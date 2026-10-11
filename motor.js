@@ -1720,6 +1720,21 @@ const inicioOT =
     { id: "buscador", label: "Buscador", icon: Search, ready: true },
     { id: "stats", label: "Estad\xEDsticas", icon: BarChart3, ready: true }
   ];
+  const GRUPOS = [{ id: "alquiler", label: "Alquiler" }, { id: "taller", label: "Taller" }];
+  const GroupBar = ({ grupo, onChange }) => React.createElement("div", { style: { background: T.bg, padding: "0 28px" } },
+    React.createElement("div", { role: "tablist", "aria-label": "Área", style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "6px", padding: "12px 0 10px" } },
+      GRUPOS.map((g) => { const on = grupo === g.id; return React.createElement("button", { key: g.id, role: "tab", "aria-selected": on, onClick: () => onChange(g.id),
+        style: { cursor: "pointer", padding: "8px 18px", borderRadius: "10px", border: `1px solid ${on ? T.ink : T.border}`, background: on ? T.ink : T.surface, color: on ? T.bg : T.inkSoft, fontFamily: F.body, fontSize: "12.5px", fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", transition: "all 120ms" } }, g.label); })));
+  // Pestañas del grupo TALLER: se irán añadiendo aquí.
+  const TALLER_TABS = [];
+  const TallerView = () => React.createElement(React.Fragment, null,
+    React.createElement("nav", { style: { background: T.surface, borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, padding: "0 28px", position: "sticky", top: 0, zIndex: 40 } },
+      React.createElement("div", { style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "2px", minHeight: "44px", alignItems: "center" } },
+        TALLER_TABS.length ? null : React.createElement("span", { style: { fontSize: "13px", color: T.inkFaint, fontStyle: "italic", padding: "12px 14px" } }, "Todavía no hay pestañas de taller"))),
+    React.createElement("main", { style: { maxWidth: "1280px", margin: "0 auto", padding: "28px 28px 60px" } },
+      React.createElement("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "40px 28px", textAlign: "center" } },
+        React.createElement("div", { style: { fontFamily: F.display, fontSize: "20px", fontWeight: 700, color: T.ink } }, "Taller"),
+        React.createElement("div", { style: { fontSize: "14px", color: T.inkSoft, marginTop: "8px", lineHeight: 1.6 } }, "Aquí irán apareciendo las pestañas del taller: calendario, entregas de vehículos, hojas de trabajo…"))));
   const TabBar = ({ active, onChange }) => /* @__PURE__ */ React.createElement("nav", { style: {
     background: T.surface,
     borderTop: `1px solid ${T.border}`,
@@ -2714,6 +2729,7 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       const k = (e) => {
         if (e.defaultPrevented || escribiendo(e) || e.ctrlKey || e.metaKey || e.altKey) return;
         if (document.querySelector('[role=dialog], [data-modal]')) return;
+        const mAlq = document.querySelector('main[data-grupo="alquiler"]'); if (mAlq && mAlq.style.display === "none") return;
         const at = getAtajos(); if (!at.activos) return;
         const lista = visRef.current || []; if (!lista.length) return;
         const idx = lista.findIndex((d) => d.id === actRef.current);
@@ -11258,6 +11274,8 @@ const parseOTDateTime = (value) => {
       } catch { }
     }, [theme]);
 const [activeTab, setActiveTab] = useState("today");
+    const [grupo, setGrupoState] = useState(() => { try { return localStorage.getItem("acllar_grupo") === "taller" ? "taller" : "alquiler"; } catch (e) { return "alquiler"; } });
+    const setGrupo = (g) => { setGrupoState(g); try { localStorage.setItem("acllar_grupo", g); } catch (e) {} };
 const [detailOrigin, setDetailOrigin] = useState("fleet");    
 const [globalSede, setGlobalSede] = useState([]);
     const [quantHistorySnapshot, setQuantHistorySnapshot] = useState([]);
@@ -13990,7 +14008,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         theme,
         onToggleTheme: toggleTheme
       }
-    ), /* @__PURE__ */ React.createElement(TabBar, { active: activeTab, onChange: setActiveTab }), watchStatus === "active" && /* @__PURE__ */ React.createElement("div", { style: {
+    ), React.createElement(GroupBar, { grupo, onChange: setGrupo }), grupo === "alquiler" && /* @__PURE__ */ React.createElement(TabBar, { active: activeTab, onChange: setActiveTab }), grupo === "taller" && React.createElement(TallerView, null), grupo === "alquiler" && watchStatus === "active" && /* @__PURE__ */ React.createElement("div", { style: {
       display: "flex",
       alignItems: "center",
       gap: "10px",
@@ -14011,7 +14029,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
       fontSize: "11px",
       fontWeight: 700,
       cursor: "pointer"
-    } }, "Detener")), watchStatus === "error" && /* @__PURE__ */ React.createElement("div", { style: {
+    } }, "Detener")), grupo === "alquiler" && watchStatus === "error" && /* @__PURE__ */ React.createElement("div", { style: {
       display: "flex",
       alignItems: "center",
       gap: "10px",
@@ -14036,7 +14054,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
       maxWidth: "1280px",
       margin: "0 auto",
       padding: "12px 28px 0",
-      display: "flex",
+      display: grupo === "taller" ? "none" : "flex",
       alignItems: "center",
       gap: "8px",
       flexWrap: "wrap"
@@ -14064,7 +14082,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         },
         s === "todas" ? "Todas" : s
       );
-    }), globalSede.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: "11px", color: T.inkSoft, fontStyle: "italic", marginLeft: "4px" } }, "mostrando ", globalSede.length === 1 ? `solo ${globalSede[0]}` : globalSede.join(" + "))), /* @__PURE__ */ React.createElement("main", { style: { maxWidth: "1280px", margin: "0 auto", padding: "28px 28px 60px" } }, activeTab === "today" && /* @__PURE__ */ (window.acllarEsAdmin && window.acllarEsAdmin()) && React.createElement(ArchivePanel, { info: archInfo, onArchive: doArchive, onChangeFolder: doChangeFolder }), activeTab === "today" && /* @__PURE__ */ React.createElement(RevPendPanel, { items: revPend, openingId: revOpening, onOpen: openRevision }), activeTab === "today" && /* @__PURE__ */ React.createElement(
+    }), globalSede.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: "11px", color: T.inkSoft, fontStyle: "italic", marginLeft: "4px" } }, "mostrando ", globalSede.length === 1 ? `solo ${globalSede[0]}` : globalSede.join(" + "))), /* @__PURE__ */ React.createElement("main", { "data-grupo": "alquiler", style: { maxWidth: "1280px", margin: "0 auto", padding: "28px 28px 60px", display: grupo === "taller" ? "none" : "block" } }, activeTab === "today" && /* @__PURE__ */ (window.acllarEsAdmin && window.acllarEsAdmin()) && React.createElement(ArchivePanel, { info: archInfo, onArchive: doArchive, onChangeFolder: doChangeFolder }), activeTab === "today" && /* @__PURE__ */ React.createElement(RevPendPanel, { items: revPend, openingId: revOpening, onOpen: openRevision }), activeTab === "today" && /* @__PURE__ */ React.createElement(
       TodayView,
       {
         state: activeState,
