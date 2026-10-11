@@ -513,10 +513,27 @@
     });
   }
 
+  let miRol = null;
+  function sinAcceso(rol) {
+    return new Promise(() => {
+      const l = document.getElementById("loading"); if (l) l.style.display = "none";
+      const box = document.createElement("div");
+      box.id = "nube-login";
+      box.innerHTML = '<form><div class="nl-title">Cockpit AC-LLAR</div>' +
+        '<div class="nl-sub">' + (rol === "comercial" ? "Tu cuenta es de comercial: no tiene acceso al cockpit." : "Tu cuenta todavía no tiene permisos asignados. Pídeselos al administrador.") + '</div>' +
+        '<div class="nl-err">' + (userEmail || "") + '</div><button type="submit">Cerrar sesión</button></form>';
+      document.body.appendChild(box);
+      box.querySelector("form").onsubmit = async (e) => { e.preventDefault(); try { await sb.auth.signOut(); } catch (x) {} location.reload(); };
+    });
+  }
+
   async function boot() {
     let { data: { session } } = await sb.auth.getSession();
     if (!session) session = await showLogin();
     userEmail = (session.user && session.user.email) || "";
+    // Rol de la cuenta: el cockpit es solo para admin y taller (los comerciales usan su propia app).
+    const { data: rol, error: rolErr } = await sb.rpc("mi_rol");
+    if (!rolErr) { miRol = rol; if (rol !== "admin" && rol !== "taller") await sinAcceso(rol); }
     setBadge("busy", "Cargando datos de la nube…");
     const seed = [];
     try {
@@ -691,9 +708,19 @@
   window.acllarCloud = {
     sb, buzon, flushAll, revisiones, archivo, device: DEVICE, empty: false, esAdmin,
     usuario: () => userEmail,
+    rol: () => miRol,
     equipo: EQUIPO,
     cuentas: {
-      async listar() { const { data, error } = await sb.rpc("admin_cuentas"); if (error) throw new Error(error.message); return data || []; },
+      async listar() {
+        const { data, error } = await sb.rpc("admin_cuentas"); if (error) throw new Error(error.message);
+        const { data: perf } = await sb.from("perfiles").select("email,rol");
+        const roles = {}; for (const p of perf || []) roles[p.email] = p.rol;
+        return (data || []).map((u) => ({ ...u, rol: String(u.email || "").toLowerCase() === ADMIN ? "admin" : roles[String(u.email || "").toLowerCase()] || null }));
+      },
+      async setRol(email, rol) {
+        const { error } = await sb.from("perfiles").upsert({ email: String(email).toLowerCase(), rol });
+        if (error) throw new Error(error.message);
+      },
       async accion(body) {
         const { data, error } = await sb.functions.invoke("admin-cuentas", { body });
         if (error) { let msg = error.message; try { const j = error.context && (await error.context.json()); if (j && j.error) msg = j.error; } catch (e) {} throw new Error(msg); }

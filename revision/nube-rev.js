@@ -572,6 +572,23 @@
       }
       if (!email) email = await showLogin();
       Nube.user = email;
+      // Solo admin y taller usan esta app (los comerciales tienen la suya).
+      if (online()) {
+        try {
+          const { data: rol, error: rolErr } = await sb.rpc("mi_rol");
+          if (!rolErr && rol !== "admin" && rol !== "taller") {
+            document.getElementById("app").innerHTML = `
+              <div class="hdr"><div class="hdr-top"><div><h1>AC·LLAR</h1><div class="sub">Revisión de flota</div></div></div></div>
+              <div class="container"><div class="settings-section">
+                <div class="settings-title">Sin acceso</div>
+                <div class="settings-desc">${rol === "comercial" ? "Tu cuenta es de comercial: no tiene acceso a la app de revisiones." : "Tu cuenta todavía no tiene permisos asignados. Pídeselos al administrador."}<br>${esc(email)}</div>
+                <button class="settings-btn primary" style="width:100%" id="sin-acceso-salir">Cerrar sesión</button>
+              </div></div>`;
+            document.getElementById("sin-acceso-salir").onclick = async () => { try { await sb.auth.signOut(); } catch {} location.reload(); };
+            return;
+          }
+        } catch {}
+      }
       // 2) Lo que ya hay en el móvil (funciona sin conexión).
       const f = await metaGet("fleet"); if (Array.isArray(f) && f.length) state.fleet = f;
       const b = await metaGet("bajas"); if (b && typeof b === "object") state.bajas = b;

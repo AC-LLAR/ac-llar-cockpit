@@ -1940,13 +1940,17 @@ const inicioOT =
           React.createElement("button", { onClick: () => onDone(null), style: { cursor: "pointer", padding: "8px 14px", borderRadius: "10px", border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontWeight: 700, fontSize: "13px", fontFamily: F.body } }, "Cancelar"),
           React.createElement("button", { disabled: !m, onClick: () => onDone(m), style: { cursor: m ? "pointer" : "not-allowed", opacity: m ? 1 : 0.5, padding: "8px 14px", borderRadius: "10px", border: `1px solid ${T.ok}`, background: T.ok, color: "#fff", fontWeight: 700, fontSize: "13px", fontFamily: F.body } }, yaReparado ? "Guardar" : "Marcar reparado"))));
   }
+  const ROLES_CUENTA = [
+    { id: "taller", label: "Taller", desc: "cockpit y app de revisiones" },
+    { id: "comercial", label: "Comercial", desc: "solo expedientes de venta; sin cockpit ni revisiones" },
+  ];
   function CuentasModal({ onClose }) {
     const C = window.acllarCloud || {};
     const [lista, setLista] = React.useState(null);
     const [err, setErr] = React.useState("");
     const [msg, setMsg] = React.useState("");
     const [busy, setBusy] = React.useState(false);
-    const [nueva, setNueva] = React.useState({ email: "", password: "" });
+    const [nueva, setNueva] = React.useState({ email: "", password: "", rol: "taller" });
     const [pwFor, setPwFor] = React.useState(null);
     const [pw, setPw] = React.useState("");
     const [, tick] = React.useState(0);
@@ -1985,7 +1989,12 @@ const inicioOT =
                 React.createElement("span", { title: e.t, style: { width: "9px", height: "9px", borderRadius: "50%", background: e.c, flexShrink: 0 } }),
                 React.createElement("span", { style: { fontSize: "14px", fontWeight: 700, wordBreak: "break-all" } }, u.email),
                 esYo && React.createElement("span", { style: { fontSize: "10.5px", fontWeight: 700, color: T.rust, border: `1px solid ${T.border}`, borderRadius: "999px", padding: "1px 7px" } }, "tú · administrador")),
-              React.createElement("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
+              React.createElement("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" } },
+                u.rol !== "admin" && React.createElement("select", { "aria-label": "Rol de " + u.email, disabled: busy, value: u.rol || "", title: "Qué puede usar esta cuenta",
+                  onChange: async (ev) => { const r = ev.target.value; if (!r) return; setBusy(true); setErr(""); setMsg(""); try { await C.cuentas.setRol(u.email, r); setMsg(`${u.email} ahora es ${ROLES_CUENTA.find((x) => x.id === r).label}. Si tiene el cockpit abierto, que recargue.`); await cargar(); } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); } },
+                  style: { ...inp, padding: "6px 8px", fontWeight: 700, color: u.rol ? T.ink : T.danger, borderColor: u.rol ? T.border : T.danger } },
+                  !u.rol && React.createElement("option", { value: "" }, "Sin permisos"),
+                  ROLES_CUENTA.map((r) => React.createElement("option", { key: r.id, value: r.id }, r.label))),
                 React.createElement("button", { disabled: busy, onClick: () => { setPwFor(pwFor === u.id ? null : u.id); setPw(""); }, style: btn() }, "Cambiar contraseña"),
                 !esYo && React.createElement("button", { disabled: busy, onClick: async () => { if (u.desactivada || window.confirm(`¿Desactivar ${u.email}? No podrá entrar al cockpit ni a la app de revisiones. Lo que hizo se conserva.`)) await run({ accion: u.desactivada ? "reactivar" : "desactivar", id: u.id }, u.desactivada ? `${u.email} reactivada.` : `${u.email} desactivada. Se cerrará su sesión en menos de 1 hora.`); }, style: btn(u.desactivada ? undefined : "danger") }, u.desactivada ? "Reactivar" : "Desactivar"))),
             React.createElement("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "6px", lineHeight: 1.6 } },
@@ -2003,8 +2012,15 @@ const inicioOT =
           React.createElement("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
             React.createElement("input", { type: "email", value: nueva.email, onChange: (ev) => setNueva({ ...nueva, email: ev.target.value }), placeholder: "email@ac-llar.com", autoComplete: "off", style: { ...inp, flex: "2 1 220px" } }),
             React.createElement("input", { type: "text", value: nueva.password, onChange: (ev) => setNueva({ ...nueva, password: ev.target.value }), placeholder: "Contraseña inicial (mín. 8)", autoComplete: "new-password", style: { ...inp, flex: "1 1 180px" } }),
-            React.createElement("button", { disabled: busy || !nueva.email || nueva.password.length < 8, onClick: async () => { if (await run({ accion: "crear", email: nueva.email, password: nueva.password }, `Cuenta ${nueva.email.trim().toLowerCase()} creada. Ya puede entrar al cockpit y a la app de revisiones.`)) setNueva({ email: "", password: "" }); }, style: { ...btn("primary"), opacity: !nueva.email || nueva.password.length < 8 ? 0.5 : 1 } }, "Crear")),
-          React.createElement("div", { style: { fontSize: "11.5px", color: T.inkFaint, marginTop: "8px" } }, "Las contraseñas no se pueden ver: Supabase no las guarda. Si alguien la olvida, ponle una nueva aquí. Las cuentas nuevas no tienen permisos de administrador."))));
+            React.createElement("select", { "aria-label": "Rol de la cuenta nueva", value: nueva.rol, onChange: (ev) => setNueva({ ...nueva, rol: ev.target.value }), style: { ...inp, fontWeight: 700 } },
+              ROLES_CUENTA.map((r) => React.createElement("option", { key: r.id, value: r.id }, r.label))),
+            React.createElement("button", { disabled: busy || !nueva.email || nueva.password.length < 8, onClick: async () => {
+              const email = nueva.email.trim().toLowerCase(), rol = nueva.rol;
+              // Primero el rol: si la cuenta se crea sin rol no puede entrar a nada (seguro por defecto).
+              try { await C.cuentas.setRol(email, rol); } catch (e) { setErr(e.message || String(e)); return; }
+              const ok = rol === "comercial" ? `Cuenta ${email} creada como Comercial. No puede entrar al cockpit ni a la app de revisiones.` : `Cuenta ${email} creada como Taller. Ya puede entrar al cockpit y a la app de revisiones.`;
+              if (await run({ accion: "crear", email, password: nueva.password }, ok)) setNueva({ email: "", password: "", rol: "taller" }); }, style: { ...btn("primary"), opacity: !nueva.email || nueva.password.length < 8 ? 0.5 : 1 } }, "Crear")),
+          React.createElement("div", { style: { fontSize: "11.5px", color: T.inkFaint, marginTop: "8px" } }, "Taller: cockpit y app de revisiones. Comercial: solo expedientes de venta (sin cockpit ni revisiones). Las contraseñas no se pueden ver: Supabase no las guarda; si alguien la olvida, ponle una nueva aquí. Solo tú eres administrador."))));
   }
   function SessionGear() {
     const [open, setOpen] = React.useState(false);
@@ -2034,7 +2050,7 @@ const inicioOT =
       open && React.createElement("div", { role: "dialog", "aria-label": "Sesión", style: { position: "absolute", right: 0, top: "calc(100% + 8px)", zIndex: 9500, width: "270px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", boxShadow: "0 12px 32px rgba(15,27,46,.18)", padding: "16px", fontFamily: F.body, textAlign: "left" } },
         React.createElement("div", { style: { fontFamily: F.display, fontSize: "15px", fontWeight: 700, color: T.ink, marginBottom: "12px" } }, "Cuenta"),
         fila("Sesión iniciada", email || "—"),
-        fila("Permisos", admin ? "Administrador (copias de seguridad y archivo)" : "Usuario"),
+        fila("Permisos", admin ? "Administrador (copias de seguridad, archivo y cuentas)" : (C.rol && C.rol() === "taller") ? "Taller" : "Usuario"),
         fila("Este equipo", C.equipo || C.device || "—", true),
         React.createElement("button", { onClick: () => { setOpen(false); setAtajosOpen(true); }, style: { width: "100%", marginTop: "2px", marginBottom: "8px", cursor: "pointer", padding: "9px 12px", borderRadius: "10px", border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontWeight: 700, fontSize: "13px", fontFamily: F.body } }, "⌨ Atajos de teclado"),
         admin && C.cuentas && React.createElement("button", { onClick: () => { setOpen(false); setCuentas(true); }, style: { width: "100%", marginTop: "2px", marginBottom: "8px", cursor: "pointer", padding: "9px 12px", borderRadius: "10px", border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontWeight: 700, fontSize: "13px", fontFamily: F.body } }, "Gestionar cuentas"),
