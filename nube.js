@@ -514,6 +514,8 @@
   }
 
   let miRol = null;
+  // Archivar OT en la carpeta compartida: cualquiera que use el cockpit (admin o taller).
+  const puedeArchivar = () => esAdmin() || miRol === "taller";
   function sinAcceso(rol) {
     return new Promise(() => {
       const l = document.getElementById("loading"); if (l) l.style.display = "none";
@@ -627,7 +629,8 @@
   const DIAS_FOTOS_NUBE = 45; // las fotos de la app viven 45 días en la nube; después, en las OT de OneDrive
   const archivo = {
     soportado: () => typeof window.showDirectoryPicker === "function",
-    async carpeta() { const h = await hGet("onedrive"); return h ? h.name : null; },
+    // Carpeta de ESTE equipo (cada ordenador elige la suya; no se comparte).
+    async carpeta() { const h = await hGet("onedrive"); if (h) return h.name; try { return localStorage.getItem("acllar_carpeta_ot") || null; } catch (e) { return null; } },
     async pendientes() {
       const { data, error } = await sb.rpc("revisiones_sin_archivar");
       if (error) throw error;
@@ -636,22 +639,23 @@
     // pedir=true: abrir el selector para (re)elegir la carpeta.
     // Elegir (o cambiar) la carpeta de OneDrive sin archivar todavía.
     async elegirCarpeta() {
-      if (!esAdmin()) throw new Error("Solo el administrador puede archivar.");
+      if (!puedeArchivar()) throw new Error("Tu cuenta no puede archivar.");
       const dir = await window.showDirectoryPicker({ mode: "readwrite", id: "acllar-onedrive" });
       await hSet("onedrive", dir);
+      try { localStorage.setItem("acllar_carpeta_ot", dir.name); } catch (e) {}
       let prev = {};
       try { const r = await window.storage.get("archivo_onedrive"); prev = r && r.value ? JSON.parse(r.value) : {}; } catch (e) {}
       await window.storage.set("archivo_onedrive", JSON.stringify({ ...prev, carpeta: dir.name, carpetaCambiadaAt: new Date().toISOString(), por: who() }));
       return dir.name;
     },
     async archivar({ pedir = false, onProgress } = {}) {
-      if (!esAdmin()) throw new Error("Solo el administrador puede archivar.");
+      if (!puedeArchivar()) throw new Error("Tu cuenta no puede archivar.");
       let dir = pedir ? null : await hGet("onedrive");
       if (dir) {
         const perm = await dir.requestPermission({ mode: "readwrite" });
         if (perm !== "granted") dir = null;
       }
-      if (!dir) { dir = await window.showDirectoryPicker({ mode: "readwrite", id: "acllar-onedrive" }); await hSet("onedrive", dir); }
+      if (!dir) { dir = await window.showDirectoryPicker({ mode: "readwrite", id: "acllar-onedrive" }); await hSet("onedrive", dir); try { localStorage.setItem("acllar_carpeta_ot", dir.name); } catch (e) {} }
       const lista = await this.pendientes();
       let hechas = 0, errores = 0;
       for (const row of lista) {
@@ -670,8 +674,9 @@
       }
       // Backup completo del cockpit: se DESCARGA (a Descargas), igual que
       // "Exportar backup completo". En la carpeta de OT solo van las OT.
+      // SOLO el administrador: el resto archiva las OT pero no se lleva copia de los datos.
       let datos = false;
-      try {
+      if (esAdmin()) try {
         const val = (k) => readLocal(k);
         const cockpit = JSON.parse(val(MAIN_KEY) || "{}");
         const cuantificador = {}; for (const k of ["ac_history", "ac_repo", "ac_doc2", "ac_flota", "ac_pieza_mem", "ac_extra_mem", "ac_consultas"]) { const v = val(k); if (v != null) cuantificador[k] = v; }
@@ -687,7 +692,7 @@
       } catch (e) { console.warn("[archivo] backup completo", e); }
       // Limpieza: fotos de OT de más de 45 días ya archivadas en OneDrive y confirmadas
       let fotosBorradas = 0;
-      if (!errores) {
+      if (!errores && esAdmin()) {
         try {
           const { data: limp, error } = await sb.rpc("revisiones_fotos_limpiables", { p_dias: DIAS_FOTOS_NUBE });
           if (error) throw error;
@@ -709,6 +714,7 @@
     sb, buzon, flushAll, revisiones, archivo, device: DEVICE, empty: false, esAdmin,
     usuario: () => userEmail,
     rol: () => miRol,
+    puedeArchivar,
     equipo: EQUIPO,
     cuentas: {
       async listar() {

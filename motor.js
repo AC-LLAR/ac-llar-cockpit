@@ -11234,7 +11234,7 @@ const parseOTDateTime = (value) => {
     const cuando = info.lastAt ? (dias === 0 ? "hoy" : dias === 1 ? "ayer" : `hace ${dias} días`) : "nunca";
     return h("div", { style: { display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", background: warn ? "#FEF3C7" : T.surface, border: `1px solid ${warn ? "#F59E0B" : T.border}`, borderRadius: "10px", padding: "10px 14px", marginBottom: "14px", fontSize: "13px", color: T.ink } },
       h("span", { style: { fontWeight: 800 } }, "📁 Copia en OneDrive"),
-      h("span", { style: { color: T.inkSoft } }, `última: ${cuando}${info.carpeta ? " · " + info.carpeta : ""}`),
+      h("span", { style: { color: T.inkSoft } }, `última: ${cuando}${info.lastAt && info.lastPor ? " (" + String(info.lastPor).split("@")[0] + ")" : ""}${info.carpeta ? " · carpeta en este equipo: " + info.carpeta : " · este equipo aún no tiene carpeta"}`),
       h("span", { style: { fontWeight: 700, color: info.pend ? (warn ? "#92400E" : T.warn) : T.ok } }, info.pend ? `${info.pend} OT sin archivar` : "todo archivado ✓"),
       info.msg && h("span", { style: { color: T.inkSoft } }, info.msg),
       h("div", { style: { flex: 1 } }),
@@ -12938,12 +12938,14 @@ const scanResWatchFolder = async (handle) => {
     const [archInfo, setArchInfo] = useState(null);
     const loadArch = useCallback(async () => {
       const C = window.acllarCloud;
-      if (!C || !C.archivo || !(window.acllarEsAdmin && window.acllarEsAdmin())) return;
+      if (!C || !C.archivo || !(C.puedeArchivar && C.puedeArchivar())) return;
       try {
         const pend = (await C.archivo.pendientes()).length;
         const r = await window.storage.get("archivo_onedrive");
         const last = r && r.value ? JSON.parse(r.value) : null;
-        setArchInfo((prev) => ({ ...(prev || {}), pend, lastAt: last && last.at, carpeta: last && last.carpeta, soportado: C.archivo.soportado() }));
+        // La carpeta es de ESTE ordenador (cada uno elige la suya); "última" es de cualquiera.
+        let carpetaLocal = null; try { carpetaLocal = await C.archivo.carpeta(); } catch (e) {}
+        setArchInfo((prev) => ({ ...(prev || {}), pend, lastAt: last && last.at, lastPor: last && last.por, carpeta: carpetaLocal, soportado: C.archivo.soportado() }));
       } catch (e) { console.warn("[archivo]", e); }
     }, []);
     useEffect(() => {
@@ -14115,7 +14117,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         },
         s === "todas" ? "Todas" : s
       );
-    }), globalSede.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: "11px", color: T.inkSoft, fontStyle: "italic", marginLeft: "4px" } }, "mostrando ", globalSede.length === 1 ? `solo ${globalSede[0]}` : globalSede.join(" + "))), /* @__PURE__ */ React.createElement("main", { "data-grupo": "alquiler", style: { maxWidth: "1280px", margin: "0 auto", padding: "28px 28px 60px", display: grupo === "taller" ? "none" : "block" } }, activeTab === "today" && /* @__PURE__ */ (window.acllarEsAdmin && window.acllarEsAdmin()) && React.createElement(ArchivePanel, { info: archInfo, onArchive: doArchive, onChangeFolder: doChangeFolder }), activeTab === "today" && /* @__PURE__ */ React.createElement(RevPendPanel, { items: revPend, openingId: revOpening, onOpen: openRevision }), activeTab === "today" && /* @__PURE__ */ React.createElement(
+    }), globalSede.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: "11px", color: T.inkSoft, fontStyle: "italic", marginLeft: "4px" } }, "mostrando ", globalSede.length === 1 ? `solo ${globalSede[0]}` : globalSede.join(" + "))), /* @__PURE__ */ React.createElement("main", { "data-grupo": "alquiler", style: { maxWidth: "1280px", margin: "0 auto", padding: "28px 28px 60px", display: grupo === "taller" ? "none" : "block" } }, activeTab === "today" && /* @__PURE__ */ (window.acllarCloud && window.acllarCloud.puedeArchivar && window.acllarCloud.puedeArchivar()) && React.createElement(ArchivePanel, { info: archInfo, onArchive: doArchive, onChangeFolder: doChangeFolder }), activeTab === "today" && /* @__PURE__ */ React.createElement(RevPendPanel, { items: revPend, openingId: revOpening, onOpen: openRevision }), activeTab === "today" && /* @__PURE__ */ React.createElement(
       TodayView,
       {
         state: activeState,
