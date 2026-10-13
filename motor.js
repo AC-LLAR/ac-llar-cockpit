@@ -191,8 +191,8 @@ window.addEventListener('load', function () {
   const MANT_KM = 35000, MANT_AVISO_KM = 2000;
   const fmtKm = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ".") + " km";
   const mantInfo = (v) => {
-    const km = Number(v && v.odometro) || 0;
-    if (!km) return null;
+    if (!v || v.odometro == null || v.odometro === "") return null;
+    const km = Number(v.odometro) || 0;
     const base = Number.isFinite(v.mantBaseKm) ? v.mantBaseKm : Math.floor(km / MANT_KM) * MANT_KM;
     const proximo = base + MANT_KM, restante = proximo - km;
     return { km, base, proximo, restante, nivel: restante <= 0 ? "vencido" : restante <= MANT_AVISO_KM ? "proximo" : "ok", at: v.odometroAt, fuente: v.odometroFuente };
@@ -200,7 +200,9 @@ window.addEventListener('load', function () {
   // Campos a fusionar en el vehículo cuando llega una lectura de km (solo si es mayor que la que hay).
   const odometroUpdate = (v, km, fuente, at) => {
     km = Math.round(Number(km) || 0);
-    if (!km || km < 100) return {};
+    // 0 km = vehículo nuevo (solo si aún no tenía lectura): próximo mantenimiento a 35.000.
+    if (km === 0 && (v.odometro == null || v.odometro === "")) return { odometro: 0, odometroAt: at || new Date().toISOString(), odometroFuente: fuente, mantBaseKm: 0 };
+    if (km < 100) return {};
     const out = {};
     if (km > (Number(v.odometro) || 0)) Object.assign(out, { odometro: km, odometroAt: at || new Date().toISOString(), odometroFuente: fuente });
     if (!Number.isFinite(v.mantBaseKm)) out.mantBaseKm = Math.floor(Math.max(km, Number(v.odometro) || 0) / MANT_KM) * MANT_KM;
@@ -11731,7 +11733,8 @@ No se puede deshacer.`,
         const res = { km: 0, sedes: [], sinCasar: [] };
         const patches = {}, usados = new Set();
         for (const v of state.vehicles) {
-          const f = filas.find((x) => x.plate && x.plate === plate(v.plate)) || filas.find((x) => acK(x.id) && acK(x.id) === acK(v.id));
+          // Identidad = prefijo + número (AC-302 = AC-302C = AC-302A). Matrícula solo de respaldo.
+          const f = filas.find((x) => acK(x.id) && acK(x.id) === acK(v.id)) || filas.find((x) => x.plate && x.plate === plate(v.plate));
           if (!f) continue;
           usados.add(f);
           let p = {};
