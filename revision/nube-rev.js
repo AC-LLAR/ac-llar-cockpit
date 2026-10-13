@@ -386,6 +386,132 @@
   })();
   const esAdmin = () => String(Nube.user || "").trim().toLowerCase() === "sebastian@ac-llar.com";
   window.acRevEsAdmin = esAdmin;
+
+  // ================= gestión de cuentas (solo admin) =================
+  // Backend compartido con el cockpit: RPC admin_cuentas / tabla perfiles /
+  // Edge Function admin-cuentas. Aquí solo va la pantalla.
+  const ROLES_CUENTA = [
+    { id: "taller", label: "Taller", desc: "cockpit y app de revisiones" },
+    { id: "comercial", label: "Comercial", desc: "solo expedientes de venta; sin revisiones" },
+  ];
+  const ADMIN_EMAIL = "sebastian@ac-llar.com";
+  Nube.cuentas = {
+    async listar() {
+      const { data, error } = await sb.rpc("admin_cuentas");
+      if (error) throw new Error(error.message);
+      const { data: perf } = await sb.from("perfiles").select("email,rol");
+      const roles = {}; for (const p of perf || []) roles[p.email] = p.rol;
+      return (data || []).map((u) => ({ ...u, rol: String(u.email || "").toLowerCase() === ADMIN_EMAIL ? "admin" : roles[String(u.email || "").toLowerCase()] || null }));
+    },
+    async setRol(email, rol) {
+      const { error } = await sb.from("perfiles").upsert({ email: String(email).toLowerCase(), rol });
+      if (error) throw new Error(error.message);
+    },
+    async accion(body) {
+      const { data, error } = await sb.functions.invoke("admin-cuentas", { body });
+      if (error) { let msg = error.message; try { const j = error.context && (await error.context.json()); if (j && j.error) msg = j.error; } catch (e) {} throw new Error(msg); }
+      if (data && data.error) throw new Error(data.error);
+      return data;
+    },
+  };
+
+  // Pinta/repinta la lista de usuarios dentro de #usuarios-box (en Ajustes).
+  window.renderUsuarios = async function () {
+    const box = document.getElementById("usuarios-box");
+    if (!box || !esAdmin()) return;
+    const hace = (d) => { if (!d) return "nunca"; const m = Math.round((Date.now() - Date.parse(d)) / 60000); if (m < 1) return "ahora mismo"; if (m < 60) return "hace " + m + " min"; const h = Math.round(m / 60); if (h < 24) return "hace " + h + " h"; return new Date(d).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }); };
+    const fecha = (d) => d ? new Date(d).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+    const appNom = (a) => a === "revisiones" ? "App revisiones" : a === "cockpit" ? "Cockpit" : (a || "");
+    const estado = (u) => {
+      if (u.desactivada) return { c: "#9CA3AF", t: "Desactivada" };
+      const m = u.visto ? (Date.now() - Date.parse(u.visto)) / 60000 : Infinity;
+      if (m <= 3) return { c: "var(--OK)", t: "Activa ahora" };
+      if (m <= 30) return { c: "var(--WA)", t: "Activa hace poco" };
+      return { c: "#9CA3AF", t: "Sin actividad reciente" };
+    };
+    let lista;
+    try { lista = await Nube.cuentas.listar(); }
+    catch (e) { box.innerHTML = `<div class="set-err">No se pudo cargar: ${esc(e.message || e)}</div>`; return; }
+    const yo = String(Nube.user || "").toLowerCase();
+    const optRol = (sel) => ROLES_CUENTA.map((r) => `<option value="${r.id}"${sel === r.id ? " selected" : ""}>${r.label}</option>`).join("");
+    const filas = (lista || []).map((u) => {
+      const e = estado(u); const esYo = (u.email || "").toLowerCase() === yo; const esAdm = u.rol === "admin";
+      const rolCtrl = esAdm
+        ? `<span style="font-size:12px;font-weight:700;color:var(--P)">Administrador</span>`
+        : `<select data-ucrol="${esc(u.email)}" style="padding:7px 8px;border-radius:9px;border:1px solid ${u.rol ? "var(--BD)" : "var(--DM)"};background:var(--WH);color:${u.rol ? "var(--TX)" : "var(--DM)"};font-size:13px;font-weight:700">${u.rol ? "" : '<option value="">Sin permisos</option>'}${optRol(u.rol)}</select>`;
+      return `<div style="border:1px solid var(--BD);border-radius:12px;padding:12px 14px;margin-bottom:10px;opacity:${u.desactivada ? ".65" : "1"}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <span title="${esc(e.t)}" style="width:9px;height:9px;border-radius:50%;background:${e.c};flex-shrink:0"></span>
+            <span style="font-size:14px;font-weight:700;word-break:break-all">${esc(u.email)}</span>
+            ${esYo ? '<span style="font-size:10.5px;font-weight:700;color:var(--P);border:1px solid var(--BD);border-radius:999px;padding:1px 7px">tú</span>' : ""}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            ${rolCtrl}
+            <button data-ucpw="${esc(u.email)}" data-ucid="${u.id}" style="padding:7px 10px;border-radius:9px;border:1px solid var(--BD);background:var(--WH);color:var(--TX);font-size:12.5px;font-weight:700">Contraseña</button>
+            ${esYo ? "" : `<button data-ucban="${u.id}" data-ucbanv="${u.desactivada ? "reactivar" : "desactivar"}" data-ucmail="${esc(u.email)}" style="padding:7px 10px;border-radius:9px;border:1px solid ${u.desactivada ? "var(--BD)" : "var(--DM)"};background:var(--WH);color:${u.desactivada ? "var(--TX)" : "var(--DM)"};font-size:12.5px;font-weight:700">${u.desactivada ? "Reactivar" : "Desactivar"}</button>`}
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--GR);margin-top:6px;line-height:1.6">
+          <span style="color:${e.c};font-weight:700">${esc(e.t)}</span>${u.visto ? ` · visto ${hace(u.visto)} en ${appNom(u.app)}` : ""}<br>
+          Último acceso: ${fecha(u.ultimo_login)} · Creada: ${fecha(u.creada)}
+        </div>
+      </div>`;
+    }).join("");
+    const nHab = (lista || []).filter((u) => !u.desactivada).length;
+    box.innerHTML = `
+      <div style="font-size:12.5px;color:var(--GR);margin-bottom:10px">${nHab} cuenta${nHab === 1 ? "" : "s"} activa${nHab === 1 ? "" : "s"} · cockpit y app de revisiones</div>
+      <div id="uc-msg"></div>
+      ${filas}
+      <div style="border-top:1px solid var(--BD);margin-top:14px;padding-top:14px">
+        <div style="font-size:14px;font-weight:700;margin-bottom:8px">Crear usuario</div>
+        <input id="uc-email" type="email" placeholder="email@ac-llar.com" autocomplete="off" style="width:100%;padding:10px;border:1px solid var(--BD);border-radius:10px;font-size:14px;margin-bottom:8px">
+        <input id="uc-pass" type="text" placeholder="Contraseña inicial (mín. 8)" autocomplete="new-password" style="width:100%;padding:10px;border:1px solid var(--BD);border-radius:10px;font-size:14px;margin-bottom:8px">
+        <select id="uc-rol" style="width:100%;padding:10px;border:1px solid var(--BD);border-radius:10px;font-size:14px;font-weight:700;margin-bottom:8px">${optRol("taller")}</select>
+        <button class="settings-btn primary" id="uc-crear" style="margin:0">Crear usuario</button>
+        <div class="settings-desc" style="margin:8px 0 0">Taller: puede revisar vehículos. Comercial: sin acceso a revisiones. Las contraseñas no se guardan: si alguien la olvida, pon una nueva aquí.</div>
+      </div>`;
+    const msg = (t, ok) => { const m = document.getElementById("uc-msg"); if (m) m.innerHTML = `<div style="background:var(--WH);border:1px solid ${ok ? "var(--OK)" : "var(--DM)"};color:${ok ? "var(--OK)" : "var(--DM)"};border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;margin-bottom:12px">${esc(t)}</div>`; };
+    // cambiar rol
+    box.querySelectorAll("[data-ucrol]").forEach((s) => s.addEventListener("change", async (ev) => {
+      const email = s.getAttribute("data-ucrol"); const rol = ev.target.value; if (!rol) return;
+      try { await Nube.cuentas.setRol(email, rol); msg(`${email} ahora es ${ROLES_CUENTA.find((x) => x.id === rol).label}. Si tiene la app abierta, que recargue.`, true); await renderUsuarios(); }
+      catch (e) { msg(e.message || String(e), false); }
+    }));
+    // cambiar contraseña
+    box.querySelectorAll("[data-ucpw]").forEach((b) => b.addEventListener("click", async () => {
+      const email = b.getAttribute("data-ucpw"); const id = b.getAttribute("data-ucid");
+      const pw = await uiPrompt(`Nueva contraseña para ${email} (mínimo 8 caracteres):`, "");
+      if (pw === null) return;
+      if (String(pw).length < 8) { msg("La contraseña debe tener al menos 8 caracteres.", false); return; }
+      try { await Nube.cuentas.accion({ accion: "password", id, password: pw }); msg(`Contraseña de ${email} cambiada. Pásasela a esa persona.`, true); }
+      catch (e) { msg(e.message || String(e), false); }
+    }));
+    // desactivar / reactivar
+    box.querySelectorAll("[data-ucban]").forEach((b) => b.addEventListener("click", async () => {
+      const id = b.getAttribute("data-ucban"); const accion = b.getAttribute("data-ucbanv"); const email = b.getAttribute("data-ucmail");
+      if (accion === "desactivar" && !(await uiConfirm(`¿Desactivar ${email}? No podrá entrar a la app. Lo que hizo se conserva.`, { ok: "Desactivar", danger: true }))) return;
+      try { await Nube.cuentas.accion({ accion, id }); msg(accion === "desactivar" ? `${email} desactivada. Se cerrará su sesión en menos de 1 hora.` : `${email} reactivada.`, true); await renderUsuarios(); }
+      catch (e) { msg(e.message || String(e), false); }
+    }));
+    // crear
+    const btnCrear = document.getElementById("uc-crear");
+    if (btnCrear) btnCrear.addEventListener("click", async () => {
+      const email = (document.getElementById("uc-email").value || "").trim().toLowerCase();
+      const pass = document.getElementById("uc-pass").value || "";
+      const rol = document.getElementById("uc-rol").value || "taller";
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { msg("Email no válido.", false); return; }
+      if (pass.length < 8) { msg("La contraseña debe tener al menos 8 caracteres.", false); return; }
+      btnCrear.disabled = true;
+      try {
+        await Nube.cuentas.setRol(email, rol); // rol primero: sin rol no entra a nada (seguro por defecto)
+        await Nube.cuentas.accion({ accion: "crear", email, password: pass });
+        msg(rol === "comercial" ? `Cuenta ${email} creada como Comercial (sin acceso a revisiones).` : `Cuenta ${email} creada como Taller. Ya puede entrar a revisar vehículos.`, true);
+        await renderUsuarios();
+      } catch (e) { msg(e.message || String(e), false); btnCrear.disabled = false; }
+    });
+  };
+
   window.rescueAll = async function () {
     if (!esAdmin()) return;
     const ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
@@ -470,6 +596,7 @@
     const offs = Object.keys(state.revOffsets || {}).length;
     const last = Nube.lastSync ? Nube.lastSync.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }) : "—";
     const row = (k, v) => `<div class="set-row"><span>${k}</span><b>${v}</b></div>`;
+    if (esAdmin()) setTimeout(() => { try { renderUsuarios(); } catch (e) {} }, 0);
     return `
     <div class="hdr"><div class="hdr-top">
       <button style="background:none;color:var(--INK);font-size:24px;padding:0;border:none" aria-label="Volver" data-action="back-home">‹</button>
@@ -498,6 +625,11 @@
       </div>
       ${esAdmin() ? `
       <div class="set-group">Administración</div>
+      <div class="settings-section">
+        <div class="settings-title">Usuarios</div>
+        <div class="settings-desc" style="margin-bottom:10px">Crea cuentas para que otras personas revisen vehículos, cambia contraseñas o roles. Solo tú (administrador) ves esto.</div>
+        <div id="usuarios-box"><div class="settings-desc" style="margin:0">Cargando usuarios…</div></div>
+      </div>
       <div class="settings-section">
         <div class="settings-title">Descargar historial</div>
         <div class="settings-desc">Descarga los datos de todas las revisiones, sin fotos.</div>
