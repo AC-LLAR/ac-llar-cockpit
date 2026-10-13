@@ -5373,7 +5373,8 @@ setEditDep({ id: e.id, fecha: fechaHoraLocal });
       sedes.map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s === "Todas" ? "Todas las sedes" : s))
     ))), /* @__PURE__ */ React.createElement("div", { style: { background: T.bg } }, pendientesFiltrados.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { padding: "20px", textAlign: "center", color: T.inkFaint, fontSize: "13.5px" } }, depSearch || depSede !== "Todas" ? "Ning\xFAn veh\xEDculo coincide con el filtro." : "No hay veh\xEDculos pendientes de gestionar.") : pendientesFiltrados.map(({ v, tit, hqReserva, tieneDanosNuevos, reAlquilada, arrivalAt }) => {
 const llegadaReal = v.returnedAt || v.lastReturnAt || arrivalAt || null;
-const since = llegadaReal ? hoursSince(llegadaReal) : null;
+// "revisado hace…" debe medir desde la revisión, no desde la llegada.
+const since = v.lastInspectedAt ? hoursSince(v.lastInspectedAt) : null;
 const fechas = llegadaReal
   ? `Llegó: ${fmtFechaHora(llegadaReal)}`
   : "";
