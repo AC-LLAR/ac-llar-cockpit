@@ -11757,7 +11757,7 @@ No se puede deshacer.`,
   devolucion: hqRes.fechaDevolucion,
   reservaId: hqRes.reservaId || ""
 } : {
-  cliente: lastCompletedTitular(v)?.cliente || "",
+  cliente: v.currentClient || lastCompletedTitular(v)?.cliente || "",
   salida: v.returnedAt || v.lastReturnAt || "",
   devolucion: v.returnedAt || v.lastReturnAt || "",
   reservaId: ""
@@ -13107,13 +13107,21 @@ const scanResWatchFolder = async (handle) => {
           for (const vid of importedVehicleIds) {
             const v = s.vehicles.find((x) => x.id === vid);
             if (!v) continue;
-            // Preferir arrivalLog para la reserva actual (fuente inmutable). Fallback al vehículo.
-            const tit = lastCompletedTitular(v);
-            const arrEvent = tit?.reservaId ? findArrivalEvent(arrLog, vid, tit.reservaId) : null;
-            const ret = arrEvent?.at || v.returnedAt || v.lastReturnAt;
-            if (!ret) continue;
-            const reservaIdForLog = tit?.reservaId || arrEvent?.reservaId || null;
-            const already = reviewLog.some((r) => r.vehicleId === vid && (reservaIdForLog && r.reservaId === reservaIdForLog || r.returnedAt === ret));
+            // El ciclo que se revisa es el ÚLTIMO VOLVIÓ del vehículo (returnedAt). La reserva sale
+            // del arrivalLog de esa misma llegada o, si no hay, del 720 (currentReservaId).
+            // NO usar reservaHistory: es el Excel de completadas, congelado desde ago-2026, y hacía
+            // que se ligara la revisión a una llegada vieja y no se registrara el tiempo (AC-303,
+            // AC-296, AC-297, AC-310; detectado 13-oct-2026).
+            const retVeh = v.returnedAt || v.lastReturnAt;
+            if (!retVeh) continue;
+            const retMs = new Date(retVeh).getTime();
+            const arrEvent = arrLog.filter((a) => a.vehicleId === vid && Math.abs(new Date(a.at || 0).getTime() - retMs) <= 36e5)
+              .sort((a, b) => new Date(b.at) - new Date(a.at))[0] || null;
+            const ret = arrEvent?.at || retVeh;
+            const reservaIdForLog = arrEvent?.reservaId || v.currentReservaId || null;
+            // Un tiempo de revisión por LLEGADA (identidad = hora del VOLVIÓ), no por reservaId:
+            // un reservaId repetido o desactualizado no debe impedir registrar un ciclo nuevo.
+            const already = reviewLog.some((r) => r.vehicleId === vid && r.returnedAt && Math.abs(new Date(r.returnedAt).getTime() - new Date(ret).getTime()) <= 36e5);
             if (already) continue;
 const parseOTDateTime = (value) => {
   if (!value) return null;
