@@ -184,6 +184,33 @@ window.addEventListener('load', function () {
     "Castell\xF3n": { bg: "#EEF2F8", color: "#B45309", accent: "#B45309" },
     Alicante: { bg: "#E9EEFC", color: "#2B44C7", accent: "#4F6BF6" }
   };
+  // ===== Mantenimiento cada 35.000 km =====
+  // v.odometro (km), v.odometroAt, v.odometroFuente ("HQ" | "revisión" | "manual")
+  // v.mantBaseKm = km del último mantenimiento hecho (o asumido). Próximo = base + 35.000.
+  // Al conocer el km por primera vez, se asume hecho el último múltiplo de 35.000 ya pasado.
+  const MANT_KM = 35000, MANT_AVISO_KM = 2000;
+  const fmtKm = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ".") + " km";
+  const mantInfo = (v) => {
+    const km = Number(v && v.odometro) || 0;
+    if (!km) return null;
+    const base = Number.isFinite(v.mantBaseKm) ? v.mantBaseKm : Math.floor(km / MANT_KM) * MANT_KM;
+    const proximo = base + MANT_KM, restante = proximo - km;
+    return { km, base, proximo, restante, nivel: restante <= 0 ? "vencido" : restante <= MANT_AVISO_KM ? "proximo" : "ok", at: v.odometroAt, fuente: v.odometroFuente };
+  };
+  // Campos a fusionar en el vehículo cuando llega una lectura de km (solo si es mayor que la que hay).
+  const odometroUpdate = (v, km, fuente, at) => {
+    km = Math.round(Number(km) || 0);
+    if (!km || km < 100) return {};
+    const out = {};
+    if (km > (Number(v.odometro) || 0)) Object.assign(out, { odometro: km, odometroAt: at || new Date().toISOString(), odometroFuente: fuente });
+    if (!Number.isFinite(v.mantBaseKm)) out.mantBaseKm = Math.floor(Math.max(km, Number(v.odometro) || 0) / MANT_KM) * MANT_KM;
+    return out;
+  };
+  const SEDES_VALIDAS = ["Valencia", "Onil", "Castell\xF3n", "Alicante"];
+  const normSede = (x) => {
+    const k = String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    return SEDES_VALIDAS.find((sd) => sd.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() === k) || null;
+  };
   const DEFAULT_STATE = {
     version: APP_VERSION,
     vehicles: [],
@@ -1101,6 +1128,8 @@ const inicioOT = inicioMatch
     const sede = fromMap("sede") || findByLabel(["SEDE"]) || grab(/SEDE/);
     const marcaModelo = fromMap("marca / modelo", "marca/modelo", "marca") || findByLabel(["MARCA\\s*/\\s*MODELO", "MARCA"]) || grab(/MARCA\s*\/\s*MODELO/);
     const vin = fromMap("bastidor (vin)", "bastidor", "vin") || findByLabel(["BASTIDOR", "VIN"]) || grab(/BASTIDOR|VIN/);
+    const kmTxt = fromMap("kil\xF3metros", "kilometros", "km") || "";
+    const km = parseInt(String(kmTxt).replace(/[^0-9]/g, ""), 10) || null;
 const inicioOT =
   fromMap(
     "inicio",
@@ -1202,7 +1231,8 @@ const inicioOT =
   marcaModelo,
   vin,
   inicioOT,
-  otNota
+  otNota,
+  km
 },
       damages,
       raw: { source: "html", rowCount: damages.length }
@@ -1720,6 +1750,62 @@ const inicioOT =
     { id: "buscador", label: "Buscador", icon: Search, ready: true },
     { id: "stats", label: "Estad\xEDsticas", icon: BarChart3, ready: true }
   ];
+  // Franja de mantenimiento: muy visible, en todas las pestañas (Alquiler y Taller).
+  const MantBanner = ({ vehicles, onOpen }) => {
+    const [abierto, setAbierto] = React.useState(false);
+    const lista = (vehicles || []).filter((v) => !v.baja).map((v) => ({ v, m: mantInfo(v) })).filter((x) => x.m && x.m.nivel !== "ok")
+      .sort((a, b) => a.m.restante - b.m.restante);
+    if (!lista.length) return null;
+    const venc = lista.filter((x) => x.m.nivel === "vencido").length, prox = lista.length - venc;
+    const rojo = venc > 0;
+    const bg = rojo ? "#B91C1C" : "#B45309";
+    const h = React.createElement;
+    return h("div", { role: "alert", "data-mant-banner": "1", style: { background: bg, color: "#fff", padding: "10px 28px", fontFamily: F.body } },
+      h("div", { style: { maxWidth: "1280px", margin: "0 auto" } },
+        h("div", { style: { display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", cursor: "pointer" }, onClick: () => setAbierto(!abierto) },
+          h("span", { style: { fontSize: "20px" } }, "\u{1F527}"),
+          h("span", { style: { fontWeight: 800, fontSize: "15px", letterSpacing: "0.02em" } }, "MANTENIMIENTO 35.000 KM"),
+          h("span", { style: { fontWeight: 700, fontSize: "14px" } }, [venc ? `${venc} vencido${venc === 1 ? "" : "s"}` : null, prox ? `${prox} pr\xF3ximo${prox === 1 ? "" : "s"} (menos de ${fmtKm(MANT_AVISO_KM)})` : null].filter(Boolean).join(" \xB7 ")),
+          h("div", { style: { flex: 1 } }),
+          h("span", { style: { fontSize: "12.5px", fontWeight: 700, textDecoration: "underline" } }, abierto ? "Ocultar" : "Ver veh\xEDculos")),
+        abierto && h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" } },
+          lista.map(({ v, m }) => h("button", { key: v.id, onClick: () => onOpen && onOpen(v.id), title: "Abrir ficha del veh\xEDculo",
+            style: { cursor: "pointer", border: "1px solid rgba(255,255,255,.6)", background: m.nivel === "vencido" ? "#7F1D1D" : "rgba(0,0,0,.18)", color: "#fff", borderRadius: "10px", padding: "6px 10px", fontFamily: F.body, fontSize: "12.5px", textAlign: "left" } },
+            h("b", { style: { fontFamily: F.mono } }, v.id), " \xB7 ", fmtKm(m.km), " \xB7 ",
+            m.restante <= 0 ? h("b", null, `pasado ${fmtKm(-m.restante)}`) : `faltan ${fmtKm(m.restante)}`,
+            " (tocaba a ", fmtKm(m.proximo), ")")))));
+  };
+  // Tarjeta de mantenimiento en la ficha del vehículo.
+  const MantCard = ({ vehicle, onHecho, onSetKm }) => {
+    const m = mantInfo(vehicle);
+    const [modo, setModo] = React.useState(null); // "hecho" | "km"
+    const [draft, setDraft] = React.useState("");
+    const h = React.createElement;
+    const col = !m ? T.inkFaint : m.nivel === "vencido" ? T.danger : m.nivel === "proximo" ? T.warn : T.ok;
+    const fecha = (d) => { try { return new Date(d).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }); } catch (e) { return ""; } };
+    const abrir = (md) => { setModo(md); setDraft(String((m && m.km) || "")); };
+    const val = parseInt(String(draft).replace(/[^0-9]/g, ""), 10) || 0;
+    const ultimo = (vehicle.mantLog || []).slice(-1)[0];
+    return h("div", { "data-mant-card": "1", style: { background: T.surface, border: `1px solid ${T.border}`, borderLeft: `4px solid ${col}`, borderRadius: "10px", padding: "14px 18px", marginBottom: "16px", fontFamily: F.body } },
+      h("div", { style: { display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" } },
+        h("span", { style: { fontWeight: 800, fontSize: "14px", color: T.ink } }, "\u{1F527} Mantenimiento cada 35.000 km"),
+        m ? h(React.Fragment, null,
+          h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Km actual: ", h("b", { style: { color: T.ink } }, fmtKm(m.km)), m.fuente ? ` (${m.fuente}${m.at ? ", " + fecha(m.at) : ""})` : ""),
+          h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Pr\xF3ximo: ", h("b", { style: { color: T.ink } }, fmtKm(m.proximo))),
+          h("span", { style: { fontSize: "13px", fontWeight: 800, color: col } }, m.restante <= 0 ? `VENCIDO \xB7 pasado ${fmtKm(-m.restante)}` : `faltan ${fmtKm(m.restante)}`))
+          : h("span", { style: { fontSize: "13px", color: T.inkFaint, fontStyle: "italic" } }, "Sin km registrado: importa la flota del HQ o pon el km a mano."),
+        h("div", { style: { flex: 1 } }),
+        h(Btn, { variant: m && m.nivel !== "ok" ? "primary" : "secondary", sm: true, onClick: () => abrir("hecho") }, "\u2714 Mantenimiento hecho"),
+        h(Btn, { variant: "ghost", sm: true, onClick: () => abrir("km") }, "Corregir km")),
+      ultimo && h("div", { style: { fontSize: "11.5px", color: T.inkFaint, marginTop: "6px" } }, `\xDAltimo registrado: a los ${fmtKm(ultimo.km)} el ${fecha(ultimo.at)}${ultimo.por ? " (" + String(ultimo.por).split("@")[0] + ")" : ""}`),
+      modo && h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "10px", flexWrap: "wrap" } },
+        h("span", { style: { fontSize: "13px", color: T.inkSoft } }, modo === "hecho" ? "Km al hacer el mantenimiento:" : "Km actual del veh\xEDculo:"),
+        h("input", { "aria-label": modo === "hecho" ? "Km del mantenimiento" : "Km actual", inputMode: "numeric", value: draft, onChange: (e) => setDraft(e.target.value), autoFocus: true,
+          style: { padding: "6px 10px", border: `1px solid ${T.border}`, borderRadius: "9px", fontSize: "13px", width: "130px", background: T.bg, color: T.ink, fontFamily: F.mono } }),
+        h(Btn, { variant: "primary", sm: true, disabled: val < 100, onClick: () => { if (modo === "hecho") onHecho(vehicle.id, val); else onSetKm(vehicle.id, val); setModo(null); } }, "Guardar"),
+        h(Btn, { variant: "ghost", sm: true, onClick: () => setModo(null) }, "Cancelar"),
+        modo === "hecho" && val >= 100 && h("span", { style: { fontSize: "12px", color: T.inkSoft } }, `El siguiente ser\xE1 a los ${fmtKm(val + MANT_KM)}.`)));
+  };
   const GRUPOS = [{ id: "alquiler", label: "Alquiler" }, { id: "taller", label: "Taller" }];
   const GroupBar = ({ grupo, onChange }) => React.createElement("div", { style: { background: T.bg, padding: "0 28px" } },
     React.createElement("div", { role: "tablist", "aria-label": "Área", style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "6px", padding: "12px 0 10px" } },
@@ -2117,7 +2203,7 @@ const inicioOT =
     fontSize: "14px",
     fontWeight: 600
   } }, /* @__PURE__ */ React.createElement(FileWarning, { size: 16 }), backupReminder.text), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: "8px" } }, /* @__PURE__ */ React.createElement(Btn, { variant: "ghost", sm: true, onClick: onDismissReminder }, "Hoy no"), /* @__PURE__ */ React.createElement(Btn, { variant: "primary", sm: true, onClick: onBackup, icon: Download }, "Exportar")))));
-const FleetView = ({ state, setView, onSelectVehicle, onAdd, onImport, bajaVehicles = [] }) => {
+const FleetView = ({ state, setView, onSelectVehicle, onAdd, onImport, onImportFleet, bajaVehicles = [] }) => {
     const [q, setQ] = useState("");
     const [showBaja, setShowBaja] = useState(false);
     const [locFilter, setLocFilter] = useState("Todas");
@@ -2170,7 +2256,11 @@ const FleetView = ({ state, setView, onSelectVehicle, onAdd, onImport, bajaVehic
       {
         kicker: "Flota AC-LLAR",
         count: state.vehicles.length === filtered.length ? state.vehicles.length : `${filtered.length} / ${state.vehicles.length}`,
-        action: /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: "8px" } }, /* @__PURE__ */ React.createElement(Btn, { variant: "primary", onClick: onAdd, icon: Plus }, "Nuevo veh\xEDculo"))
+        action: /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: "8px" } },
+          onImportFleet && React.createElement("label", { title: "Excel de Flota del HQ (fleets.vehicles\u2026xlsx): actualiza od\xF3metros y sede actual", style: { display: "inline-flex", alignItems: "center", gap: "6px", cursor: "pointer", padding: "8px 14px", borderRadius: "10px", border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: "13px", fontWeight: 600, fontFamily: F.body } },
+            "\u{1F4E5} Importar flota HQ (km y sede)",
+            React.createElement("input", { type: "file", accept: ".xlsx,.xls", "data-import-flota": "1", style: { display: "none" }, onChange: (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; if (f) onImportFleet(f); } })),
+          /* @__PURE__ */ React.createElement(Btn, { variant: "primary", onClick: onAdd, icon: Plus }, "Nuevo veh\xEDculo"))
       },
       state.vehicles.length === 1 ? "veh\xEDculo" : "veh\xEDculos"
     ), /* @__PURE__ */ React.createElement("div", { style: {
@@ -2691,6 +2781,8 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
     onEditReviewDate,
     onMarkNoNewDamages,
     onClearNextRental,
+    onMantHecho,
+    onSetKm,
     requestConfirm
   }) => {
     const status = computeVehicleStatus(vehicle, damages);
@@ -2789,7 +2881,7 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       },
       /* @__PURE__ */ React.createElement(ArrowLeft, { size: 14 }),
       " Volver a la flota"
-    ), /* @__PURE__ */ React.createElement("div", { style: {
+    ), onMantHecho && React.createElement(MantCard, { vehicle, onHecho: onMantHecho, onSetKm }), /* @__PURE__ */ React.createElement("div", { style: {
       background: T.surface,
       border: `1px solid ${T.border}`,
       borderLeft: locTheme ? `4px solid ${locTheme.accent}` : `1px solid ${T.border}`,
@@ -3575,6 +3667,7 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
   sourceFile: r.file.name,
   inicioOT: r.parsed?.header?.inicioOT || "",
   otNota: (r.parsed?.header?.otNota || "").trim(),
+  km: r.parsed?.header?.km || null,
   damages: r.damages.filter((d) => d._selected),
         // Damages to mark as repaired (missing from this OT + user chose 'repair')
         markRepaired: (r.missing || []).filter((m) => m._action === "repair").map((m) => m.id)
@@ -11606,6 +11699,61 @@ No se puede deshacer.`,
         })
       }));
     };
+    // ===== Mantenimiento 35.000 km =====
+    const quienSoy = () => { try { return (window.acllarCloud && window.acllarCloud.usuario && window.acllarCloud.usuario()) || ""; } catch (e) { return ""; } };
+    const handleMantHecho = (vehicleId, km) => {
+      setState((s) => ({ ...s, vehicles: s.vehicles.map((v) => v.id !== vehicleId ? v : {
+        ...v, ...odometroUpdate(v, km, "manual"), mantBaseKm: km,
+        mantLog: [...(Array.isArray(v.mantLog) ? v.mantLog : []), { km, at: nowIso(), por: quienSoy() }].slice(-20)
+      }) }));
+    };
+    const handleSetKm = (vehicleId, km) => {
+      setState((s) => ({ ...s, vehicles: s.vehicles.map((v) => v.id !== vehicleId ? v : {
+        ...v, odometro: km, odometroAt: nowIso(), odometroFuente: "manual",
+        ...(Number.isFinite(v.mantBaseKm) ? {} : { mantBaseKm: Math.floor(km / MANT_KM) * MANT_KM })
+      }) }));
+    };
+    // Excel "fleets.vehicles…" del HQ: odómetro y sede actual de cada vehículo (se casa por matrícula).
+    const handleImportFleet = async (file) => {
+      try {
+        const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array", cellDates: true });
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null });
+        const col = (r, ...ns) => { for (const n of ns) { const k = Object.keys(r).find((x) => x.toLowerCase().trim() === n.toLowerCase()); if (k) return r[k]; } return null; };
+        if (!rows.length || col(rows[0], "Od\xF3metro", "Odometro") === null && col(rows[0], "Ubicaci\xF3n Actual") === null) {
+          await requestConfirm({ title: "No es el Excel de flota", message: 'No encuentro las columnas "Od\xF3metro" y "Ubicaci\xF3n Actual". Exp\xF3rtalo desde Flota en el HQ (fleets.vehicles\u2026xlsx).', confirmLabel: "Entendido" });
+          return;
+        }
+        const plate = (p) => String(p || "").replace(/\s+/g, "").toUpperCase();
+        const acK = (x) => { const m = String(x || "").match(/^(AC|CB)-?(\d+)/i); return m ? m[1].toUpperCase() + "-" + m[2] : ""; };
+        const at = new Date(file.lastModified || Date.now()).toISOString();
+        const filas = rows.map((r) => ({ id: String(col(r, "Identificador del Veh\xEDculo") || "").trim(), plate: plate(col(r, "Matricula", "Matr\xEDcula")),
+          sede: normSede(col(r, "Ubicaci\xF3n Actual")), km: parseInt(String(col(r, "Od\xF3metro", "Odometro") || "").replace(/[^0-9]/g, ""), 10) || 0 })).filter((f) => f.id || f.plate);
+        const res = { km: 0, sedes: [], sinCasar: [] };
+        const patches = {}, usados = new Set();
+        for (const v of state.vehicles) {
+          const f = filas.find((x) => x.plate && x.plate === plate(v.plate)) || filas.find((x) => acK(x.id) && acK(x.id) === acK(v.id));
+          if (!f) continue;
+          usados.add(f);
+          let p = {};
+          const od = odometroUpdate(v, f.km, "HQ", at);
+          if (Object.keys(od).length) { p = { ...p, ...od }; if (od.odometro) res.km++; }
+          if (f.id && f.id !== v.hqId) p.hqId = f.id;
+          if (f.sede && f.sede !== v.location) {
+            res.sedes.push(`${v.id}: ${v.location || "\u2014"} \u2192 ${f.sede}`);
+            p.location = f.sede;
+            p.sedeCambios = [...(v.sedeCambios || []), { de: v.location || "", a: f.sede, at: nowIso(), fuente: "flota HQ" }].slice(-10);
+          }
+          if (Object.keys(p).length) patches[v.id] = p;
+        }
+        res.sinCasar = filas.filter((f) => !usados.has(f)).map((f) => f.id || f.plate);
+        setState((s) => ({ ...s, vehicles: s.vehicles.map((v) => patches[v.id] ? { ...v, ...patches[v.id] } : v) }));
+        await requestConfirm({ title: "Flota del HQ importada",
+          message: `${res.km} od\xF3metros actualizados.` + (res.sedes.length ? ` Sedes corregidas: ${res.sedes.join("; ")}.` : " Todas las sedes ya coincid\xEDan.") + (res.sinCasar.length ? ` Sin veh\xEDculo en el cockpit: ${res.sinCasar.join(", ")}.` : ""),
+          confirmLabel: "Entendido" });
+      } catch (e) {
+        await requestConfirm({ title: "No se pudo importar la flota", message: String(e && e.message || e), confirmLabel: "Entendido" });
+      }
+    };
     const handleMarkInspected = () => {
       if (!selectedVehicle) return;
       if (typeof nubeAccionEstado === "function") nubeAccionEstado(selectedVehicle.id, "revisado");
@@ -13086,8 +13234,10 @@ const scanResWatchFolder = async (handle) => {
         let vehicles = s.vehicles.map((v) => {
           if (!importedVehicleIds.has(v.id)) return v;
           const _otNota = (payload.find((p) => p.vehicleId === v.id)?.otNota || "").trim();
+          const _km = Number(payload.find((p) => p.vehicleId === v.id)?.km) || 0;
           return {
             ...v,
+            ...odometroUpdate(v, _km, "revisi\xF3n"),
             lastInspectedAt: nowIso(),
             workflowStatus: "REVISADO",
             lastReturnHasNewDamages: (newQuantByVehicle[v.id] || 0) > 0,
@@ -13270,8 +13420,17 @@ const reservaHistory = [...merged.values()]
     return db - da;
   })
   .slice(0, 3);
+// SEDE ACTUAL desde el 704: el "Lugar de entrega" de la reserva en curso (En Alquiler) o, si no
+// hay, de la próxima salida. En el 99% de los casos es la sede real del vehículo.
+const sedeRow = enAlquilerRow || liveReservas.filter((r) => (r.salida || "").slice(0, 10) >= today2)[0] || null;
+const sede704 = sedeRow ? normSede(sedeRow.sede) : null;
+const sedePatch = sede704 && sede704 !== v.location ? {
+  location: sede704,
+  sedeCambios: [...(v.sedeCambios || []), { de: v.location || "", a: sede704, at: nowIso(), fuente: "704", reservaId: sedeRow.reservaId || "" }].slice(-10)
+} : {};
 const base = {
   ...v,
+  ...sedePatch,
   reservas: liveReservas,
   reservaHistory,
   nextRentalDate: "",
@@ -14043,7 +14202,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         theme,
         onToggleTheme: toggleTheme
       }
-    ), React.createElement(GroupBar, { grupo, onChange: setGrupo }), grupo === "alquiler" && /* @__PURE__ */ React.createElement(TabBar, { active: activeTab, onChange: setActiveTab }), grupo === "taller" && React.createElement(TallerView, null), grupo === "alquiler" && watchStatus === "active" && /* @__PURE__ */ React.createElement("div", { style: {
+    ), React.createElement(MantBanner, { vehicles: state.vehicles, onOpen: (id) => { setGrupo("alquiler"); setActiveTab("fleet"); setDetailOrigin("fleet"); setSelectedVehicleId(id); setView("detail"); } }), React.createElement(GroupBar, { grupo, onChange: setGrupo }), grupo === "alquiler" && /* @__PURE__ */ React.createElement(TabBar, { active: activeTab, onChange: setActiveTab }), grupo === "taller" && React.createElement(TallerView, null), grupo === "alquiler" && watchStatus === "active" && /* @__PURE__ */ React.createElement("div", { style: {
       display: "flex",
       alignItems: "center",
       gap: "10px",
@@ -14150,7 +14309,8 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
     setView("detail");
   },
   onAdd: handleAddVehicle,
-  onImport: () => setImportModalOpen(true)
+  onImport: () => setImportModalOpen(true),
+  onImportFleet: handleImportFleet
 }
     ) : selectedVehicle ? /* @__PURE__ */ React.createElement(
       VehicleDetailView,
@@ -14183,6 +14343,8 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         onMarkNoNewDamages: handleMarkNoNewDamages,
         onClearNextRental: handleClearNextRental,
         onToggleBaja: handleToggleBaja,
+        onMantHecho: handleMantHecho,
+        onSetKm: handleSetKm,
         requestConfirm
       }
     ) : null), activeTab === "agenda" && /* @__PURE__ */ React.createElement(
