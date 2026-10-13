@@ -5455,7 +5455,9 @@ const fechas = llegadaReal
               confirmLabel: "S\xED, se fue sin revisar",
               cancelLabel: "Cancelar"
             });
-            if (ok) onLeftUnreviewed(v.id);
+            // Registrar contra la MISMA reserva que se ve en la fila (no la del historial,
+            // que puede estar desactualizado: caso AC-303, 13-oct-2026).
+            if (ok) onLeftUnreviewed(v.id, { cliente: tit?.cliente || "", reservaId: tit?._hqReservaId || "", arrivalAt: arrivalAt || null });
           },
           style: { background: "transparent", border: `1px dashed ${T.inkFaint}`, borderRadius: "10px", cursor: "pointer", padding: "6px 10px", fontSize: "11.5px", color: T.inkSoft, fontWeight: 600 }
         },
@@ -11941,17 +11943,23 @@ No se puede deshacer.`,
       reader.readAsText(file);
       e.target.value = "";
     };
-    const handleLeftUnreviewed = (vehicleId) => {
+    const handleLeftUnreviewed = (vehicleId, reservaVisible) => {
       setState((s) => {
         const v = s.vehicles.find((x) => x.id === vehicleId);
         if (!v) return s;
         const now = nowIso();
-        const tit = lastCompletedTitular(v);
+        // Reserva a la que corresponde: la que muestra la fila; si no, la del 720 (ciclo que
+        // acaba de volver); solo en último caso el historial de reservas completadas.
+        const tit = reservaVisible && (reservaVisible.reservaId || reservaVisible.cliente)
+          ? { cliente: reservaVisible.cliente || "", reservaId: reservaVisible.reservaId || "" }
+          : (v.currentReservaId || v.currentClient)
+            ? { cliente: v.currentClient || "", reservaId: v.currentReservaId || "" }
+            : lastCompletedTitular(v);
         // Consultar arrivalLog para preservar el timestamp real de llegada,
         // aunque el vehículo se haya re-alquilado o el state esté "sucio".
         const arrLog = Array.isArray(s.arrivalLog) ? s.arrivalLog : [];
         const arrEvent = tit?.reservaId ? findArrivalEvent(arrLog, vehicleId, tit.reservaId) : null;
-        const returnedAt = arrEvent?.at || v.returnedAt || v.lastReturnAt || null;
+        const returnedAt = (reservaVisible && reservaVisible.arrivalAt) || arrEvent?.at || v.returnedAt || v.lastReturnAt || null;
         const entry = {
           id: Date.now() + Math.random(),
           vehicleId,
