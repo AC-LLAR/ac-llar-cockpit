@@ -1777,6 +1777,65 @@ const inicioOT =
             m.restante <= 0 ? h("b", null, `pasado ${fmtKm(-m.restante)}`) : `faltan ${fmtKm(m.restante)}`,
             " (tocaba a ", fmtKm(m.proximo), ")")))));
   };
+  // ===== Historial "quién hizo qué" (tabla actividad, la rellena la base de datos sola) =====
+  const ACT_COL = { vehicles: "Veh\xEDculo", damages: "Da\xF1o", depositLog: "Fianza", leftUnreviewedLog: "Se fue sin revisar", arrivalLog: "Llegada (Volvi\xF3)", reviewLog: "Tiempo de revisi\xF3n", partsToOrder: "Recambio", presupuestos: "Presupuesto" };
+  const ACT_CAMPO = { workflowStatus: "estado", location: "sede", baja: "baja", odometro: "km", mantBaseKm: "mantenimiento hecho a (km)", returnedAt: "llegada", lastReturnAt: null, lastInspectedAt: "revisi\xF3n", arrivalConfirmed: "llegada confirmada", notes: "notas", plate: "matr\xEDcula",
+    state: "reparaci\xF3n", repair: "reparaci\xF3n", cargo: "cargo", mecanico: "mec\xE1nico", gravedad: "gravedad", description: "descripci\xF3n", tipo: "tipo", nivelDisputa: "disputa", nota: "nota", estado: "estado", fianzaAvisoEnviado: "aviso a oficina", leftUnreviewedAt: "se fue sin revisar", needsQuantification: "a cuantificar" };
+  const ACT_SKIP = new Set(["reservas", "reservaHistory", "reservasProximas", "sedeCambios", "mantLog", "last720Rental", "nextRentalDate", "nextRentalEndDate", "pendingRental", "activeRental", "updatedAt", "lastReturnAt", "odometroAt", "odometroFuente", "repairedVia", "_y", "_page"]);
+  const actVal = (x) => {
+    if (x === null || x === undefined || x === "") return "\u2014";
+    if (x === true) return "s\xED"; if (x === false) return "no";
+    if (typeof x === "string" && /^\d{4}-\d{2}-\d{2}T/.test(x)) { try { return new Date(x).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); } catch (e) { return x; } }
+    if (typeof x === "object") return Array.isArray(x) ? `${x.length} elemento${x.length === 1 ? "" : "s"}` : "\u2026";
+    return String(x);
+  };
+  const actTexto = (r) => {
+    const que = ACT_COL[r.col] || r.col;
+    const ref = r.col === "damages" ? " " + String(r.item_id || "").replace(/^i:/, "") : "";
+    if (r.accion === "alta") {
+      const n = (r.cambios && r.cambios.nuevo) || {};
+      if (r.col === "depositLog") return n.tipo === "presupuesto" ? "Presupuesto enviado" : "Fianza devuelta";
+      if (r.col === "arrivalLog") return "Marcado como VOLVI\xD3" + (n.cliente ? ` (${n.cliente})` : "");
+      if (r.col === "leftUnreviewedLog") return "Se fue sin revisar";
+      if (r.col === "reviewLog") return "Tiempo de revisi\xF3n registrado" + (n.horas != null ? ` (${n.horas} h)` : "");
+      if (r.col === "damages") return `Da\xF1o nuevo${ref}` + (n.description ? ": " + n.description : "");
+      return `${que}${ref} \u2014 alta`;
+    }
+    if (r.accion === "borrado") return `${que}${ref} \u2014 borrado`;
+    const partes = Object.entries(r.cambios || {}).filter(([k]) => !ACT_SKIP.has(k) && ACT_CAMPO[k] !== null)
+      .map(([k, [a, b]]) => `${ACT_CAMPO[k] || k}: ${actVal(a)} \u2192 ${actVal(b)}`);
+    return partes.length ? `${que}${ref} \u2014 ${partes.join(" \xB7 ")}` : null;
+  };
+  const HistorialVehiculo = ({ vehId }) => {
+    const [abierto, setAbierto] = React.useState(false);
+    const [filas, setFilas] = React.useState(null);
+    const [err, setErr] = React.useState("");
+    const h = React.createElement;
+    const cargar = async () => {
+      setErr("");
+      try {
+        const C = window.acllarCloud;
+        const { data, error } = await C.sb.from("actividad").select("at,email,device,col,item_id,accion,cambios").eq("veh", vehId).order("at", { ascending: false }).limit(150);
+        if (error) throw error;
+        setFilas((data || []).map((r) => ({ ...r, txt: actTexto(r) })).filter((r) => r.txt));
+      } catch (e) { setErr(String(e && e.message || e)); setFilas([]); }
+    };
+    const fecha = (d) => { try { return new Date(d).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }); } catch (e) { return d; } };
+    return h("div", { "data-historial": "1", style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "10px", padding: "12px 18px", marginBottom: "16px", fontFamily: F.body } },
+      h("div", { style: { display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }, onClick: () => { const n = !abierto; setAbierto(n); if (n) cargar(); } },
+        h("span", { style: { fontWeight: 800, fontSize: "14px", color: T.ink } }, "\u{1F552} Historial de cambios"),
+        h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "qui\xE9n hizo cada cosa y cu\xE1ndo"),
+        h("div", { style: { flex: 1 } }),
+        h("span", { style: { fontSize: "12.5px", fontWeight: 700, color: T.rust } }, abierto ? "Ocultar" : "Ver")),
+      abierto && h("div", { style: { marginTop: "10px" } },
+        err && h("div", { style: { color: T.danger, fontSize: "12.5px" } }, err),
+        filas === null ? h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, "Cargando\u2026")
+          : filas.length === 0 ? h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, "Sin cambios registrados todav\xEDa (se registra desde el 14/10/2026).")
+          : h("div", { style: { maxHeight: "320px", overflowY: "auto" } }, filas.map((r, i) => h("div", { key: i, style: { display: "flex", gap: "12px", padding: "6px 0", borderTop: i ? `1px solid ${T.border}` : "none", fontSize: "12.5px" } },
+              h("span", { style: { fontFamily: F.mono, color: T.inkFaint, whiteSpace: "nowrap" } }, fecha(r.at)),
+              h("span", { style: { fontWeight: 700, color: T.ink, whiteSpace: "nowrap", minWidth: "90px" } }, String(r.email || "?").split("@")[0]),
+              h("span", { style: { color: T.inkSoft } }, r.txt))))));
+  };
   // Tarjeta de mantenimiento en la ficha del vehículo.
   const MantCard = ({ vehicle, onHecho, onSetKm }) => {
     const m = mantInfo(vehicle);
@@ -2883,7 +2942,7 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       },
       /* @__PURE__ */ React.createElement(ArrowLeft, { size: 14 }),
       " Volver a la flota"
-    ), onMantHecho && React.createElement(MantCard, { vehicle, onHecho: onMantHecho, onSetKm }), /* @__PURE__ */ React.createElement("div", { style: {
+    ), onMantHecho && React.createElement(MantCard, { vehicle, onHecho: onMantHecho, onSetKm }), React.createElement(HistorialVehiculo, { key: "hist-" + vehicle.id, vehId: vehicle.id }), /* @__PURE__ */ React.createElement("div", { style: {
       background: T.surface,
       border: `1px solid ${T.border}`,
       borderLeft: locTheme ? `4px solid ${locTheme.accent}` : `1px solid ${T.border}`,
