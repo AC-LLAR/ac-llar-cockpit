@@ -280,7 +280,7 @@
     let txt, bg, fg;
     if (!online()) { txt = n ? "Sin conexión · " + n + " por subir" : "Sin conexión"; bg = "#FEF3C7"; fg = "#92400E"; }
     else if (Nube.syncing) { txt = "Subiendo…"; bg = "#FFEDD5"; fg = "#9A3412"; }
-    else if (n) { txt = "" + n + " por subir"; bg = "#FEE2E2"; fg = "#991B1B"; }
+    else if (n) { txt = "" + n + " por subir" + (Nube.error ? " · error (toca)" : ""); bg = "#FEE2E2"; fg = "#991B1B"; }
     else { txt = "Al día"; bg = "#DCFCE7"; fg = "#166534"; }
     return `<span id="nube-pill" data-action="sync-now" style="display:inline-block;margin-top:4px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;background:${bg};color:${fg};cursor:pointer">${txt}</span>`;
   }
@@ -661,7 +661,7 @@
     const el = e.target.closest && e.target.closest("[data-action]");
     if (!el) return;
     const a = el.dataset.action;
-    if (a === "sync-now") { e.stopPropagation(); toast(online() ? "Sincronizando…" : "Sin conexión"); syncAll(); }
+    if (a === "sync-now") { e.stopPropagation(); toast(!online() ? "Sin conexión" : Nube.error ? "Último error: " + Nube.error + " · reintentando…" : "Sincronizando…"); syncAll(); }
     if (a === "logout") {
       if (pendingCount() && !(await uiConfirm("Hay revisiones sin subir. Si cierras sesión se subirán cuando vuelvas a entrar. ¿Cerrar sesión?", {ok:'Cerrar sesión'}))) return;
       await sb.auth.signOut(); location.reload();
