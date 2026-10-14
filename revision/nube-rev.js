@@ -65,11 +65,13 @@
   async function uploadPhoto(recId, dataUrl, keepLocal = true) {
     if (isRef(dataUrl) || typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return dataUrl;
     const path = recId + "/" + (await sha1(dataUrl)) + ".jpg";
-    const cached = await dbGet("photos", path).catch(() => null);
+    // La caché local de fotos es solo una optimización: si el almacenamiento del móvil no
+    // responde (lleno o bloqueado), se sigue adelante sin ella en vez de quedarse esperando.
+    const cached = await conTiempo(dbGet("photos", path), 5000, "cach\u00E9").catch(() => null);
     if (!(cached && cached.up)) {
       const { error } = await conTiempo(sb.storage.from(BUCKET).upload(path, dataUrlToBlob(dataUrl), { contentType: "image/jpeg", upsert: true }), 90000, "foto");
       if (error) throw error;
-      await dbPut("photos", keepLocal ? { path, data: dataUrl, up: true, at: Date.now() } : { path, up: true, at: Date.now() });
+      await conTiempo(dbPut("photos", keepLocal ? { path, data: dataUrl, up: true, at: Date.now() } : { path, up: true, at: Date.now() }), 5000, "cach\u00E9").catch((e) => console.warn("[revisiones] cach\u00E9 de foto", e));
     }
     return "sb:" + path;
   }
@@ -93,7 +95,9 @@
   async function resolvePhoto(p) {
     if (!isRef(p)) return p;
     const path = p.slice(3);
-    const cached = await dbGet("photos", path).catch(() => null);
+    // La caché local de fotos es solo una optimización: si el almacenamiento del móvil no
+    // responde (lleno o bloqueado), se sigue adelante sin ella en vez de quedarse esperando.
+    const cached = await conTiempo(dbGet("photos", path), 5000, "cach\u00E9").catch(() => null);
     if (cached && cached.data) return cached.data;
     if (!online()) return NO_PHOTO;
     try {
@@ -192,8 +196,8 @@
           const now = state.records.find((x) => x.id === rec.id);
           if (now && now !== rec && now._sync === "pendiente" && now._rev !== rec._rev) continue;
           const done = { ...withRefs, revNum: data.revnum, _estado: data.estado, _inspector: rec._inspector || Nube.user, _sync: "ok" };
-          await dbPut("inspections", done);
           setLocal(done);
+          await conTiempo(dbPut("inspections", done), 10000, "guardar en el m\u00F3vil").catch((e) => console.warn("[revisiones] guardar local", e));
         } catch (e) {
           Nube.error = (e && e.message) || String(e);
           console.warn("[revisiones] no se pudo subir", rec.id, e);
