@@ -49,8 +49,15 @@
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
   function dataUrlToBlob(dataUrl) {
-    const [head, b64] = dataUrl.split(",");
-    const mime = (head.match(/data:([^;]+)/) || [])[1] || "image/jpeg";
+    const i = dataUrl.indexOf(",");
+    const head = dataUrl.slice(0, i), raw = dataUrl.slice(i + 1);
+    const mime = (head.match(/data:([^;,]+)/) || [])[1] || "image/jpeg";
+    // Tolerante: quita espacios/saltos, convierte base64 "url-safe" y completa el relleno.
+    // (Una foto con base64 mal formado bloqueaba la subida de toda la revisión: AC-323, 14-oct-2026.)
+    let b64 = /;base64/i.test(head) ? raw : btoa(unescape(encodeURIComponent(decodeURIComponent(raw))));
+    b64 = b64.replace(/[\s]/g, "").replace(/-/g, "+").replace(/_/g, "/").replace(/[^A-Za-z0-9+/=]/g, "").replace(/=+$/, "");
+    if (b64.length % 4 === 1) b64 = b64.slice(0, -1);
+    while (b64.length % 4) b64 += "=";
     const bin = atob(b64); const u = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
     return new Blob([u], { type: mime });
@@ -69,7 +76,14 @@
     // responde (lleno o bloqueado), se sigue adelante sin ella en vez de quedarse esperando.
     const cached = await conTiempo(dbGet("photos", path), 5000, "cach\u00E9").catch(() => null);
     if (!(cached && cached.up)) {
-      const { error } = await conTiempo(sb.storage.from(BUCKET).upload(path, dataUrlToBlob(dataUrl), { contentType: "image/jpeg", upsert: true }), 90000, "foto");
+      let blob;
+      try { blob = dataUrlToBlob(dataUrl); } catch (e) {
+        // Foto dañada en el móvil: no se puede recuperar. Se descarta ESA foto y la revisión sube igual.
+        console.warn("[revisiones] foto dañada descartada", path, e);
+        try { diag({ paso: "foto-danada", id: recId, len: dataUrl.length, head: dataUrl.slice(0, 40), msg: String(e && e.message || e) }); } catch (x) {}
+        return null;
+      }
+      const { error } = await conTiempo(sb.storage.from(BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: true }), 90000, "foto");
       if (error) throw error;
       await conTiempo(dbPut("photos", keepLocal ? { path, data: dataUrl, up: true, at: Date.now() } : { path, up: true, at: Date.now() }), 5000, "cach\u00E9").catch((e) => console.warn("[revisiones] cach\u00E9 de foto", e));
     }
@@ -111,7 +125,7 @@
   // Aplica fn a todas las fotos de una revisión (o de una entrada de caché).
   async function mapPhotos(rec, fn) {
     const r = JSON.parse(JSON.stringify(rec));
-    const arr = async (a) => (Array.isArray(a) ? Promise.all(a.map(fn)) : a);
+    const arr = async (a) => (Array.isArray(a) ? (await Promise.all(a.map(fn))).filter((x) => x != null) : a);
     if (Array.isArray(r.genPhotos)) r.genPhotos = await arr(r.genPhotos);
     for (const d of r.dmgs || []) { if (d.photos) d.photos = await arr(d.photos); if (d.d && d.d.photos) d.d.photos = await arr(d.d.photos); }
     for (const k of Object.keys(r.itemsSnapshot || {})) { const it = r.itemsSnapshot[k]; if (it && it.d && it.d.photos) it.d.photos = await arr(it.d.photos); }
@@ -168,7 +182,7 @@
 
   // ================= subida =================
   // Diagnóstico remoto: qué ve el móvil al intentar subir (solo lo lee el administrador).
-  const diag = (info) => { try { Promise.resolve(sb.from("rev_diag").insert({ device: typeof EQUIPO !== "undefined" ? EQUIPO : "", info: { v: 15, ...info } })).catch(() => {}); } catch (e) {} };
+  const diag = (info) => { try { Promise.resolve(sb.from("rev_diag").insert({ device: typeof EQUIPO !== "undefined" ? EQUIPO : "", info: { v: 17, ...info } })).catch(() => {}); } catch (e) {} };
   async function push() {
     // Red de seguridad: si una subida anterior quedó "colgada" más de 5 min, se libera.
     if (Nube.syncing && Nube.syncingSince && Date.now() - Nube.syncingSince > 300000) Nube.syncing = false;
