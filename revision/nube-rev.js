@@ -59,12 +59,15 @@
   const NO_PHOTO = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="#F1F5F9"/><text x="100" y="92" font-size="13" text-anchor="middle" fill="#64748B" font-family="sans-serif">Foto en la OT de OneDrive</text><text x="100" y="115" font-size="10" text-anchor="middle" fill="#94A3B8" font-family="sans-serif">(más de 45 días) o sin conexión</text></svg>');
 
   // keepLocal=false: no guardar copia en el móvil (historial antiguo importado).
+  // Ninguna llamada de red puede quedarse colgada: con mala cobertura una subida podía no
+  // terminar nunca y bloquear toda la sincronización hasta reiniciar la app (AC-323, 14-oct-2026).
+  const conTiempo = (p, ms, que) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("Tiempo agotado (" + que + "): se reintentará")), ms))]);
   async function uploadPhoto(recId, dataUrl, keepLocal = true) {
     if (isRef(dataUrl) || typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return dataUrl;
     const path = recId + "/" + (await sha1(dataUrl)) + ".jpg";
     const cached = await dbGet("photos", path).catch(() => null);
     if (!(cached && cached.up)) {
-      const { error } = await sb.storage.from(BUCKET).upload(path, dataUrlToBlob(dataUrl), { contentType: "image/jpeg", upsert: true });
+      const { error } = await conTiempo(sb.storage.from(BUCKET).upload(path, dataUrlToBlob(dataUrl), { contentType: "image/jpeg", upsert: true }), 90000, "foto");
       if (error) throw error;
       await dbPut("photos", keepLocal ? { path, data: dataUrl, up: true, at: Date.now() } : { path, up: true, at: Date.now() });
     }
@@ -161,8 +164,10 @@
 
   // ================= subida =================
   async function push() {
+    // Red de seguridad: si una subida anterior quedó "colgada" más de 5 min, se libera.
+    if (Nube.syncing && Nube.syncingSince && Date.now() - Nube.syncingSince > 300000) Nube.syncing = false;
     if (Nube.syncing || !online() || !Nube.user) return;
-    Nube.syncing = true; refreshPill();
+    Nube.syncing = true; Nube.syncingSince = Date.now(); refreshPill();
     try {
       const queue = state.records.filter((r) => r._sync === "pendiente" || r._sync === "borrar").sort((a, b) => new Date(a.date) - new Date(b.date));
       for (const rec of queue) {
@@ -178,10 +183,10 @@
           const withRefs = await mapPhotos(src, (p) => uploadPhoto(rec.id, p, !rec._historica));
           const payload = stripLocal(withRefs);
           delete payload.revNum;
-          const { data, error } = await sb.rpc("guardar_revision", {
+          const { data, error } = await conTiempo(sb.rpc("guardar_revision", {
             p_id: rec.id, p_veh: rec.veh.id, p_fecha: rec.date, p_data: payload,
             p_historica: !!rec._historica, p_revnum: rec.revNum != null ? rec.revNum : null,
-          });
+          }), 60000, "guardar");
           if (error) throw error;
           // Si mientras subía se volvió a editar, no pisar la versión nueva.
           const now = state.records.find((x) => x.id === rec.id);
