@@ -167,6 +167,8 @@
   function softRender() { if (state.view === "home" || state.view === "settings") render(); else refreshPill(); }
 
   // ================= subida =================
+  // Diagnóstico remoto: qué ve el móvil al intentar subir (solo lo lee el administrador).
+  const diag = (info) => { try { Promise.resolve(sb.from("rev_diag").insert({ device: typeof EQUIPO !== "undefined" ? EQUIPO : "", info: { v: 15, ...info } })).catch(() => {}); } catch (e) {} };
   async function push() {
     // Red de seguridad: si una subida anterior quedó "colgada" más de 5 min, se libera.
     if (Nube.syncing && Nube.syncingSince && Date.now() - Nube.syncingSince > 300000) Nube.syncing = false;
@@ -174,7 +176,10 @@
     Nube.syncing = true; Nube.syncingSince = Date.now(); refreshPill();
     try {
       const queue = state.records.filter((r) => r._sync === "pendiente" || r._sync === "borrar").sort((a, b) => new Date(a.date) - new Date(b.date));
+      const hoy = state.records.filter((r) => String(r.date || "").slice(0, 10) >= new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10));
+      diag({ paso: "inicio", cola: queue.map((r) => ({ id: r.id, veh: r.veh && r.veh.id, sync: r._sync })), recientes: hoy.map((r) => ({ id: r.id, veh: r.veh && r.veh.id, sync: r._sync, estado: r._estado, rev: r.revNum })), total: state.records.length });
       for (const rec of queue) {
+        let paso = "fotos";
         try {
           if (rec._sync === "borrar") {
             const { error } = await sb.from("revisiones").update({ deleted: true }).eq("id", rec.id);
@@ -185,8 +190,10 @@
           }
           const src = rec._historica ? await mapPhotos(rec, (p) => recompress(p, 1600, 0.75)) : rec;
           const withRefs = await mapPhotos(src, (p) => uploadPhoto(rec.id, p, !rec._historica));
+          paso = "preparar";
           const payload = stripLocal(withRefs);
           delete payload.revNum;
+          paso = "guardar";
           const { data, error } = await conTiempo(sb.rpc("guardar_revision", {
             p_id: rec.id, p_veh: rec.veh.id, p_fecha: rec.date, p_data: payload,
             p_historica: !!rec._historica, p_revnum: rec.revNum != null ? rec.revNum : null,
@@ -201,6 +208,7 @@
         } catch (e) {
           Nube.error = (e && e.message) || String(e);
           console.warn("[revisiones] no se pudo subir", rec.id, e);
+          diag({ paso: "error", en: paso, id: rec.id, veh: rec.veh && rec.veh.id, msg: Nube.error, stack: String((e && e.stack) || "").slice(0, 800) });
         }
       }
       if (!state.records.some((r) => r._sync === "pendiente")) Nube.error = null;
