@@ -13703,7 +13703,10 @@ const base = {
       if (mismaReserva) {
         return {
           ...v,
-          workflowStatus: "DEVUELTO",
+          // Si ya avanzó tras la vuelta (REVISADO, EN_REPARACION, LISTO…), NO retroceder a
+          // DEVUELTO: el 720 sigue listando el alquiler hasta que la oficina cierra el contrato,
+          // y eso devolvía el vehículo a "Para inspeccionar" (AC-320, 14-oct-2026).
+          workflowStatus: v.workflowStatus && v.workflowStatus !== "EN_USO" ? v.workflowStatus : "DEVUELTO",
           rentalEndDate: "",
           arrivalConfirmed: !!v.arrivalConfirmed,
           returnedAt: v.returnedAt || null,
