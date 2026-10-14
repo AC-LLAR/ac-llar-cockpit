@@ -14297,6 +14297,8 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         onMarkFianzaAvisada: handleMarkFianzaAvisada,
         onToggleNeedsQuantification: handleToggleNeedsQuantification,
         onLeftUnreviewed: handleLeftUnreviewed,
+        // "Está en campa" = exactamente lo mismo que "VOLVIÓ" de la Agenda.
+        onConfirmArrival: handleMarkReturned,
         onGoToTab: setActiveTab,
         requestConfirm
       }
@@ -14347,6 +14349,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         onClearNextRental: handleClearNextRental,
         onToggleBaja: handleToggleBaja,
         onMantHecho: handleMantHecho,
+        onConfirmArrival: handleMarkReturned,
         onSetKm: handleSetKm,
         requestConfirm
       }
