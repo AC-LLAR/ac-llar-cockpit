@@ -64,6 +64,7 @@ window.addEventListener('load', function () {
     Filter: makeIcon([PG('22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3')]),
     Loader2: makeIcon([P('M21 12a9 9 0 1 1-6.219-8.56')]),
     CircleAlert: makeIcon([C(12,12,10), L(12,8,12,12), L(12,16,12.01,16)]),
+    Mic: makeIcon([P('M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z'), P('M19 10v2a7 7 0 0 1-14 0v-2'), L(12,19,12,22)]),
     Sparkles: makeIcon([P('m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z'), P('M5 3v4'), P('M19 17v4'), P('M3 5h4'), P('M17 19h4')]),
     ChevronDown: makeIcon([PL('6 9 12 15 18 9')]),
   };
@@ -105,6 +106,7 @@ window.addEventListener('load', function () {
     Filter,
     Loader2,
     CircleAlert,
+    Mic,
     Sparkles,
     ChevronDown
   } = window.lucideReact;
@@ -1772,6 +1774,7 @@ const inicioOT =
     { id: "deposits", label: "Fianzas", icon: Coins, ready: true },
     { id: "recambios", label: "Recambios", icon: Wrench, ready: true },
     { id: "buscador", label: "Buscador", icon: Search, ready: true },
+    { id: "voz", label: "Campa por voz", icon: Mic, ready: true },
     { id: "stats", label: "Estad\xEDsticas", icon: BarChart3, ready: true }
   ];
   // Franja de mantenimiento: muy visible, en todas las pestañas (Alquiler y Taller).
@@ -1944,6 +1947,212 @@ const inicioOT =
           })));
       }),
       grupos.length > 4 && h("div", { style: { marginTop: "6px" } }, h("button", { onClick: () => setTodos(!todos), style: { background: "none", border: "none", color: T.rust, fontWeight: 700, fontSize: "12.5px", cursor: "pointer", padding: 0 } }, todos ? "Ver menos" : `Ver las ${grupos.length} revisiones`)));
+  };
+  // ===== Campa por voz: dictar "AC 309 volvió" y registrar la ronda entera de una vez =====
+  const VOZ_NUM = { cero: 0, un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15,
+    dieciseis: 16, diecisiete: 17, dieciocho: 18, diecinueve: 19, veinte: 20, veintiuno: 21, veintiun: 21, veintidos: 22, veintitres: 23, veinticuatro: 24, veinticinco: 25, veintiseis: 26, veintisiete: 27, veintiocho: 28, veintinueve: 29,
+    treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90, cien: 100, ciento: 100, doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500,
+    seiscientos: 600, setecientos: 700, ochocientos: 800, novecientos: 900 };
+  const vozNorm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  // Convierte el texto dictado en tokens; las palabras-número se agrupan en una cifra
+  // ("trescientos nueve" → 309; "tres cero nueve" → 309, dicho cifra a cifra).
+  const vozTokens = (texto) => {
+    const raw = vozNorm(texto).replace(/(\d)([a-z])/g, "$1 $2").replace(/([a-z])(\d)/g, "$1 $2").replace(/[^a-z0-9ñ]+/g, " ").trim().split(/\s+/).filter(Boolean);
+    const out = [];
+    let run = [];
+    const flush = () => {
+      if (!run.length) return;
+      const vals = run.map((w) => VOZ_NUM[w]);
+      let n;
+      if (vals.length > 1 && vals.every((x) => x < 10)) n = Number(vals.join(""));
+      else {
+        n = 0; let grupo = 0;
+        for (const x of vals) {
+          if (x >= 100) { if (grupo) { n = n * 1000 + grupo; grupo = 0; } grupo = x; }
+          else if (x >= 10 && grupo % 100 >= 10) { n = Number(String(n || "") + String(grupo)); grupo = x; }
+          else if (x < 10 && grupo % 10 !== 0) { n = Number(String(n || "") + String(grupo)); grupo = x; }
+          else grupo += x;
+        }
+        n = n ? Number(String(n) + String(grupo)) : grupo;
+      }
+      out.push(String(n)); run = [];
+    };
+    for (let i = 0; i < raw.length; i++) {
+      const w = raw[i];
+      if (VOZ_NUM[w] !== undefined) { run.push(w); continue; }
+      if (w === "y" && run.length && VOZ_NUM[raw[i + 1]] !== undefined && VOZ_NUM[raw[i + 1]] < 10 && VOZ_NUM[run[run.length - 1]] >= 20 && VOZ_NUM[run[run.length - 1]] < 100) continue;
+      flush(); out.push(w);
+    }
+    flush();
+    // "3 0 9" (cifras sueltas seguidas) → "309"
+    const unido = [];
+    for (const t of out) {
+      const last = unido[unido.length - 1];
+      if (/^\d$/.test(t) && last && /^\d+$/.test(last.v) && last.solo) { last.v += t; continue; }
+      unido.push({ v: t, solo: /^\d$/.test(t) });
+    }
+    return unido.map((x) => x.v);
+  };
+  const vozNumDe = (id) => { const m = String(id || "").match(/^([A-Z]+)-?0*(\d+)/i); return m ? { pre: m[1].toUpperCase(), n: Number(m[2]) } : null; };
+  const vozDist1 = (a, b) => {
+    if (a === b) return true;
+    if (Math.abs(a.length - b.length) > 1) return false;
+    if (a.length === b.length) { let d = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++; return d <= 1; }
+    const [l, s] = a.length > b.length ? [a, b] : [b, a];
+    for (let i = 0; i < l.length; i++) if (l.slice(0, i) + l.slice(i + 1) === s) return true;
+    return false;
+  };
+  // Devuelve una entrada por cada número dictado: { dicho, id } si casa exacto, o { dicho, candidatos } si hay duda.
+  const vozInterpretar = (texto, vehicles) => {
+    const flota = (vehicles || []).filter((v) => !v.baja).map((v) => ({ v, k: vozNumDe(v.id) })).filter((x) => x.k);
+    const toks = vozTokens(texto);
+    const res = [];
+    for (let i = 0; i < toks.length; i++) {
+      if (!/^\d+$/.test(toks[i])) continue;
+      const num = toks[i];
+      if (num.length > 4 || Number(num) === 0) continue;
+      const prev = toks.slice(Math.max(0, i - 2), i).join(" ");
+      const pre = /\b(cb|c b|ce be|cebe|sebe|ce b|c be)$/.test(prev) ? "CB" : /\b(ac|a c|a ce|ace|hace|a se|ase)$/.test(prev) ? "AC" : null;
+      const n = Number(num);
+      let exact = flota.filter((x) => x.k.n === n && (!pre || x.k.pre === pre));
+      if (exact.length > 1 && !pre) exact = exact.filter((x) => x.k.pre === "AC").length ? exact.filter((x) => x.k.pre === "AC") : exact;
+      if (exact.length === 1) { res.push({ dicho: (pre || "") + " " + num, id: exact[0].v.id }); continue; }
+      const cands = flota.filter((x) => (!pre || x.k.pre === pre) && vozDist1(String(x.k.n), num)).map((x) => x.v.id).slice(0, 6);
+      res.push({ dicho: (pre || "") + " " + num, id: null, candidatos: cands });
+    }
+    return res;
+  };
+  const vozHablar = (t) => { try { if (!window.speechSynthesis) return; const u = new SpeechSynthesisUtterance(t); u.lang = "es-ES"; u.rate = 1.1; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch (e) {} };
+  const VOZ_LS = "acllar_voz_ronda";
+  const VozCampaView = ({ vehicles, onMarkReturned, onOpenVehicle }) => {
+    const h = React.createElement;
+    const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+    const [items, setItems] = React.useState(() => { try { return JSON.parse(localStorage.getItem(VOZ_LS) || "[]"); } catch (e) { return []; } });
+    const [escuchando, setEscuchando] = React.useState(false);
+    const [parcial, setParcial] = React.useState("");
+    const [err, setErr] = React.useState("");
+    const [manual, setManual] = React.useState("");
+    const [registrando, setRegistrando] = React.useState(false);
+    const [resumen, setResumen] = React.useState(null);
+    const [full, setFull] = React.useState(() => { try { return /^#voz/.test(window.location.hash); } catch (e) { return false; } });
+    const ponerFull = (on) => { setFull(on); try { if (on) window.location.hash = "voz"; else history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) {} };
+    React.useEffect(() => { if (full) { const d = document.documentElement, o = document.body.style.overflow, od = d.style.overflow; document.body.style.overflow = "hidden"; d.style.overflow = "hidden"; return () => { document.body.style.overflow = o; d.style.overflow = od; }; } }, [full]);
+    const recRef = React.useRef(null), onRef = React.useRef(false), itemsRef = React.useRef(items);
+    itemsRef.current = items;
+    React.useEffect(() => { try { localStorage.setItem(VOZ_LS, JSON.stringify(items)); } catch (e) {} }, [items]);
+    React.useEffect(() => () => { onRef.current = false; try { recRef.current && recRef.current.abort(); } catch (e) {} }, []);
+    const byId = React.useMemo(() => Object.fromEntries((vehicles || []).map((v) => [v.id, v])), [vehicles]);
+    const ahora = () => new Date().toISOString();
+    const anadir = (texto, origen) => {
+      const r = vozInterpretar(texto, vehicles);
+      if (!r.length) { if (origen === "voz") vozHablar("No he entendido el n\xFAmero"); return 0; }
+      const nuevos = [], dichos = [];
+      for (const x of r) {
+        if (x.id && itemsRef.current.some((it) => it.id === x.id)) { dichos.push(`${x.id.replace("-", " ")} ya estaba`); continue; }
+        nuevos.push({ key: Math.random().toString(36).slice(2), dicho: x.dicho.trim(), texto, id: x.id, candidatos: x.candidatos || [], at: ahora(), sel: true });
+        dichos.push(x.id ? x.id.replace("-", " ") : `${x.dicho.trim()}, revisar`);
+      }
+      if (nuevos.length) setItems((s) => [...s, ...nuevos]);
+      if (origen === "voz") vozHablar(dichos.join(". "));
+      return nuevos.length;
+    };
+    const arrancar = () => {
+      setErr(""); setResumen(null);
+      if (!SR) { setErr("Este navegador no permite dictado. En el m\xF3vil usa Chrome (Android) o Safari (iPhone)."); return; }
+      const rec = new SR();
+      rec.lang = "es-ES"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+      rec.onresult = (ev) => {
+        let interino = "";
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const t = ev.results[i][0].transcript;
+          if (ev.results[i].isFinal) anadir(t, "voz"); else interino += t;
+        }
+        setParcial(interino);
+      };
+      rec.onerror = (e) => {
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") { onRef.current = false; setEscuchando(false); setErr("No hay permiso para el micr\xF3fono. Perm\xEDtelo en el candado de la barra de direcciones."); }
+        else if (e.error === "network") setErr("Sin conexi\xF3n: el dictado necesita internet.");
+      };
+      rec.onend = () => { setParcial(""); if (onRef.current) { try { rec.start(); } catch (e) {} } else setEscuchando(false); };
+      recRef.current = rec; onRef.current = true;
+      try { rec.start(); setEscuchando(true); vozHablar("Te escucho"); } catch (e) { setErr(String(e.message || e)); }
+    };
+    const parar = () => { onRef.current = false; try { recRef.current && recRef.current.stop(); } catch (e) {} setEscuchando(false); };
+    const estadoDe = (it) => {
+      if (!it.id) return { tipo: "duda", txt: it.candidatos && it.candidatos.length ? "\xBFCu\xE1l es?" : "No existe en la flota" };
+      const v = byId[it.id];
+      if (!v) return { tipo: "duda", txt: "No existe en la flota" };
+      if (v.workflowStatus !== "EN_USO") return { tipo: "ya", txt: `Ya estaba en campa (${(WORKFLOW_STATES[v.workflowStatus] || {}).short || v.workflowStatus || "sin estado"})` };
+      const fin = v.rentalEndDate ? String(v.rentalEndDate).slice(0, 10) : null;
+      if (fin && fin > todayKey()) return { tipo: "ok", txt: `En uso \xB7 devoluci\xF3n prevista ${fmtFechaCorta(v.rentalEndDate)} (vuelve antes)` };
+      return { tipo: "ok", txt: "En uso → se marcar\xE1 VOLVI\xD3" + (v.currentClient ? ` \xB7 ${v.currentClient}` : "") };
+    };
+    const lista = items.map((it) => ({ it, e: estadoDe(it) }));
+    const aRegistrar = lista.filter((x) => x.e.tipo === "ok" && x.it.sel);
+    const registrar = async () => {
+      setRegistrando(true);
+      const hechos = [];
+      for (const { it } of aRegistrar) {
+        try { await onMarkReturned(it.id, it.at); hechos.push(it.id); } catch (e) { console.warn("[voz]", e); }
+      }
+      setRegistrando(false);
+      setResumen(hechos);
+      vozHablar(`${hechos.length} veh\xEDculo${hechos.length === 1 ? "" : "s"} registrado${hechos.length === 1 ? "" : "s"}`);
+      setItems((s) => s.filter((it) => !hechos.includes(it.id)));
+    };
+    const quitar = (key) => setItems((s) => s.filter((x) => x.key !== key));
+    const elegir = (key, id) => setItems((s) => s.some((x) => x.id === id) ? s.filter((x) => x.key !== key) : s.map((x) => x.key === key ? { ...x, id, candidatos: [] } : x));
+    const color = { ok: T.ok, ya: T.inkFaint, duda: T.warn };
+    const hora = (iso) => { try { return new Date(iso).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; } };
+    const contenido = h("div", { "data-voz-campa": "1", style: { maxWidth: "640px", margin: "0 auto", fontFamily: F.body } },
+      h("div", { style: { display: "flex", justifyContent: "flex-end" } },
+        full ? h("button", { "data-voz-salir": "1", onClick: () => ponerFull(false), style: { background: "none", border: `1px solid ${T.border}`, borderRadius: "10px", padding: "6px 12px", cursor: "pointer", color: T.inkSoft, fontSize: "13px" } }, "← Ir al cockpit")
+          : h("button", { "data-voz-full": "1", onClick: () => ponerFull(true), title: "Para el m\xF3vil: abre solo esta pantalla. Guarda el enlace como acceso directo.", style: { background: "none", border: `1px solid ${T.border}`, borderRadius: "10px", padding: "6px 12px", cursor: "pointer", color: T.inkSoft, fontSize: "13px" } }, "\u{1F4F1} Pantalla completa (m\xF3vil)")),
+      h("div", { style: { textAlign: "center", padding: "8px 0 18px" } },
+        h("h2", { style: { margin: "0 0 4px", fontFamily: F.display, fontSize: "24px", color: T.ink } }, "\u{1F399}️ Campa por voz"),
+        h("div", { style: { fontSize: "13px", color: T.inkSoft } }, "Pulsa el micr\xF3fono y ve diciendo: ", h("b", null, "“AC 309 volvi\xF3”"), ". Al terminar la ronda, revisa la lista y pulsa ", h("b", null, "Registrar todos"), ".")),
+      h("div", { style: { display: "flex", justifyContent: "center", marginBottom: "14px" } },
+        h("button", { "data-voz-mic": "1", onClick: escuchando ? parar : arrancar, "aria-pressed": escuchando,
+          style: { width: "128px", height: "128px", borderRadius: "50%", border: "none", cursor: "pointer", fontSize: "48px", color: "#fff",
+            background: escuchando ? "#B91C1C" : T.rust, boxShadow: escuchando ? "0 0 0 10px rgba(185,28,28,.18), 0 0 0 22px rgba(185,28,28,.08)" : "0 6px 18px rgba(0,0,0,.18)", transition: "all .2s" } },
+          escuchando ? "■" : "\u{1F399}️")),
+      h("div", { style: { textAlign: "center", minHeight: "22px", fontSize: "14px", color: escuchando ? "#B91C1C" : T.inkFaint, fontWeight: 700, marginBottom: "6px" } },
+        escuchando ? (parcial ? `“${parcial}”` : "Escuchando… (pulsa para parar)") : "Micr\xF3fono apagado"),
+      err && h("div", { style: { background: "#FEE2E2", color: "#991B1B", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", marginBottom: "12px" } }, err),
+      h("div", { style: { display: "flex", gap: "8px", marginBottom: "16px" } },
+        h("input", { "aria-label": "Escribir veh\xEDculo", value: manual, onChange: (e) => setManual(e.target.value), placeholder: "o escribe: 309, CB 3…", inputMode: "text",
+          onKeyDown: (e) => { if (e.key === "Enter" && manual.trim()) { anadir(manual, "texto"); setManual(""); } },
+          style: { flex: 1, padding: "10px 12px", border: `1px solid ${T.border}`, borderRadius: "10px", fontSize: "15px", background: T.surface, color: T.ink } }),
+        h(Btn, { variant: "secondary", disabled: !manual.trim(), onClick: () => { anadir(manual, "texto"); setManual(""); } }, "A\xF1adir")),
+      resumen && h("div", { "data-voz-resumen": "1", style: { background: "#D7EFDA", color: "#1F5E2A", borderRadius: "10px", padding: "10px 12px", fontSize: "13.5px", fontWeight: 700, marginBottom: "12px" } },
+        `✔ ${resumen.length} registrado${resumen.length === 1 ? "" : "s"} como VOLVI\xD3: ${resumen.join(", ") || "ninguno"}`),
+      h("div", { style: { display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "6px" } },
+        h("span", { style: { fontWeight: 800, color: T.ink, fontSize: "15px" } }, "Ronda"),
+        h("span", { style: { fontSize: "12.5px", color: T.inkSoft } }, `${items.length} dicho${items.length === 1 ? "" : "s"} \xB7 ${aRegistrar.length} a registrar`),
+        h("div", { style: { flex: 1 } }),
+        items.length > 0 && h("button", { onClick: () => setItems([]), style: { background: "none", border: "none", color: T.inkSoft, fontSize: "12px", cursor: "pointer", textDecoration: "underline" } }, "Vaciar")),
+      items.length === 0 ? h("div", { style: { textAlign: "center", padding: "26px", border: `1px dashed ${T.border}`, borderRadius: "12px", color: T.inkFaint, fontSize: "13px" } }, "Todav\xEDa no has dictado ning\xFAn veh\xEDculo.")
+        : h("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } }, lista.slice().reverse().map(({ it, e }) => h("div", { key: it.key, "data-voz-item": it.id || "?",
+            style: { display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: T.surface, border: `1px solid ${T.border}`, borderLeft: `4px solid ${color[e.tipo]}`, borderRadius: "10px", opacity: e.tipo === "ya" ? 0.7 : 1 } },
+            e.tipo === "ok" ? h("input", { type: "checkbox", checked: !!it.sel, "aria-label": "Registrar " + it.id, onChange: (ev) => setItems((s) => s.map((x) => x.key === it.key ? { ...x, sel: ev.target.checked } : x)), style: { width: "20px", height: "20px" } }) : h("span", { style: { width: "20px", textAlign: "center" } }, e.tipo === "ya" ? "–" : "?"),
+            h("div", { style: { flex: 1, minWidth: 0 } },
+              h("div", { style: { display: "flex", gap: "8px", alignItems: "baseline", flexWrap: "wrap" } },
+                it.id ? h("button", { onClick: () => onOpenVehicle && onOpenVehicle(it.id), style: { background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: F.mono, fontWeight: 800, fontSize: "16px", color: T.ink } }, it.id)
+                  : h("span", { style: { fontFamily: F.mono, fontWeight: 800, fontSize: "16px", color: T.warn } }, it.dicho || "?"),
+                h("span", { style: { fontSize: "11px", color: T.inkFaint } }, hora(it.at), " \xB7 o\xEDdo: “", String(it.texto || "").trim().slice(0, 40), "”")),
+              h("div", { style: { fontSize: "12.5px", color: color[e.tipo], fontWeight: 600 } }, e.txt),
+              !it.id && it.candidatos && it.candidatos.length > 0 && h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "6px" } },
+                it.candidatos.map((c) => h("button", { key: c, onClick: () => elegir(it.key, c), style: { cursor: "pointer", border: `1px solid ${T.border}`, background: T.bg, borderRadius: "8px", padding: "4px 10px", fontFamily: F.mono, fontWeight: 700, fontSize: "13px", color: T.ink } }, c)))),
+            h("button", { onClick: () => quitar(it.key), title: "Quitar de la lista", style: { background: "none", border: "none", cursor: "pointer", color: T.inkFaint, fontSize: "20px", lineHeight: 1 } }, "\xD7")))),
+      h("div", { style: { position: "sticky", bottom: "12px", marginTop: "16px" } },
+        h("button", { "data-voz-registrar": "1", disabled: !aRegistrar.length || registrando, onClick: registrar,
+          style: { width: "100%", padding: "16px", borderRadius: "14px", border: "none", cursor: aRegistrar.length ? "pointer" : "default", fontSize: "16px", fontWeight: 800,
+            background: aRegistrar.length ? T.ok : T.border, color: aRegistrar.length ? "#fff" : T.inkFaint, boxShadow: aRegistrar.length ? "0 6px 18px rgba(0,0,0,.18)" : "none" } },
+          registrando ? "Registrando…" : `✔ Registrar todos (${aRegistrar.length}) como VOLVI\xD3`)),
+      h("div", { style: { fontSize: "11.5px", color: T.inkFaint, textAlign: "center", marginTop: "10px", lineHeight: 1.5 } },
+        "Cada registro equivale a pulsar VOLVI\xD3 a la hora en que lo dictaste. Los que ya estaban en campa no se tocan. La lista se guarda en este m\xF3vil hasta que registres."));
+    if (!full) return contenido;
+    return h("div", { "data-voz-pantalla": "1", style: { position: "fixed", inset: 0, zIndex: 2000, background: T.bg, overflowY: "auto", padding: "16px 16px 24px", boxSizing: "border-box" } }, contenido);
   };
   const GRUPOS = [{ id: "alquiler", label: "Alquiler" }, { id: "taller", label: "Taller" }];
   const GroupBar = ({ grupo, onChange }) => React.createElement("div", { style: { background: T.bg, padding: "0 28px" } },
@@ -11543,7 +11752,7 @@ const parseOTDateTime = (value) => {
         document.documentElement.style.colorScheme = theme === "dark" ? "dark" : "light";
       } catch { }
     }, [theme]);
-const [activeTab, setActiveTab] = useState("today");
+const [activeTab, setActiveTab] = useState(() => { try { return /^#voz/.test(window.location.hash) ? "voz" : "today"; } catch (e) { return "today"; } });
     const [grupo, setGrupoState] = useState(() => { try { return localStorage.getItem("acllar_grupo") === "taller" ? "taller" : "alquiler"; } catch (e) { return "alquiler"; } });
     const setGrupo = (g) => { setGrupoState(g); try { localStorage.setItem("acllar_grupo", g); } catch (e) {} };
 const [detailOrigin, setDetailOrigin] = useState("fleet");    
@@ -14020,8 +14229,9 @@ const base = {
     };
   });
 };
-    const handleMarkReturned = async (vehicleId) => {
-      const at = nowIso();
+    const handleMarkReturned = async (vehicleId, atDictado) => {
+      // atDictado: hora real en que se dictó en "Campa por voz" (si no, ahora).
+      const at = typeof atDictado === "string" && /^\d{4}-\d{2}-\d{2}T/.test(atDictado) ? atDictado : nowIso();
       const hqRes = await findHqReservaActual(vehicleId);
       setState((s) => {
         const prevLog = Array.isArray(s.arrivalLog) ? s.arrivalLog : [];
@@ -14603,7 +14813,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
           onMarkOrdered: handleMarkOrdered
         }
       )
-    ), activeTab === "buscador" && /* @__PURE__ */ React.createElement(BuscadorView, { state: filteredState, onSelectVehicle: (id) => { setSelectedVehicleId(id); setView("detail"); setActiveTab("fleet"); } }), activeTab === "stats" && /* @__PURE__ */ React.createElement(StatsView, { state: filteredState, activeTab, quantHistorySnapshot })), /* @__PURE__ */ React.createElement(
+    ), activeTab === "buscador" && /* @__PURE__ */ React.createElement(BuscadorView, { state: filteredState, onSelectVehicle: (id) => { setSelectedVehicleId(id); setView("detail"); setActiveTab("fleet"); } }), activeTab === "voz" && React.createElement(VozCampaView, { vehicles: state.vehicles, onMarkReturned: handleMarkReturned, onOpenVehicle: (id) => { setSelectedVehicleId(id); setView("detail"); setActiveTab("fleet"); } }), activeTab === "stats" && /* @__PURE__ */ React.createElement(StatsView, { state: filteredState, activeTab, quantHistorySnapshot })), /* @__PURE__ */ React.createElement(
       VehicleModal,
       {
         open: !!vehicleModal,
