@@ -372,6 +372,13 @@ window.addEventListener('load', function () {
     }
     return best || (v && v.nextRentalDate) || null;
   };
+  // Próxima salida según el 704 (reserva confirmada con salida de hoy en adelante; no la que ya está en alquiler).
+  const proximaSalida704 = (v) => {
+    const hoy = todayKey();
+    return ((v && v.reservas) || []).filter((r) => r && r.salida && String(r.salida).slice(0, 10) >= hoy && !/alquiler/i.test(r.estatus || ""))
+      .sort((a, b) => String(a.salida).localeCompare(String(b.salida)))[0] || null;
+  };
+  const fmtFechaCorta = (iso) => { try { return new Date(iso).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }); } catch (e) { return ""; } };
   // Reserva que acaba de terminar: reservaHistory[0] (ordenado por devolución desc).
   // Fallback: reserva de v.reservas con devolución ya pasada más reciente.
   const reviewEndedReserva = (v) => {
@@ -2928,6 +2935,8 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
     const [ordenDanos, setOrdenDanos] = useState(() => { try { return localStorage.getItem("acllar_orden_danos") || "gravedad"; } catch (e) { return "gravedad"; } });
     const cambiarOrden = (o) => { setOrdenDanos(o); try { localStorage.setItem("acllar_orden_danos", o); } catch (e) {} };
     const [activoId, setActivoId] = useState(null);
+    const sal704 = proximaSalida704(vehicle);
+    const dias704 = sal704 ? daysBetween(todayKey(), String(sal704.salida).slice(0, 10)) : null;
     const verDano = (id) => {
       setFilterCargo("todos"); setFilterRepair("todos"); setFilterGravedad("todas"); setActivoId(id);
       setTimeout(() => { const el = document.querySelector(`[data-dano-id="${id}"]`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);
@@ -3057,7 +3066,9 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
       gap: "14px 22px"
-    } }, /* @__PURE__ */ React.createElement(DetailField, { label: "Matr\xEDcula", value: vehicle.plate || /* @__PURE__ */ React.createElement("em", { style: { color: T.warn } }, "provisional"), mono: !!vehicle.plate }), /* @__PURE__ */ React.createElement(DetailField, { label: "Bastidor", value: vehicle.vin ? /* @__PURE__ */ React.createElement(VinCopy, { vin: vehicle.vin }) : "\u2014", small: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "Ubicaci\xF3n", value: vehicle.location ? /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "4px", color: locTheme?.color } }, /* @__PURE__ */ React.createElement(MapPin, { size: 11 }), " ", vehicle.location) : "\u2014" }), /* @__PURE__ */ React.createElement(DetailField, { label: "Pr\xF3xima salida", value: vehicle.nextRentalDate ? /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "8px" } }, /* @__PURE__ */ React.createElement("span", null, formatDate(vehicle.nextRentalDate), days !== null && days >= 0 && days <= 7 && /* @__PURE__ */ React.createElement("span", { style: { color: days <= 3 ? T.rust : T.warn, marginLeft: "5px", fontSize: "11px", fontWeight: 600 } }, "(", days === 0 ? "hoy" : days === 1 ? "ma\xF1ana" : `${days}d`, ")")), onClearNextRental && /* @__PURE__ */ React.createElement(
+    } }, /* @__PURE__ */ React.createElement(DetailField, { label: "Matr\xEDcula", value: vehicle.plate || /* @__PURE__ */ React.createElement("em", { style: { color: T.warn } }, "provisional"), mono: !!vehicle.plate }), /* @__PURE__ */ React.createElement(DetailField, { label: "Bastidor", value: vehicle.vin ? /* @__PURE__ */ React.createElement(VinCopy, { vin: vehicle.vin }) : "\u2014", small: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "Ubicaci\xF3n", value: vehicle.location ? /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "4px", color: locTheme?.color } }, /* @__PURE__ */ React.createElement(MapPin, { size: 11 }), " ", vehicle.location) : "\u2014" }), /* @__PURE__ */ React.createElement(DetailField, { label: "Pr\xF3xima salida", value: sal704 ? React.createElement("span", { "data-salida-704": "1", style: { display: "inline-flex", flexDirection: "column", gap: "2px" } },
+      React.createElement("span", null, formatDate(sal704.salida), dias704 !== null && dias704 >= 0 && dias704 <= 7 && React.createElement("span", { style: { color: dias704 <= 3 ? T.rust : T.warn, marginLeft: "5px", fontSize: "11px", fontWeight: 600 } }, "(", dias704 === 0 ? "hoy" : dias704 === 1 ? "ma\xF1ana" : `${dias704}d`, ")")),
+      React.createElement("span", { style: { fontSize: "10px", color: T.inkFaint } }, "seg\xFAn HQ 704", sal704.sede ? " \xB7 " + sal704.sede : "", sal704.cliente ? " \xB7 " + sal704.cliente : "")) : vehicle.nextRentalDate ? /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "8px" } }, /* @__PURE__ */ React.createElement("span", null, formatDate(vehicle.nextRentalDate), days !== null && days >= 0 && days <= 7 && /* @__PURE__ */ React.createElement("span", { style: { color: days <= 3 ? T.rust : T.warn, marginLeft: "5px", fontSize: "11px", fontWeight: 600 } }, "(", days === 0 ? "hoy" : days === 1 ? "ma\xF1ana" : `${days}d`, ")")), onClearNextRental && /* @__PURE__ */ React.createElement(
       "button",
       {
         onClick: () => onClearNextRental(vehicle.id),
@@ -3084,9 +3095,9 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       boxShadow: "0 1px 3px rgba(168,53,15,0.10)"
     } },
       /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "6px", marginBottom: "7px", fontSize: "11px", fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: T.rust } }, /* @__PURE__ */ React.createElement(FileText, { size: 13 }), "Notas"),
-      vehicle.otNotes && /* @__PURE__ */ React.createElement("div", { style: { fontSize: "14px", color: T.ink, lineHeight: 1.5, whiteSpace: "pre-wrap", fontWeight: 500 } }, vehicle.otNotes && vehicle.notes ? /* @__PURE__ */ React.createElement("span", { style: { display: "block", fontSize: "10px", fontWeight: 700, color: T.inkFaint, letterSpacing: "0.05em", marginBottom: "2px" } }, "DE LA OT") : null, vehicle.otNotes),
+      vehicle.otNotes && /* @__PURE__ */ React.createElement("div", { style: { fontSize: "14px", color: T.ink, lineHeight: 1.5, whiteSpace: "pre-wrap", fontWeight: 500 } }, (vehicle.otNotes && vehicle.notes) || vehicle.otNotesAt ? /* @__PURE__ */ React.createElement("span", { style: { display: "block", fontSize: "10px", fontWeight: 700, color: T.inkFaint, letterSpacing: "0.05em", marginBottom: "2px" } }, vehicle.notes ? "DE LA OT" : "", vehicle.otNotesAt ? React.createElement("span", { "data-nota-fecha": "ot", style: { fontWeight: 600, fontFamily: F.mono, marginLeft: vehicle.notes ? "6px" : 0 } }, fmtFechaCorta(vehicle.otNotesAt)) : null) : null, vehicle.otNotes),
       vehicle.otNotes && vehicle.notes && /* @__PURE__ */ React.createElement("div", { style: { height: "1px", background: "#E8C36B", opacity: 0.55, margin: "9px 0" } }),
-      vehicle.notes && /* @__PURE__ */ React.createElement("div", { style: { fontSize: "13.5px", color: T.inkSoft, lineHeight: 1.5, whiteSpace: "pre-wrap", fontStyle: "italic" } }, vehicle.otNotes ? /* @__PURE__ */ React.createElement("span", { style: { display: "block", fontStyle: "normal", fontSize: "10px", fontWeight: 700, color: T.inkFaint, letterSpacing: "0.05em", marginBottom: "2px" } }, "MANUAL") : null, vehicle.notes)
+      vehicle.notes && /* @__PURE__ */ React.createElement("div", { style: { fontSize: "13.5px", color: T.inkSoft, lineHeight: 1.5, whiteSpace: "pre-wrap", fontStyle: "italic" } }, vehicle.otNotes || vehicle.notesAt ? /* @__PURE__ */ React.createElement("span", { style: { display: "block", fontStyle: "normal", fontSize: "10px", fontWeight: 700, color: T.inkFaint, letterSpacing: "0.05em", marginBottom: "2px" } }, vehicle.otNotes ? "MANUAL" : "", vehicle.notesAt ? React.createElement("span", { "data-nota-fecha": "manual", style: { fontWeight: 600, fontFamily: F.mono, marginLeft: vehicle.otNotes ? "6px" : 0 } }, fmtFechaCorta(vehicle.notesAt), vehicle.notesPor ? " \xB7 " + String(vehicle.notesPor).split("@")[0] : "") : null) : null, vehicle.notes)
     ), isForcedReady(vehicle, damages) && /* @__PURE__ */ React.createElement("div", { style: {
       marginTop: "14px",
       padding: "10px 14px",
@@ -11770,6 +11781,11 @@ const [globalSede, setGlobalSede] = useState([]);
     };
     const handleSaveVehicle = async (data) => {
       const synced = { ...data };
+      {
+        const prevV = state.vehicles.find((v) => v.id === data.id);
+        const nuevo = String(data.notes || "").trim(), viejo = String((prevV && prevV.notes) || "").trim();
+        if (nuevo !== viejo) { synced.notesAt = nuevo ? nowIso() : null; synced.notesPor = nuevo ? quienSoy() : null; }
+      }
       if (data.rentalDays !== void 0 && data.rentalDays !== "") {
         const n = parseInt(data.rentalDays, 10);
         if (!isNaN(n)) synced.rentalDays = n;
@@ -13414,7 +13430,7 @@ const scanResWatchFolder = async (handle) => {
             lastReturnHasNewDamages: (newQuantByVehicle[v.id] || 0) > 0,
             // Notas leídas de la OT: se guardan aparte de las notas manuales, y solo
             // se actualizan cuando esta OT trae nota (no se borran en re-importaciones sin nota).
-            ...(_otNota ? { otNotes: _otNota } : {}),
+            ...(_otNota ? { otNotes: _otNota, ...(_otNota !== String(v.otNotes || "").trim() || !v.otNotesAt ? { otNotesAt: nowIso() } : {}) } : {}),
             // If no new damages this round, clear any pending Rosana-aviso flag
             ...(newQuantByVehicle[v.id] || 0) === 0 ? { fianzaAvisoEnviado: false } : {}
           };
