@@ -2023,6 +2023,102 @@ const inicioOT =
     return res;
   };
   const vozHablar = (t) => { try { if (!window.speechSynthesis) return; const u = new SpeechSynthesisUtterance(t); u.lang = "es-ES"; u.rate = 1.1; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch (e) {} };
+  // ---- Diccionario personal: "cómo te entiende el móvil" → vehículo real (se guarda en la nube por usuario) ----
+  const VOZ_RELLENO = new Set(["volvio", "volvi", "vuelve", "volvieron", "ha", "ya", "esta", "en", "campa", "el", "la", "los", "de", "y", "ok", "vale", "venga", "listo"]);
+  const vozCore = (t) => vozTokens(t).filter((w) => !VOZ_RELLENO.has(w)).join(" ");
+  const vozDiccKey = () => { try { const u = window.acllarCloud && window.acllarCloud.usuario && window.acllarCloud.usuario(); return "voz_dicc_" + String(u || "local").toLowerCase(); } catch (e) { return "voz_dicc_local"; } };
+  // Elige, entre las interpretaciones del móvil, la que corresponde a vehículos reales.
+  const vozResolver = (alts, vehicles, dicc) => {
+    const ids = new Set((vehicles || []).filter((v) => !v.baja).map((v) => v.id));
+    const map = (dicc && dicc.map) || {};
+    for (const a of alts) { const e = map[vozCore(a)]; if (e && ids.has(e.id)) return { res: [{ dicho: a, id: e.id, aprendido: true }], texto: a }; }
+    for (const a of alts) { const r = vozInterpretar(a, vehicles); if (r.length && r.every((x) => x.id)) return { res: r, texto: a }; }
+    return { res: vozInterpretar(alts[0] || "", vehicles), texto: alts[0] || "" };
+  };
+  const VozCalibracion = ({ vehicles, dicc, onAprender, onBorrar, SR }) => {
+    const h = React.createElement;
+    const [abierto, setAbierto] = React.useState(false);
+    const [activo, setActivo] = React.useState(false);
+    const [objetivo, setObjetivo] = React.useState(null);
+    const [escucha, setEscucha] = React.useState(false);
+    const [intentos, setIntentos] = React.useState([]);
+    const [verDicc, setVerDicc] = React.useState(false);
+    const recRef = React.useRef(null), usados = React.useRef(new Set()), diccRef = React.useRef(dicc);
+    diccRef.current = dicc;
+    React.useEffect(() => () => { try { recRef.current && recRef.current.abort(); } catch (e) {} }, []);
+    const flota = (vehicles || []).filter((v) => !v.baja && vozNumDe(v.id));
+    const siguiente = () => {
+      let pool = flota.filter((v) => !usados.current.has(v.id));
+      if (!pool.length) { usados.current = new Set(); pool = flota; }
+      const v = pool[Math.floor(Math.random() * pool.length)];
+      usados.current.add(v.id); setObjetivo(v.id);
+      return v.id;
+    };
+    const escuchar = (obj) => {
+      if (!SR) return;
+      const rec = new SR();
+      rec.lang = "es-ES"; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 5;
+      rec.onresult = (ev) => {
+        const alts = Array.from(ev.results[0] || []).map((a) => a.transcript).filter(Boolean);
+        const r0 = vozInterpretar(alts[0] || "", vehicles);
+        const directo = r0.length === 1 && r0[0].id === obj;
+        const conSistema = (() => { const r = vozResolver(alts, vehicles, diccRef.current).res; return r.length === 1 && r[0].id === obj; })();
+        const otro = r0.length === 1 && r0[0].id && r0[0].id !== obj ? r0[0].id : null;
+        let aprendido = false;
+        // Aprende la forma en que te entendió, salvo que coincida con OTRO vehículo real (sería peligroso).
+        if (!directo && !otro) { const c = vozCore(alts[0] || ""); if (c && /\d/.test(c)) { onAprender(c, obj, "calibracion"); aprendido = true; } }
+        setIntentos((s) => [...s, { obj, oido: alts[0] || "", alts, directo, conSistema: conSistema || aprendido, otro, aprendido }]);
+        vozHablar(directo || conSistema ? "Bien" : otro ? "Me pareci\xF3 " + otro.replace("-", " ") : "Aprendido");
+        setTimeout(() => { const n = siguiente(); setTimeout(() => escuchar(n), 900); }, 700);
+      };
+      rec.onerror = (e) => { setEscucha(false); if (e.error === "no-speech") { setTimeout(() => escuchar(obj), 300); } };
+      rec.onend = () => setEscucha(false);
+      recRef.current = rec;
+      try { rec.start(); setEscucha(true); } catch (e) {}
+    };
+    const empezar = () => { setIntentos([]); usados.current = new Set(); setActivo(true); const n = siguiente(); vozHablar("Di el veh\xEDculo que aparece en pantalla"); setTimeout(() => escuchar(n), 1800); };
+    const terminar = () => { setActivo(false); setObjetivo(null); try { recRef.current && recRef.current.abort(); } catch (e) {} setEscucha(false); };
+    const saltar = () => { try { recRef.current && recRef.current.abort(); } catch (e) {} const n = siguiente(); setTimeout(() => escuchar(n), 400); };
+    const N = intentos.length, dir = intentos.filter((x) => x.directo).length, sis = intentos.filter((x) => x.conSistema).length;
+    const conf = intentos.filter((x) => x.otro);
+    const entradas = Object.entries((dicc && dicc.map) || {}).sort((a, b) => String(b[1].at || "").localeCompare(String(a[1].at || "")));
+    const card = { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px 14px", marginTop: "18px" };
+    return h("div", { "data-voz-calibracion": "1", style: card },
+      h("div", { style: { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }, onClick: () => setAbierto(!abierto) },
+        h("span", { style: { fontWeight: 800, color: T.ink, fontSize: "14.5px" } }, "\u{1F3AF} Entrenar mi voz"),
+        h("span", { style: { fontSize: "12px", color: T.inkSoft } }, `${entradas.length} correcci\xF3n${entradas.length === 1 ? "" : "es"} aprendida${entradas.length === 1 ? "" : "s"}`),
+        h("div", { style: { flex: 1 } }),
+        h("span", { style: { fontSize: "12.5px", fontWeight: 700, color: T.rust } }, abierto ? "Ocultar" : "Abrir")),
+      abierto && h("div", { style: { marginTop: "10px" } },
+        !activo && h("div", { style: { fontSize: "12.5px", color: T.inkSoft, lineHeight: 1.5, marginBottom: "10px" } },
+          "Te ir\xE9 mostrando veh\xEDculos de la flota. D\xEDlos como en la campa (“AC 314 volvi\xF3”). Cuando el m\xF3vil te entienda mal, apunto c\xF3mo te entendi\xF3 para corregirlo la pr\xF3xima vez. No se guarda tu voz, solo el texto. Con 20–30 basta."),
+        !activo ? h(Btn, { variant: "primary", onClick: empezar, disabled: !SR }, N ? "Otra ronda de calibraci\xF3n" : "Empezar calibraci\xF3n")
+          : h("div", { style: { textAlign: "center" } },
+              h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Di:"),
+              h("div", { "data-voz-objetivo": objetivo || "", style: { fontFamily: F.mono, fontWeight: 800, fontSize: "40px", color: T.ink, margin: "2px 0 6px" } }, objetivo ? objetivo.replace("-", " ") : "…"),
+              h("div", { style: { fontSize: "13px", fontWeight: 700, color: escucha ? "#B91C1C" : T.inkFaint, minHeight: "20px" } }, escucha ? "\u{1F534} Escuchando…" : "…"),
+              h("div", { style: { display: "flex", gap: "8px", justifyContent: "center", marginTop: "8px" } },
+                h(Btn, { variant: "secondary", sm: true, onClick: saltar }, "Saltar"),
+                h(Btn, { variant: "primary", sm: true, onClick: terminar }, "Terminar"))),
+        N > 0 && h("div", { "data-voz-cal-resultado": "1", style: { marginTop: "12px", fontSize: "13px", color: T.ink, lineHeight: 1.6 } },
+          h("div", null, "Entendido a la primera por el m\xF3vil: ", h("b", null, `${dir}/${N} (${Math.round(dir * 100 / N)}%)`)),
+          h("div", null, "Con alternativas y tu diccionario: ", h("b", { style: { color: T.ok } }, `${sis}/${N} (${Math.round(sis * 100 / N)}%)`)),
+          conf.length > 0 && h("div", { style: { color: T.warn, fontSize: "12.5px", marginTop: "4px" } }, "Confundidos con otro veh\xEDculo real (no se puede aprender, ojo con estos): ",
+            conf.map((x) => `${x.obj} → ${x.otro}`).join(" \xB7 ")),
+          h("div", { style: { maxHeight: "160px", overflowY: "auto", marginTop: "6px", borderTop: `1px solid ${T.border}` } },
+            intentos.slice().reverse().map((x, i) => h("div", { key: i, style: { fontSize: "12px", padding: "3px 0", color: x.directo ? T.ok : x.otro ? T.warn : T.inkSoft } },
+              x.directo ? "✔ " : x.otro ? "⚠ " : "✎ ", h("b", { style: { fontFamily: F.mono } }, x.obj), " — o\xEDdo: “", x.oido, "”", x.aprendido ? " (aprendido)" : "")))),
+        h("div", { style: { marginTop: "10px" } },
+          h("button", { onClick: () => setVerDicc(!verDicc), style: { background: "none", border: "none", padding: 0, cursor: "pointer", color: T.rust, fontWeight: 700, fontSize: "12.5px", textDecoration: "underline" } }, verDicc ? "Ocultar mi diccionario" : `Ver mi diccionario (${entradas.length})`),
+          verDicc && h("div", { "data-voz-dicc": "1", style: { marginTop: "6px" } },
+            entradas.length === 0 ? h("div", { style: { fontSize: "12px", color: T.inkFaint } }, "Vac\xEDo.")
+              : entradas.map(([k, e]) => h("div", { key: k, style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "12.5px", padding: "3px 0", borderTop: `1px solid ${T.border}` } },
+                  h("span", { style: { color: T.inkSoft, flex: 1 } }, "“", k, "”"),
+                  h("span", null, "→"),
+                  h("b", { style: { fontFamily: F.mono } }, e.id),
+                  h("span", { style: { fontSize: "11px", color: T.inkFaint } }, e.src === "uso" ? "uso" : "calib.", e.n > 1 ? ` \xD7${e.n}` : ""),
+                  h("button", { onClick: () => onBorrar(k), title: "Borrar", style: { background: "none", border: "none", cursor: "pointer", color: T.inkFaint, fontSize: "16px" } }, "\xD7")))))));
+  };
   const VOZ_LS = "acllar_voz_ronda";
   const VozCampaView = ({ vehicles, onMarkReturned, onOpenVehicle }) => {
     const h = React.createElement;
@@ -2039,17 +2135,24 @@ const inicioOT =
     React.useEffect(() => { if (full) { const d = document.documentElement, o = document.body.style.overflow, od = d.style.overflow; document.body.style.overflow = "hidden"; d.style.overflow = "hidden"; return () => { document.body.style.overflow = o; d.style.overflow = od; }; } }, [full]);
     const recRef = React.useRef(null), onRef = React.useRef(false), itemsRef = React.useRef(items);
     itemsRef.current = items;
+    const [dicc, setDicc] = React.useState({ map: {} });
+    const diccRef = React.useRef(dicc); diccRef.current = dicc;
+    React.useEffect(() => { let vivo = true; (async () => { try { const r = await window.storage.get(vozDiccKey()); if (vivo && r && r.value) setDicc(JSON.parse(r.value)); } catch (e) {} })(); return () => { vivo = false; }; }, []);
+    const guardarDicc = (fn) => setDicc((d) => { const nd = fn(d || { map: {} }); try { window.storage.set(vozDiccKey(), JSON.stringify(nd)); } catch (e) {} return nd; });
+    const aprender = (core, id, src) => { if (!core || !id || !/\d/.test(core)) return; guardarDicc((d) => { const prev = d.map[core]; return { ...d, map: { ...d.map, [core]: { id, src, n: prev && prev.id === id ? (prev.n || 1) + 1 : 1, at: new Date().toISOString() } } }; }); };
+    const olvidar = (core) => guardarDicc((d) => { const m = { ...d.map }; delete m[core]; return { ...d, map: m }; });
     React.useEffect(() => { try { localStorage.setItem(VOZ_LS, JSON.stringify(items)); } catch (e) {} }, [items]);
     React.useEffect(() => () => { onRef.current = false; try { recRef.current && recRef.current.abort(); } catch (e) {} }, []);
     const byId = React.useMemo(() => Object.fromEntries((vehicles || []).map((v) => [v.id, v])), [vehicles]);
     const ahora = () => new Date().toISOString();
-    const anadir = (texto, origen) => {
-      const r = vozInterpretar(texto, vehicles);
+    const anadir = (entrada, origen) => {
+      const alts = Array.isArray(entrada) ? entrada : [entrada];
+      const { res: r, texto } = vozResolver(alts, vehicles, diccRef.current);
       if (!r.length) { if (origen === "voz") vozHablar("No he entendido el n\xFAmero"); return 0; }
       const nuevos = [], dichos = [];
       for (const x of r) {
         if (x.id && itemsRef.current.some((it) => it.id === x.id)) { dichos.push(`${x.id.replace("-", " ")} ya estaba`); continue; }
-        nuevos.push({ key: Math.random().toString(36).slice(2), dicho: x.dicho.trim(), texto, id: x.id, candidatos: x.candidatos || [], at: ahora(), sel: true });
+        nuevos.push({ key: Math.random().toString(36).slice(2), dicho: x.dicho.trim(), texto, id: x.id, candidatos: x.candidatos || [], at: ahora(), sel: true, unico: r.length === 1, aprendido: !!x.aprendido });
         dichos.push(x.id ? x.id.replace("-", " ") : `${x.dicho.trim()}, revisar`);
       }
       if (nuevos.length) setItems((s) => [...s, ...nuevos]);
@@ -2060,12 +2163,12 @@ const inicioOT =
       setErr(""); setResumen(null);
       if (!SR) { setErr("Este navegador no permite dictado. En el m\xF3vil usa Chrome (Android) o Safari (iPhone)."); return; }
       const rec = new SR();
-      rec.lang = "es-ES"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+      rec.lang = "es-ES"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 5;
       rec.onresult = (ev) => {
         let interino = "";
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
           const t = ev.results[i][0].transcript;
-          if (ev.results[i].isFinal) anadir(t, "voz"); else interino += t;
+          if (ev.results[i].isFinal) anadir(Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean), "voz"); else interino += t;
         }
         setParcial(interino);
       };
@@ -2101,7 +2204,11 @@ const inicioOT =
       setItems((s) => s.filter((it) => !hechos.includes(it.id)));
     };
     const quitar = (key) => setItems((s) => s.filter((x) => x.key !== key));
-    const elegir = (key, id) => setItems((s) => s.some((x) => x.id === id) ? s.filter((x) => x.key !== key) : s.map((x) => x.key === key ? { ...x, id, candidatos: [] } : x));
+    const elegir = (key, id) => {
+      const it = itemsRef.current.find((x) => x.key === key);
+      if (it && it.unico && it.texto) aprender(vozCore(it.texto), id, "uso");
+      setItems((s) => s.some((x) => x.id === id) ? s.filter((x) => x.key !== key) : s.map((x) => x.key === key ? { ...x, id, candidatos: [] } : x));
+    };
     const color = { ok: T.ok, ya: T.inkFaint, duda: T.warn };
     const hora = (iso) => { try { return new Date(iso).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; } };
     const contenido = h("div", { "data-voz-campa": "1", style: { maxWidth: "640px", margin: "0 auto", fontFamily: F.body } },
@@ -2139,7 +2246,7 @@ const inicioOT =
               h("div", { style: { display: "flex", gap: "8px", alignItems: "baseline", flexWrap: "wrap" } },
                 it.id ? h("button", { onClick: () => onOpenVehicle && onOpenVehicle(it.id), style: { background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: F.mono, fontWeight: 800, fontSize: "16px", color: T.ink } }, it.id)
                   : h("span", { style: { fontFamily: F.mono, fontWeight: 800, fontSize: "16px", color: T.warn } }, it.dicho || "?"),
-                h("span", { style: { fontSize: "11px", color: T.inkFaint } }, hora(it.at), " \xB7 o\xEDdo: “", String(it.texto || "").trim().slice(0, 40), "”")),
+                h("span", { style: { fontSize: "11px", color: T.inkFaint } }, hora(it.at), " \xB7 o\xEDdo: “", String(it.texto || "").trim().slice(0, 40), "”", it.aprendido ? " \xB7 \u{1F3AF} corregido por tu diccionario" : "")),
               h("div", { style: { fontSize: "12.5px", color: color[e.tipo], fontWeight: 600 } }, e.txt),
               !it.id && it.candidatos && it.candidatos.length > 0 && h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "6px" } },
                 it.candidatos.map((c) => h("button", { key: c, onClick: () => elegir(it.key, c), style: { cursor: "pointer", border: `1px solid ${T.border}`, background: T.bg, borderRadius: "8px", padding: "4px 10px", fontFamily: F.mono, fontWeight: 700, fontSize: "13px", color: T.ink } }, c)))),
@@ -2149,6 +2256,7 @@ const inicioOT =
           style: { width: "100%", padding: "16px", borderRadius: "14px", border: "none", cursor: aRegistrar.length ? "pointer" : "default", fontSize: "16px", fontWeight: 800,
             background: aRegistrar.length ? T.ok : T.border, color: aRegistrar.length ? "#fff" : T.inkFaint, boxShadow: aRegistrar.length ? "0 6px 18px rgba(0,0,0,.18)" : "none" } },
           registrando ? "Registrando…" : `✔ Registrar todos (${aRegistrar.length}) como VOLVI\xD3`)),
+      h(VozCalibracion, { vehicles, dicc, onAprender: aprender, onBorrar: olvidar, SR }),
       h("div", { style: { fontSize: "11.5px", color: T.inkFaint, textAlign: "center", marginTop: "10px", lineHeight: 1.5 } },
         "Cada registro equivale a pulsar VOLVI\xD3 a la hora en que lo dictaste. Los que ya estaban en campa no se tocan. La lista se guarda en este m\xF3vil hasta que registres."));
     if (!full) return contenido;
