@@ -3030,8 +3030,8 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
         activeDamageCount: activeDamages.length,
         requestConfirm
       }
-    ), status === "LISTO" && onOpenRentalModal && /* @__PURE__ */ React.createElement(Btn, { variant: "primary", onClick: () => onOpenRentalModal(vehicle), sm: true }, "\u2192 Entregar a cliente"), status === "DEVUELTO" && isPendingArrivalConfirmation(vehicle) && onConfirmArrival && /* @__PURE__ */ React.createElement(Btn, { variant: "primary", onClick: () => onConfirmArrival(vehicle.id), icon: CheckCircle, sm: true }, "Confirmar llegada f\xEDsica"), vehicle.arrivalConfirmed && vehicle.lastReturnAt && onEditArrivalDate && (!editArrival ? /* @__PURE__ */ React.createElement(Btn, { variant: "secondary", sm: true, onClick: () => {
-      const d = new Date(vehicle.lastReturnAt);
+    ), status === "LISTO" && onOpenRentalModal && /* @__PURE__ */ React.createElement(Btn, { variant: "primary", onClick: () => onOpenRentalModal(vehicle), sm: true }, "\u2192 Entregar a cliente"), status === "DEVUELTO" && isPendingArrivalConfirmation(vehicle) && onConfirmArrival && /* @__PURE__ */ React.createElement(Btn, { variant: "primary", onClick: () => onConfirmArrival(vehicle.id), icon: CheckCircle, sm: true }, "Confirmar llegada f\xEDsica"), (vehicle.returnedAt || vehicle.lastReturnAt) && status !== "EN_USO" && onEditArrivalDate && (!editArrival ? /* @__PURE__ */ React.createElement(Btn, { variant: "secondary", sm: true, onClick: () => {
+      const d = new Date(vehicle.returnedAt || vehicle.lastReturnAt);
       const pad = (n) => String(n).padStart(2, "0");
       const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
       setArrivalDraft(local);
