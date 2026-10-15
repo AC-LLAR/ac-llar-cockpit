@@ -190,12 +190,27 @@ window.addEventListener('load', function () {
   // Al conocer el km por primera vez, se asume hecho el último múltiplo de 35.000 ya pasado.
   const MANT_KM = 35000, MANT_AVISO_KM = 2000;
   const fmtKm = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ".") + " km";
+  // Intervalo según el CHASIS (la "marca" del vehículo es la del camper): se saca del bastidor.
+  // Ford 35.000 km · Fiat / Peugeot / Citroën 30.000 km.
+  const CHASIS_VIN = { WF0: "Ford", ZFA: "Fiat", VF3: "Peugeot", VF7: "Citro\xEBn" };
+  const CHASIS_KM = { Ford: 35000, Fiat: 30000, Peugeot: 30000, "Citro\xEBn": 30000 };
+  const chasisDe = (v) => {
+    const pre = String((v && v.vin) || "").trim().toUpperCase().slice(0, 3);
+    if (CHASIS_VIN[pre]) return CHASIS_VIN[pre];
+    const t = String(((v && v.brand) || "") + " " + ((v && v.model) || "")).toLowerCase();
+    if (/ford|transit/.test(t)) return "Ford";
+    if (/fiat|ducato/.test(t)) return "Fiat";
+    if (/peugeot|boxer/.test(t)) return "Peugeot";
+    if (/citro|jumper/.test(t)) return "Citro\xEBn";
+    return null;
+  };
+  const mantIntervalo = (v) => CHASIS_KM[chasisDe(v)] || MANT_KM;
   const mantInfo = (v) => {
     if (!v || v.odometro == null || v.odometro === "") return null;
-    const km = Number(v.odometro) || 0;
-    const base = Number.isFinite(v.mantBaseKm) ? v.mantBaseKm : Math.floor(km / MANT_KM) * MANT_KM;
-    const proximo = base + MANT_KM, restante = proximo - km;
-    return { km, base, proximo, restante, nivel: restante <= 0 ? "vencido" : restante <= MANT_AVISO_KM ? "proximo" : "ok", at: v.odometroAt, fuente: v.odometroFuente };
+    const km = Number(v.odometro) || 0, I = mantIntervalo(v);
+    const base = Number.isFinite(v.mantBaseKm) ? v.mantBaseKm : Math.floor(km / I) * I;
+    const proximo = base + I, restante = proximo - km;
+    return { km, base, proximo, restante, intervalo: I, chasis: chasisDe(v), manual: !!v.mantBaseManual || !!(v.mantLog && v.mantLog.length), nivel: restante <= 0 ? "vencido" : restante <= MANT_AVISO_KM ? "proximo" : "ok", at: v.odometroAt, fuente: v.odometroFuente };
   };
   // Campos a fusionar en el vehículo cuando llega una lectura de km (solo si es mayor que la que hay).
   const odometroUpdate = (v, km, fuente, at) => {
@@ -205,7 +220,7 @@ window.addEventListener('load', function () {
     if (km < 100) return {};
     const out = {};
     if (km > (Number(v.odometro) || 0)) Object.assign(out, { odometro: km, odometroAt: at || new Date().toISOString(), odometroFuente: fuente });
-    if (!Number.isFinite(v.mantBaseKm)) out.mantBaseKm = Math.floor(Math.max(km, Number(v.odometro) || 0) / MANT_KM) * MANT_KM;
+    if (!Number.isFinite(v.mantBaseKm)) { const I = mantIntervalo(v); out.mantBaseKm = Math.floor(Math.max(km, Number(v.odometro) || 0) / I) * I; out.mantIntervalo = I; }
     return out;
   };
   const SEDES_VALIDAS = ["Valencia", "Onil", "Castell\xF3n", "Alicante"];
@@ -1766,7 +1781,7 @@ const inicioOT =
       h("div", { style: { maxWidth: "1280px", margin: "0 auto" } },
         h("div", { style: { display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", cursor: "pointer" }, onClick: () => setAbierto(!abierto) },
           h("span", { style: { fontSize: "20px" } }, "\u{1F527}"),
-          h("span", { style: { fontWeight: 800, fontSize: "15px", letterSpacing: "0.02em" } }, "MANTENIMIENTO 35.000 KM"),
+          h("span", { style: { fontWeight: 800, fontSize: "15px", letterSpacing: "0.02em" } }, "MANTENIMIENTO"),
           h("span", { style: { fontWeight: 700, fontSize: "14px" } }, [venc ? `${venc} vencido${venc === 1 ? "" : "s"}` : null, prox ? `${prox} pr\xF3ximo${prox === 1 ? "" : "s"} (menos de ${fmtKm(MANT_AVISO_KM)})` : null].filter(Boolean).join(" \xB7 ")),
           h("div", { style: { flex: 1 } }),
           h("span", { style: { fontSize: "12.5px", fontWeight: 700, textDecoration: "underline" } }, abierto ? "Ocultar" : "Ver veh\xEDculos")),
@@ -1837,35 +1852,91 @@ const inicioOT =
               h("span", { style: { color: T.inkSoft } }, r.txt))))));
   };
   // Tarjeta de mantenimiento en la ficha del vehículo.
-  const MantCard = ({ vehicle, onHecho, onSetKm }) => {
+  const MantCard = ({ vehicle, onHecho, onSetKm, onSetUltimo }) => {
     const m = mantInfo(vehicle);
-    const [modo, setModo] = React.useState(null); // "hecho" | "km"
+    const I = mantIntervalo(vehicle), chasis = chasisDe(vehicle);
+    const [modo, setModo] = React.useState(null); // "hecho" | "km" | "ultimo"
     const [draft, setDraft] = React.useState("");
+    const [fechaDraft, setFechaDraft] = React.useState("");
     const h = React.createElement;
     const col = !m ? T.inkFaint : m.nivel === "vencido" ? T.danger : m.nivel === "proximo" ? T.warn : T.ok;
     const fecha = (d) => { try { return new Date(d).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }); } catch (e) { return ""; } };
-    const abrir = (md) => { setModo(md); setDraft(String((m && m.km) || "")); };
+    const abrir = (md) => { setModo(md); setFechaDraft(""); setDraft(md === "ultimo" ? (m && m.manual ? String(m.base) : "") : String((m && m.km) || "")); };
     const val = parseInt(String(draft).replace(/[^0-9]/g, ""), 10) || 0;
     const ultimo = (vehicle.mantLog || []).slice(-1)[0];
     return h("div", { "data-mant-card": "1", style: { background: T.surface, border: `1px solid ${T.border}`, borderLeft: `4px solid ${col}`, borderRadius: "10px", padding: "14px 18px", marginBottom: "16px", fontFamily: F.body } },
       h("div", { style: { display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" } },
-        h("span", { style: { fontWeight: 800, fontSize: "14px", color: T.ink } }, "\u{1F527} Mantenimiento cada 35.000 km"),
+        h("span", { style: { fontWeight: 800, fontSize: "14px", color: T.ink } }, `\u{1F527} Mantenimiento cada ${fmtKm(I).replace(" km", "")} km` + (chasis ? ` (${chasis})` : "")),
         m ? h(React.Fragment, null,
           h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Km actual: ", h("b", { style: { color: T.ink } }, fmtKm(m.km)), m.fuente ? ` (${m.fuente}${m.at ? ", " + fecha(m.at) : ""})` : ""),
+          h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "\xDAltimo: ", h("b", { style: { color: T.ink } }, fmtKm(m.base)), m.manual ? "" : h("span", { style: { color: T.warn, fontStyle: "italic" } }, " (estimado)")),
           h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Pr\xF3ximo: ", h("b", { style: { color: T.ink } }, fmtKm(m.proximo))),
           h("span", { style: { fontSize: "13px", fontWeight: 800, color: col } }, m.restante <= 0 ? `VENCIDO \xB7 pasado ${fmtKm(-m.restante)}` : `faltan ${fmtKm(m.restante)}`))
           : h("span", { style: { fontSize: "13px", color: T.inkFaint, fontStyle: "italic" } }, "Sin km registrado: importa la flota del HQ o pon el km a mano."),
         h("div", { style: { flex: 1 } }),
         h(Btn, { variant: m && m.nivel !== "ok" ? "primary" : "secondary", sm: true, onClick: () => abrir("hecho") }, "\u2714 Mantenimiento hecho"),
+        onSetUltimo && h(Btn, { variant: m && !m.manual ? "secondary" : "ghost", sm: true, onClick: () => abrir("ultimo"), title: "Indicar a qu\xE9 km se hizo el \xFAltimo mantenimiento" }, "Km \xFAltimo mantenimiento"),
         h(Btn, { variant: "ghost", sm: true, onClick: () => abrir("km") }, "Corregir km")),
-      ultimo && h("div", { style: { fontSize: "11.5px", color: T.inkFaint, marginTop: "6px" } }, `\xDAltimo registrado: a los ${fmtKm(ultimo.km)} el ${fecha(ultimo.at)}${ultimo.por ? " (" + String(ultimo.por).split("@")[0] + ")" : ""}`),
+      ultimo && h("div", { style: { fontSize: "11.5px", color: T.inkFaint, marginTop: "6px" } }, `\xDAltimo registrado: a los ${fmtKm(ultimo.km)}${ultimo.at ? " el " + fecha(ultimo.at) : ""}${ultimo.dato ? " \xB7 " + ultimo.dato : ""}${ultimo.por ? " (" + String(ultimo.por).split("@")[0] + ")" : ""}`),
       modo && h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "10px", flexWrap: "wrap" } },
-        h("span", { style: { fontSize: "13px", color: T.inkSoft } }, modo === "hecho" ? "Km al hacer el mantenimiento:" : "Km actual del veh\xEDculo:"),
-        h("input", { "aria-label": modo === "hecho" ? "Km del mantenimiento" : "Km actual", inputMode: "numeric", value: draft, onChange: (e) => setDraft(e.target.value), autoFocus: true,
+        h("span", { style: { fontSize: "13px", color: T.inkSoft } }, modo === "hecho" ? "Km al hacer el mantenimiento:" : modo === "ultimo" ? "El \xFAltimo mantenimiento se hizo a los (km):" : "Km actual del veh\xEDculo:"),
+        h("input", { "aria-label": modo === "hecho" ? "Km del mantenimiento" : modo === "ultimo" ? "Km del \xFAltimo mantenimiento" : "Km actual", inputMode: "numeric", value: draft, onChange: (e) => setDraft(e.target.value), autoFocus: true,
           style: { padding: "6px 10px", border: `1px solid ${T.border}`, borderRadius: "9px", fontSize: "13px", width: "130px", background: T.bg, color: T.ink, fontFamily: F.mono } }),
-        h(Btn, { variant: "primary", sm: true, disabled: val < 100, onClick: () => { if (modo === "hecho") onHecho(vehicle.id, val); else onSetKm(vehicle.id, val); setModo(null); } }, "Guardar"),
+        modo === "ultimo" && h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "fecha (opcional):"),
+        modo === "ultimo" && h("input", { type: "date", "aria-label": "Fecha del \xFAltimo mantenimiento", value: fechaDraft, onChange: (e) => setFechaDraft(e.target.value),
+          style: { padding: "5px 8px", border: `1px solid ${T.border}`, borderRadius: "9px", fontSize: "13px", background: T.bg, color: T.ink } }),
+        h(Btn, { variant: "primary", sm: true, disabled: modo === "ultimo" ? (draft === "" || (m && val > m.km)) : val < 100, onClick: () => { if (modo === "hecho") onHecho(vehicle.id, val); else if (modo === "ultimo") onSetUltimo(vehicle.id, val, fechaDraft || null); else onSetKm(vehicle.id, val); setModo(null); } }, "Guardar"),
         h(Btn, { variant: "ghost", sm: true, onClick: () => setModo(null) }, "Cancelar"),
-        modo === "hecho" && val >= 100 && h("span", { style: { fontSize: "12px", color: T.inkSoft } }, `El siguiente ser\xE1 a los ${fmtKm(val + MANT_KM)}.`)));
+        modo === "ultimo" && m && val > m.km && h("span", { style: { fontSize: "12px", color: T.danger } }, `No puede ser mayor que el km actual (${fmtKm(m.km)}).`),
+        (modo === "hecho" ? val >= 100 : modo === "ultimo" && draft !== "" && !(m && val > m.km)) && h("span", { style: { fontSize: "12px", color: T.inkSoft } }, `El siguiente ser\xE1 a los ${fmtKm(val + I)}.`)));
+  };
+  // Daños NUEVOS (no la carga inicial de la flota), agrupados por la OT/revisión en que entraron.
+  const DanosNuevosCard = ({ damages, onVer }) => {
+    const h = React.createElement;
+    const nuevos = (damages || []).filter((d) => d.historicalBaseline === false || (d.historicalBaseline == null && d.source !== "pdf-import" && (d.detectedAt || d.importedAt)));
+    const grupos = React.useMemo(() => {
+      const m = new Map();
+      for (const d of nuevos) {
+        const t = d.importedAt || d.detectedAt || d.createdAt || "";
+        const k = d.sourceFile ? "f:" + d.sourceFile : "d:" + t.slice(0, 10);
+        if (!m.has(k)) m.set(k, { k, at: t, ot: d.sourceFile || null, manual: !d.sourceFile, items: [] });
+        const g = m.get(k); g.items.push(d); if (t > g.at) g.at = t;
+      }
+      return [...m.values()].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+    }, [damages]);
+    const [abiertos, setAbiertos] = React.useState(() => new Set(grupos[0] ? [grupos[0].k] : []));
+    const [todos, setTodos] = React.useState(false);
+    if (!grupos.length) return null;
+    const fecha = (d) => { try { return new Date(d).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }); } catch (e) { return ""; } };
+    const otNum = (f) => { const x = String(f || "").match(/\((\d+)\)/); return x ? "OT n\xBA" + x[1] : String(f || "").replace(/\.(html?|pdf)$/i, ""); };
+    const toggle = (k) => setAbiertos((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+    const vis = todos ? grupos : grupos.slice(0, 4);
+    return h("div", { "data-danos-nuevos": "1", style: { background: T.surface, border: `1px solid ${T.border}`, borderLeft: `4px solid ${T.rust}`, borderRadius: "10px", padding: "12px 18px", marginBottom: "16px", fontFamily: F.body } },
+      h("div", { style: { display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap", marginBottom: "6px" } },
+        h("span", { style: { fontWeight: 800, fontSize: "14px", color: T.ink } }, "\u{1F195} Da\xF1os nuevos por revisi\xF3n"),
+        h("span", { style: { fontSize: "12px", color: T.inkSoft } }, `${nuevos.length} da\xF1o${nuevos.length === 1 ? "" : "s"} nuevo${nuevos.length === 1 ? "" : "s"} en ${grupos.length} ${grupos.length === 1 ? "revisi\xF3n" : "revisiones"} \xB7 no incluye los que ya tra\xEDa al darlo de alta`)),
+      vis.map((g, gi) => {
+        const ab = abiertos.has(g.k);
+        const pend = g.items.filter((d) => damageCargo(d) === "NUEVO").length;
+        return h("div", { key: g.k, "data-grupo-nuevos": g.k, style: { borderTop: `1px solid ${T.border}`, padding: "6px 0" } },
+          h("div", { style: { display: "flex", gap: "10px", alignItems: "center", cursor: "pointer", flexWrap: "wrap" }, onClick: () => toggle(g.k) },
+            h("span", { style: { fontSize: "11px", color: T.inkFaint, width: "10px" } }, ab ? "\u25BE" : "\u25B8"),
+            h("span", { style: { fontFamily: F.mono, fontSize: "12.5px", color: T.ink, fontWeight: 700 } }, fecha(g.at)),
+            h("span", { style: { fontSize: "12.5px", color: T.inkSoft } }, g.manual ? "a\xF1adido a mano" : otNum(g.ot)),
+            gi === 0 && h("span", { style: { fontSize: "10.5px", fontWeight: 800, color: "#fff", background: T.rust, borderRadius: "8px", padding: "1px 7px" } }, "\xDALTIMA"),
+            h("span", { style: { fontSize: "12.5px", fontWeight: 700, color: T.ink } }, `${g.items.length} da\xF1o${g.items.length === 1 ? "" : "s"}`),
+            pend > 0 && h("span", { style: { fontSize: "12px", fontWeight: 700, color: CARGO_STATES.NUEVO.color } }, `${pend} por decidir`)),
+          ab && h("div", { style: { display: "flex", flexDirection: "column", gap: "3px", margin: "6px 0 2px 20px" } }, g.items.map((d) => {
+            const c = CARGO_STATES[damageCargo(d)] || {}, r = REPAIR_STATES[damageRepair(d)] || {};
+            return h("div", { key: d.id, onClick: () => onVer && onVer(d.id), title: "Ver el da\xF1o en la lista", style: { display: "flex", gap: "10px", alignItems: "center", fontSize: "12.5px", cursor: "pointer", padding: "3px 6px", borderRadius: "6px", flexWrap: "wrap" } },
+              h("span", { style: { fontFamily: F.mono, color: T.inkFaint, minWidth: "105px" } }, d.id),
+              h("span", { style: { color: T.ink, flex: 1, minWidth: "160px" } }, d.description || "\u2014"),
+              d.gravedad && h("span", { style: { fontSize: "11px", color: T.inkSoft } }, d.gravedad),
+              h("span", { style: { fontSize: "11px", fontWeight: 700, color: c.color, background: c.bg, borderRadius: "6px", padding: "1px 7px" } }, c.label || damageCargo(d)),
+              h("span", { style: { fontSize: "11px", fontWeight: 700, color: r.color, background: r.bg, borderRadius: "6px", padding: "1px 7px" } }, r.label || damageRepair(d)));
+          })));
+      }),
+      grupos.length > 4 && h("div", { style: { marginTop: "6px" } }, h("button", { onClick: () => setTodos(!todos), style: { background: "none", border: "none", color: T.rust, fontWeight: 700, fontSize: "12.5px", cursor: "pointer", padding: 0 } }, todos ? "Ver menos" : `Ver las ${grupos.length} revisiones`)));
   };
   const GRUPOS = [{ id: "alquiler", label: "Alquiler" }, { id: "taller", label: "Taller" }];
   const GroupBar = ({ grupo, onChange }) => React.createElement("div", { style: { background: T.bg, padding: "0 28px" } },
@@ -2844,6 +2915,7 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
     onClearNextRental,
     onMantHecho,
     onSetKm,
+    onSetUltimoMant,
     requestConfirm
   }) => {
     const status = computeVehicleStatus(vehicle, damages);
@@ -2856,6 +2928,10 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
     const [ordenDanos, setOrdenDanos] = useState(() => { try { return localStorage.getItem("acllar_orden_danos") || "gravedad"; } catch (e) { return "gravedad"; } });
     const cambiarOrden = (o) => { setOrdenDanos(o); try { localStorage.setItem("acllar_orden_danos", o); } catch (e) {} };
     const [activoId, setActivoId] = useState(null);
+    const verDano = (id) => {
+      setFilterCargo("todos"); setFilterRepair("todos"); setFilterGravedad("todas"); setActivoId(id);
+      setTimeout(() => { const el = document.querySelector(`[data-dano-id="${id}"]`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);
+    };
     const [repairOrderOpen, setRepairOrderOpen] = useState(false);
     const [editArrival, setEditArrival] = useState(false);
     const [arrivalDraft, setArrivalDraft] = useState("");
@@ -2942,7 +3018,7 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       },
       /* @__PURE__ */ React.createElement(ArrowLeft, { size: 14 }),
       " Volver a la flota"
-    ), onMantHecho && React.createElement(MantCard, { vehicle, onHecho: onMantHecho, onSetKm }), React.createElement(HistorialVehiculo, { key: "hist-" + vehicle.id, vehId: vehicle.id }), /* @__PURE__ */ React.createElement("div", { style: {
+    ), onMantHecho && React.createElement(MantCard, { vehicle, onHecho: onMantHecho, onSetKm, onSetUltimo: onSetUltimoMant }), React.createElement(DanosNuevosCard, { key: "dn-" + vehicle.id, damages, onVer: verDano }), React.createElement(HistorialVehiculo, { key: "hist-" + vehicle.id, vehId: vehicle.id }), /* @__PURE__ */ React.createElement("div", { style: {
       background: T.surface,
       border: `1px solid ${T.border}`,
       borderLeft: locTheme ? `4px solid ${locTheme.accent}` : `1px solid ${T.border}`,
@@ -11381,8 +11457,11 @@ const parseOTDateTime = (value) => {
   }
   // ===== Copia de seguridad de las OT en OneDrive =====
   function ArchivePanel({ info, onArchive, onChangeFolder }) {
+    const [ver, setVer] = React.useState(false);
     if (!info) return null;
     const h = React.createElement;
+    const lista = [...(info.lista || [])].sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
+    const fmtF = (x) => { try { return new Date(x).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }); } catch (e) { return x || ""; } };
     const dias = info.lastAt ? Math.floor((Date.now() - new Date(info.lastAt).getTime()) / 864e5) : null;
     const warn = info.pend > 0 && (dias === null || dias >= 7);
     const cuando = info.lastAt ? (dias === 0 ? "hoy" : dias === 1 ? "ayer" : `hace ${dias} días`) : "nunca";
@@ -11390,13 +11469,20 @@ const parseOTDateTime = (value) => {
       h("span", { style: { fontWeight: 800 } }, "📁 Copia en OneDrive"),
       h("span", { style: { color: T.inkSoft } }, `última: ${cuando}${info.lastAt && info.lastPor ? " (" + String(info.lastPor).split("@")[0] + ")" : ""}${info.carpeta ? " · carpeta en este equipo: " + info.carpeta : " · este equipo aún no tiene carpeta"}`),
       h("span", { style: { fontWeight: 700, color: info.pend ? (warn ? "#92400E" : T.warn) : T.ok } }, info.pend ? `${info.pend} OT sin archivar` : "todo archivado ✓"),
+      info.pend > 0 && lista.length > 0 && h("button", { "data-ver-sin-archivar": "1", onClick: () => setVer(!ver), style: { background: "none", border: "none", padding: 0, cursor: "pointer", color: T.rust, fontWeight: 700, fontSize: "12.5px", textDecoration: "underline" } }, ver ? "ocultar" : "ver cuáles"),
       info.msg && h("span", { style: { color: T.inkSoft } }, info.msg),
       h("div", { style: { flex: 1 } }),
       info.soportado
         ? h("div", { style: { display: "flex", gap: "6px" } },
             onChangeFolder && h(Btn, { variant: "secondary", sm: true, disabled: info.busy, onClick: onChangeFolder, title: "Elegir otra carpeta donde guardar las OT archivadas" }, "Cambiar carpeta"),
             h(Btn, { variant: warn ? "primary" : "secondary", sm: true, disabled: info.busy, onClick: (e) => onArchive(e && e.shiftKey) }, info.busy ? "Archivando…" : "Archivar ahora"))
-        : h("span", { style: { fontSize: "12px", color: T.inkSoft, fontStyle: "italic" } }, "se archiva desde el PC"));
+        : h("span", { style: { fontSize: "12px", color: T.inkSoft, fontStyle: "italic" } }, "se archiva desde el PC"),
+      ver && lista.length > 0 && h("div", { "data-lista-sin-archivar": "1", style: { flexBasis: "100%", maxHeight: "260px", overflowY: "auto", borderTop: `1px solid ${warn ? "#F59E0B" : T.border}`, paddingTop: "6px" } },
+        lista.map((r) => h("div", { key: r.id, style: { display: "flex", gap: "14px", padding: "3px 0", fontSize: "12.5px" } },
+          h("span", { style: { fontWeight: 800, fontFamily: F.mono, minWidth: "70px" } }, r.veh_id),
+          h("span", { style: { minWidth: "70px" } }, r.revnum != null ? `OT (${r.revnum})` : "OT"),
+          h("span", { style: { fontFamily: F.mono, color: T.inkSoft } }, fmtF(r.fecha)),
+          r.estado && h("span", { style: { color: T.inkFaint } }, r.estado)))));
   }
   // ===== OT pendientes de confirmar (llegan de la app de revisiones en la nube) =====
   // Cada OT es una ficha independiente: se acumulan hasta que alguien las confirma.
@@ -11764,16 +11850,30 @@ No se puede deshacer.`,
     const quienSoy = () => { try { return (window.acllarCloud && window.acllarCloud.usuario && window.acllarCloud.usuario()) || ""; } catch (e) { return ""; } };
     const handleMantHecho = (vehicleId, km) => {
       setState((s) => ({ ...s, vehicles: s.vehicles.map((v) => v.id !== vehicleId ? v : {
-        ...v, ...odometroUpdate(v, km, "manual"), mantBaseKm: km,
+        ...v, ...odometroUpdate(v, km, "manual"), mantBaseKm: km, mantBaseManual: true, mantIntervalo: mantIntervalo(v),
         mantLog: [...(Array.isArray(v.mantLog) ? v.mantLog : []), { km, at: nowIso(), por: quienSoy() }].slice(-20)
       }) }));
     };
     const handleSetKm = (vehicleId, km) => {
       setState((s) => ({ ...s, vehicles: s.vehicles.map((v) => v.id !== vehicleId ? v : {
         ...v, odometro: km, odometroAt: nowIso(), odometroFuente: "manual",
-        ...(Number.isFinite(v.mantBaseKm) ? {} : { mantBaseKm: Math.floor(km / MANT_KM) * MANT_KM })
+        ...(Number.isFinite(v.mantBaseKm) ? {} : { mantBaseKm: Math.floor(km / mantIntervalo(v)) * mantIntervalo(v), mantIntervalo: mantIntervalo(v) })
       }) }));
     };
+    // Dato inicial: a qué km se hizo el último mantenimiento (sustituye al estimado).
+    const handleSetUltimoMant = (vehicleId, km, fecha) => {
+      setState((s) => ({ ...s, vehicles: s.vehicles.map((v) => v.id !== vehicleId ? v : {
+        ...v, mantBaseKm: km, mantBaseManual: true, mantIntervalo: mantIntervalo(v),
+        mantLog: [...(Array.isArray(v.mantLog) ? v.mantLog : []), { km, at: fecha ? new Date(fecha + "T12:00:00").toISOString() : null, por: quienSoy(), dato: "\xFAltimo mantenimiento (dato inicial)", registradoAt: nowIso() }].slice(-20)
+      }) }));
+    };
+    // Una sola vez: los chasis de 30.000 km (Fiat, Peugeot, Citroën) tenían el "último" estimado con 35.000.
+    useEffect(() => {
+      if (!loaded) return;
+      const fix = (v) => { const I = mantIntervalo(v); return I !== MANT_KM && v.mantIntervalo !== I && !v.mantBaseManual && !(v.mantLog && v.mantLog.length) && v.odometro != null && v.odometro !== ""; };
+      if (!state.vehicles.some(fix)) return;
+      setState((s) => ({ ...s, vehicles: s.vehicles.map((v) => { if (!fix(v)) return v; const I = mantIntervalo(v); return { ...v, mantBaseKm: Math.floor((Number(v.odometro) || 0) / I) * I, mantIntervalo: I }; }) }));
+    }, [loaded, state.vehicles]);
     // Excel "fleets.vehicles…" del HQ: odómetro y sede actual de cada vehículo (se casa por matrícula).
     const handleImportFleet = async (file) => {
       try {
@@ -13158,12 +13258,13 @@ const scanResWatchFolder = async (handle) => {
       const C = window.acllarCloud;
       if (!C || !C.archivo || !(C.puedeArchivar && C.puedeArchivar())) return;
       try {
-        const pend = (await C.archivo.pendientes()).length;
+        const lista = await C.archivo.pendientes();
+        const pend = lista.length;
         const r = await window.storage.get("archivo_onedrive");
         const last = r && r.value ? JSON.parse(r.value) : null;
         // La carpeta es de ESTE ordenador (cada uno elige la suya); "última" es de cualquiera.
         let carpetaLocal = null; try { carpetaLocal = await C.archivo.carpeta(); } catch (e) {}
-        setArchInfo((prev) => ({ ...(prev || {}), pend, lastAt: last && last.at, lastPor: last && last.por, carpeta: carpetaLocal, soportado: C.archivo.soportado() }));
+        setArchInfo((prev) => ({ ...(prev || {}), pend, lista, lastAt: last && last.at, lastPor: last && last.por, carpeta: carpetaLocal, soportado: C.archivo.soportado() }));
       } catch (e) { console.warn("[archivo]", e); }
     }, []);
     useEffect(() => {
@@ -14419,6 +14520,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         onClearNextRental: handleClearNextRental,
         onToggleBaja: handleToggleBaja,
         onMantHecho: handleMantHecho,
+        onSetUltimoMant: handleSetUltimoMant,
         onConfirmArrival: handleMarkReturned,
         onSetKm: handleSetKm,
         requestConfirm
