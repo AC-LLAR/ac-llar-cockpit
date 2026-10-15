@@ -11887,6 +11887,14 @@ No se puede deshacer.`,
       setState((s) => ({
         ...s,
         vehicles: s.vehicles.map((v) => v.id === vehicleId ? { ...v, lastReturnAt: fechaIso, ...v.returnedAt ? { returnedAt: fechaIso } : {} } : v),
+        // La llegada registrada al pulsar VOLVIÓ (arrivalLog) también pasa a la fecha corregida:
+        // la usan las fianzas y los tiempos, y si no quedaría con la hora del clic.
+        arrivalLog: (Array.isArray(s.arrivalLog) ? s.arrivalLog : []).map((e) => {
+          if (e.vehicleId !== vehicleId) return e;
+          const v = s.vehicles.find((x) => x.id === vehicleId);
+          const oldRet = v && (v.returnedAt || v.lastReturnAt);
+          return oldRet && Math.abs(new Date(e.at).getTime() - new Date(oldRet).getTime()) <= 36e5 ? { ...e, at: fechaIso, atCorregido: true } : e;
+        }),
         // Actualizar también el reviewLog de este vehículo (su returnedAt) para que
         // las estadísticas cuadren con la nueva fecha de devolución.
         reviewLog: (Array.isArray(s.reviewLog) ? s.reviewLog : []).map((r) => {
