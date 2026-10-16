@@ -1957,7 +1957,17 @@ const inicioOT =
   // Convierte el texto dictado en tokens; las palabras-número se agrupan en una cifra
   // ("trescientos nueve" → 309; "tres cero nueve" → 309, dicho cifra a cifra).
   const vozTokens = (texto) => {
-    const raw = vozNorm(texto).replace(/(\d)([a-z])/g, "$1 $2").replace(/([a-z])(\d)/g, "$1 $2").replace(/[^a-z0-9ñ]+/g, " ").trim().split(/\s+/).filter(Boolean);
+    const raw0 = vozNorm(texto).replace(/(\d)([a-z])/g, "$1 $2").replace(/([a-z])(\d)/g, "$1 $2").replace(/[^a-z0-9ñ]+/g, " ").trim().split(/\s+/).filter(Boolean);
+    // "tres cientos" / "3 cientos" (la pausa parte la palabra) → "trescientos"
+    const CIEN = { 2: "doscientos", 3: "trescientos", 4: "cuatrocientos", 5: "quinientos", 6: "seiscientos", 7: "setecientos", 8: "ochocientos", 9: "novecientos" };
+    const raw = [];
+    for (let i = 0; i < raw0.length; i++) {
+      const w = raw0[i], nx = raw0[i + 1];
+      const u = /^\d$/.test(w) ? Number(w) : VOZ_NUM[w];
+      if ((nx === "cientos" || nx === "cientas") && CIEN[u]) { raw.push(CIEN[u]); i++; continue; }
+      if (w === "docientos") { raw.push("doscientos"); continue; }
+      raw.push(w);
+    }
     const out = [];
     let run = [];
     const flush = () => {
@@ -1989,6 +1999,10 @@ const inicioOT =
     for (const t of out) {
       const last = unido[unido.length - 1];
       if (/^\d$/.test(t) && last && /^\d+$/.test(last.v) && last.solo) { last.v += t; continue; }
+      // "3 09" / "2 98" (pausa a mitad del número) → "309" / "298"
+      if (/^\d+$/.test(t) && last && /^\d+$/.test(last.v) && (last.v + t).length <= 3 && !/^\d00$/.test(last.v)) { last.v += t; last.solo = false; continue; }
+      // "300 9" / "300 20" → 309 / 320
+      if (/^\d{1,2}$/.test(t) && last && /^\d00$/.test(last.v)) { last.v = String(Number(last.v) + Number(t)); last.solo = false; continue; }
       unido.push({ v: t, solo: /^\d$/.test(t) });
     }
     return unido.map((x) => x.v);
@@ -2026,6 +2040,23 @@ const inicioOT =
   // ---- Diccionario personal: "cómo te entiende el móvil" → vehículo real (se guarda en la nube por usuario) ----
   const VOZ_RELLENO = new Set(["volvio", "volvi", "vuelve", "volvieron", "ha", "ya", "esta", "en", "campa", "el", "la", "los", "de", "y", "ok", "vale", "venga", "listo"]);
   const vozCore = (t) => vozTokens(t).filter((w) => !VOZ_RELLENO.has(w)).join(" ");
+  // Palabra de cierre: nada se interpreta hasta oír "volvió" (o "listo"); lo anterior se acumula.
+  const VOZ_FIN_RE = /\b(volvio|volvi|vuelve|volvieron|listo)\b/;
+  const vozTieneFin = (alts) => alts.some((a) => VOZ_FIN_RE.test(vozNorm(a)));
+  // Une lo acumulado con el trozo actual y lo corta en frases cerradas por "volvió".
+  // Devuelve { frases: [alts por frase], resto: texto que queda esperando su "volvió" }.
+  const vozTrocear = (prefijo, alts) => {
+    const comb = alts.map((a) => vozNorm((prefijo ? prefijo + " " : "") + a));
+    const cortes = comb.map((c) => c.split(/\b(?:volvio|volvi|vuelve|volvieron|listo)\b/));
+    const base = cortes.find((x) => x.length > 1) || cortes[0];
+    const nFrases = base.length - 1;
+    const frases = [];
+    for (let i = 0; i < nFrases; i++) {
+      const f = cortes.filter((x) => x.length === base.length).map((x) => x[i].trim()).filter(Boolean);
+      if (f.length) frases.push(Array.from(new Set(f)));
+    }
+    return { frases, resto: (base[base.length - 1] || "").trim() };
+  };
   const vozDiccKey = () => { try { const u = window.acllarCloud && window.acllarCloud.usuario && window.acllarCloud.usuario(); return "voz_dicc_" + String(u || "local").toLowerCase(); } catch (e) { return "voz_dicc_local"; } };
   // Elige, entre las interpretaciones del móvil, la que corresponde a vehículos reales.
   const vozResolver = (alts, vehicles, dicc) => {
@@ -2043,6 +2074,7 @@ const inicioOT =
     const [escucha, setEscucha] = React.useState(false);
     const [intentos, setIntentos] = React.useState([]);
     const [verDicc, setVerDicc] = React.useState(false);
+    const [oyendo, setOyendo] = React.useState("");
     const recRef = React.useRef(null), usados = React.useRef(new Set()), diccRef = React.useRef(dicc);
     diccRef.current = dicc;
     React.useEffect(() => () => { try { recRef.current && recRef.current.abort(); } catch (e) {} }, []);
@@ -2051,34 +2083,44 @@ const inicioOT =
       let pool = flota.filter((v) => !usados.current.has(v.id));
       if (!pool.length) { usados.current = new Set(); pool = flota; }
       const v = pool[Math.floor(Math.random() * pool.length)];
-      usados.current.add(v.id); setObjetivo(v.id);
+      usados.current.add(v.id); setObjetivo(v.id); objRef.current = v.id; bufC.current = ""; setOyendo("");
       return v.id;
     };
-    const escuchar = (obj) => {
+    const bufC = React.useRef(""), activoRef = React.useRef(false), objRef = React.useRef(null);
+    const evaluar = (alts, obj) => {
+      const r0 = vozInterpretar(alts[0] || "", vehicles);
+      const directo = r0.length === 1 && r0[0].id === obj;
+      const conSistema = (() => { const r = vozResolver(alts, vehicles, diccRef.current).res; return r.length === 1 && r[0].id === obj; })();
+      const otro = r0.length === 1 && r0[0].id && r0[0].id !== obj ? r0[0].id : null;
+      let aprendido = false;
+      // Aprende la forma en que te entendió, salvo que coincida con OTRO vehículo real (sería peligroso).
+      if (!directo && !otro) { const c = vozCore(alts[0] || ""); if (c && /\d/.test(c)) { onAprender(c, obj, "calibracion"); aprendido = true; } }
+      setIntentos((s) => [...s, { obj, oido: alts[0] || "", alts, directo, conSistema: conSistema || aprendido, otro, aprendido }]);
+      vozHablar(directo || conSistema ? "Bien" : otro ? "Me pareci\xF3 " + otro.replace("-", " ") : "Aprendido");
+      siguiente();
+    };
+    const escuchar = () => {
       if (!SR) return;
       const rec = new SR();
-      rec.lang = "es-ES"; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 5;
+      rec.lang = "es-ES"; rec.continuous = true; rec.interimResults = false; rec.maxAlternatives = 5;
       rec.onresult = (ev) => {
-        const alts = Array.from(ev.results[0] || []).map((a) => a.transcript).filter(Boolean);
-        const r0 = vozInterpretar(alts[0] || "", vehicles);
-        const directo = r0.length === 1 && r0[0].id === obj;
-        const conSistema = (() => { const r = vozResolver(alts, vehicles, diccRef.current).res; return r.length === 1 && r[0].id === obj; })();
-        const otro = r0.length === 1 && r0[0].id && r0[0].id !== obj ? r0[0].id : null;
-        let aprendido = false;
-        // Aprende la forma en que te entendió, salvo que coincida con OTRO vehículo real (sería peligroso).
-        if (!directo && !otro) { const c = vozCore(alts[0] || ""); if (c && /\d/.test(c)) { onAprender(c, obj, "calibracion"); aprendido = true; } }
-        setIntentos((s) => [...s, { obj, oido: alts[0] || "", alts, directo, conSistema: conSistema || aprendido, otro, aprendido }]);
-        vozHablar(directo || conSistema ? "Bien" : otro ? "Me pareci\xF3 " + otro.replace("-", " ") : "Aprendido");
-        setTimeout(() => { const n = siguiente(); setTimeout(() => escuchar(n), 900); }, 700);
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          if (!ev.results[i].isFinal) continue;
+          const alts = Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean);
+          if (!vozTieneFin(alts)) { bufC.current = (bufC.current + " " + (alts[0] || "")).trim(); setOyendo(bufC.current); continue; }
+          const { frases } = vozTrocear(bufC.current, alts);
+          bufC.current = ""; setOyendo("");
+          if (frases.length && objRef.current) evaluar(frases[0], objRef.current);
+        }
       };
-      rec.onerror = (e) => { setEscucha(false); if (e.error === "no-speech") { setTimeout(() => escuchar(obj), 300); } };
-      rec.onend = () => setEscucha(false);
+      rec.onerror = () => {};
+      rec.onend = () => { if (activoRef.current) { try { rec.start(); } catch (e) {} } else setEscucha(false); };
       recRef.current = rec;
       try { rec.start(); setEscucha(true); } catch (e) {}
     };
-    const empezar = () => { setIntentos([]); usados.current = new Set(); setActivo(true); const n = siguiente(); vozHablar("Di el veh\xEDculo que aparece en pantalla"); setTimeout(() => escuchar(n), 1800); };
-    const terminar = () => { setActivo(false); setObjetivo(null); try { recRef.current && recRef.current.abort(); } catch (e) {} setEscucha(false); };
-    const saltar = () => { try { recRef.current && recRef.current.abort(); } catch (e) {} const n = siguiente(); setTimeout(() => escuchar(n), 400); };
+    const empezar = () => { setIntentos([]); usados.current = new Set(); setActivo(true); activoRef.current = true; siguiente(); vozHablar("Di el veh\xEDculo y termina con volvi\xF3"); setTimeout(() => escuchar(), 1800); };
+    const terminar = () => { activoRef.current = false; setActivo(false); setObjetivo(null); objRef.current = null; try { recRef.current && recRef.current.abort(); } catch (e) {} setEscucha(false); };
+    const saltar = () => siguiente();
     const N = intentos.length, dir = intentos.filter((x) => x.directo).length, sis = intentos.filter((x) => x.conSistema).length;
     const conf = intentos.filter((x) => x.otro);
     const entradas = Object.entries((dicc && dicc.map) || {}).sort((a, b) => String(b[1].at || "").localeCompare(String(a[1].at || "")));
@@ -2091,12 +2133,12 @@ const inicioOT =
         h("span", { style: { fontSize: "12.5px", fontWeight: 700, color: T.rust } }, abierto ? "Ocultar" : "Abrir")),
       abierto && h("div", { style: { marginTop: "10px" } },
         !activo && h("div", { style: { fontSize: "12.5px", color: T.inkSoft, lineHeight: 1.5, marginBottom: "10px" } },
-          "Te ir\xE9 mostrando veh\xEDculos de la flota. D\xEDlos como en la campa (“AC 314 volvi\xF3”). Cuando el m\xF3vil te entienda mal, apunto c\xF3mo te entendi\xF3 para corregirlo la pr\xF3xima vez. No se guarda tu voz, solo el texto. Con 20–30 basta."),
+          "Te ir\xE9 mostrando veh\xEDculos de la flota. D\xEDlos como en la campa, terminando siempre con “volvi\xF3” (“AC 314 volvi\xF3”). Cuando el m\xF3vil te entienda mal, apunto c\xF3mo te entendi\xF3 para corregirlo la pr\xF3xima vez. No se guarda tu voz, solo el texto. Con 20–30 basta."),
         !activo ? h(Btn, { variant: "primary", onClick: empezar, disabled: !SR }, N ? "Otra ronda de calibraci\xF3n" : "Empezar calibraci\xF3n")
           : h("div", { style: { textAlign: "center" } },
               h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Di:"),
               h("div", { "data-voz-objetivo": objetivo || "", style: { fontFamily: F.mono, fontWeight: 800, fontSize: "40px", color: T.ink, margin: "2px 0 6px" } }, objetivo ? objetivo.replace("-", " ") : "…"),
-              h("div", { style: { fontSize: "13px", fontWeight: 700, color: escucha ? "#B91C1C" : T.inkFaint, minHeight: "20px" } }, escucha ? "\u{1F534} Escuchando…" : "…"),
+              h("div", { style: { fontSize: "13px", fontWeight: 700, color: escucha ? "#B91C1C" : T.inkFaint, minHeight: "20px" } }, escucha ? (oyendo ? `\u{1F534} “${oyendo}…” (falta “volvi\xF3”)` : "\u{1F534} Escuchando… termina con “volvi\xF3”") : "…"),
               h("div", { style: { display: "flex", gap: "8px", justifyContent: "center", marginTop: "8px" } },
                 h(Btn, { variant: "secondary", sm: true, onClick: saltar }, "Saltar"),
                 h(Btn, { variant: "primary", sm: true, onClick: terminar }, "Terminar"))),
@@ -2159,6 +2201,23 @@ const inicioOT =
       if (origen === "voz") vozHablar(dichos.join(". "));
       return nuevos.length;
     };
+    const bufRef = React.useRef(""), bufTimer = React.useRef(null);
+    const [pendiente, setPendiente] = React.useState("");
+    const [aviso, setAviso] = React.useState("");
+    const recibir = (alts) => {
+      if (!vozTieneFin(alts)) {
+        bufRef.current = (bufRef.current + " " + (alts[0] || "")).trim(); setPendiente(bufRef.current);
+        clearTimeout(bufTimer.current);
+        bufTimer.current = setTimeout(() => { if (bufRef.current) { setAviso(`Descartado “${bufRef.current}”: no dijiste “volvi\xF3”`); vozHablar("Falta decir volvi\xF3"); bufRef.current = ""; setPendiente(""); } }, 12000);
+        return;
+      }
+      clearTimeout(bufTimer.current); setAviso("");
+      const { frases, resto } = vozTrocear(bufRef.current, alts);
+      bufRef.current = resto; setPendiente(resto);
+      if (!frases.length) { vozHablar("No he entendido el n\xFAmero"); return; }
+      for (const f of frases) anadir(f, "voz");
+    };
+    React.useEffect(() => () => clearTimeout(bufTimer.current), []);
     const arrancar = () => {
       setErr(""); setResumen(null);
       if (!SR) { setErr("Este navegador no permite dictado. En el m\xF3vil usa Chrome (Android) o Safari (iPhone)."); return; }
@@ -2168,7 +2227,7 @@ const inicioOT =
         let interino = "";
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
           const t = ev.results[i][0].transcript;
-          if (ev.results[i].isFinal) anadir(Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean), "voz"); else interino += t;
+          if (ev.results[i].isFinal) recibir(Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean)); else interino += t;
         }
         setParcial(interino);
       };
@@ -2180,7 +2239,7 @@ const inicioOT =
       recRef.current = rec; onRef.current = true;
       try { rec.start(); setEscuchando(true); vozHablar("Te escucho"); } catch (e) { setErr(String(e.message || e)); }
     };
-    const parar = () => { onRef.current = false; try { recRef.current && recRef.current.stop(); } catch (e) {} setEscuchando(false); };
+    const parar = () => { onRef.current = false; try { recRef.current && recRef.current.stop(); } catch (e) {} setEscuchando(false); clearTimeout(bufTimer.current); if (bufRef.current) setAviso(`Descartado \u201C${bufRef.current}\u201D: no dijiste \u201Cvolvi\xF3\u201D`); bufRef.current = ""; setPendiente(""); };
     const estadoDe = (it) => {
       if (!it.id) return { tipo: "duda", txt: it.candidatos && it.candidatos.length ? "\xBFCu\xE1l es?" : "No existe en la flota" };
       const v = byId[it.id];
@@ -2217,14 +2276,15 @@ const inicioOT =
           : h("button", { "data-voz-full": "1", onClick: () => ponerFull(true), title: "Para el m\xF3vil: abre solo esta pantalla. Guarda el enlace como acceso directo.", style: { background: "none", border: `1px solid ${T.border}`, borderRadius: "10px", padding: "6px 12px", cursor: "pointer", color: T.inkSoft, fontSize: "13px" } }, "\u{1F4F1} Pantalla completa (m\xF3vil)")),
       h("div", { style: { textAlign: "center", padding: "8px 0 18px" } },
         h("h2", { style: { margin: "0 0 4px", fontFamily: F.display, fontSize: "24px", color: T.ink } }, "\u{1F399}️ Campa por voz"),
-        h("div", { style: { fontSize: "13px", color: T.inkSoft } }, "Pulsa el micr\xF3fono y ve diciendo: ", h("b", null, "“AC 309 volvi\xF3”"), ". Al terminar la ronda, revisa la lista y pulsa ", h("b", null, "Registrar todos"), ".")),
+        h("div", { style: { fontSize: "13px", color: T.inkSoft } }, "Pulsa el micr\xF3fono y di siempre: ", h("b", null, "AC + n\xFAmero + VOLVI\xD3"), " (“AC 309 volvi\xF3”). No se apunta nada hasta o\xEDr “volvi\xF3”, as\xED que puedes hacer pausas. Al terminar la ronda, revisa la lista y pulsa ", h("b", null, "Registrar todos"), ".")),
       h("div", { style: { display: "flex", justifyContent: "center", marginBottom: "14px" } },
         h("button", { "data-voz-mic": "1", onClick: escuchando ? parar : arrancar, "aria-pressed": escuchando,
           style: { width: "128px", height: "128px", borderRadius: "50%", border: "none", cursor: "pointer", fontSize: "48px", color: "#fff",
             background: escuchando ? "#B91C1C" : T.rust, boxShadow: escuchando ? "0 0 0 10px rgba(185,28,28,.18), 0 0 0 22px rgba(185,28,28,.08)" : "0 6px 18px rgba(0,0,0,.18)", transition: "all .2s" } },
           escuchando ? "■" : "\u{1F399}️")),
       h("div", { style: { textAlign: "center", minHeight: "22px", fontSize: "14px", color: escuchando ? "#B91C1C" : T.inkFaint, fontWeight: 700, marginBottom: "6px" } },
-        escuchando ? (parcial ? `“${parcial}”` : "Escuchando… (pulsa para parar)") : "Micr\xF3fono apagado"),
+        escuchando ? ((pendiente || parcial) ? `“${[pendiente, parcial].filter(Boolean).join(" ")}…” — esperando “volvi\xF3”` : "Escuchando… (pulsa para parar)") : "Micr\xF3fono apagado"),
+      aviso && h("div", { "data-voz-aviso": "1", style: { textAlign: "center", fontSize: "12.5px", color: T.warn, fontWeight: 700, marginBottom: "6px" } }, aviso),
       err && h("div", { style: { background: "#FEE2E2", color: "#991B1B", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", marginBottom: "12px" } }, err),
       h("div", { style: { display: "flex", gap: "8px", marginBottom: "16px" } },
         h("input", { "aria-label": "Escribir veh\xEDculo", value: manual, onChange: (e) => setManual(e.target.value), placeholder: "o escribe: 309, CB 3…", inputMode: "text",
