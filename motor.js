@@ -14442,6 +14442,15 @@ const base = {
           const enAlquilerSalidaTime = enAlquilerRow?.salida ? new Date(enAlquilerRow.salida).getTime() : null;
           // ¿El vehículo se re-alquiló DESPUÉS de la última llegada confirmada?
           const seReAlquiloDespuesDeLaVuelta = prevReturnedTime !== null && enAlquilerSalidaTime !== null && enAlquilerSalidaTime > prevReturnedTime;
+          // MISMA RESERVA YA DEVUELTA (igual que el 720): el HQ sigue listando "En Alquiler" el alquiler
+          // del que el vehículo YA volvió hasta que la oficina cierra el contrato. Con envíos cada hora
+          // eso devolvía a EN USO vehículos ya DEVUELTOS / REVISADOS / LISTOS. No se toca su estado.
+          if (enAlquilerRow && v.workflowStatus && v.workflowStatus !== "EN_USO") {
+            const idsVueltos = (Array.isArray(s.arrivalLog) ? s.arrivalLog : []).filter((e) => e && e.vehicleId === v.id && e.reservaId).map((e) => String(e.reservaId).trim().toLowerCase());
+            const resAlq = String(enAlquilerRow.reservaId || "").trim().toLowerCase();
+            const yaDevuelta = (resAlq && (idsVueltos.includes(resAlq) || resAlq === String(v.currentReservaId || "").trim().toLowerCase() && prevReturnedTime !== null)) || (prevReturnedTime !== null && enAlquilerSalidaTime !== null && !seReAlquiloDespuesDeLaVuelta);
+            if (yaDevuelta) return { ...base, workflowStatus: v.workflowStatus };
+          }
           if (enAlquilerRow) {
             if (prevArrivalConfirmed && !seReAlquiloDespuesDeLaVuelta) {
               // Import lo pone "EN_USO" pero el vehículo TODAVÍA no salió realmente.
