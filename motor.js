@@ -2427,6 +2427,181 @@ const inicioOT =
     if (!full) return contenido;
     return h("div", { "data-voz-pantalla": "1", style: { position: "fixed", inset: 0, zIndex: 2000, background: T.bg, overflowY: "auto", padding: "16px 16px 24px", boxSizing: "border-box" } }, contenido);
   };
+  // ===== Voz en todo el cockpit: micrófono flotante =====
+  // "312, mostrar daños" → abre la ficha. Con la ficha abierta:
+  // "parachoques trasero, rotura, reparado, Carlos" / "..., asumido" / "..., cuantificado" / "..., histórico".
+  const VOZ_SIN = { parachoques: "paragolpes", paragolpe: "paragolpes", rayon: "rayadura", rayones: "rayadura", rayado: "rayadura", rayada: "rayadura", rayaduras: "rayadura", aranazo: "rayadura",
+    golpeado: "golpe", golpes: "golpe", abolladura: "golpe", abollado: "golpe", abollada: "golpe", bollo: "golpe", roto: "rotura", rota: "rotura", rotos: "rotura", roturas: "rotura",
+    desgaste: "des", desgastado: "des", desgastada: "des", fisura: "fis", fisurado: "fis", fisurada: "fis", grieta: "fis", doblado: "dob", doblada: "dob", quemado: "que", quemada: "que", quemadura: "que",
+    falta: "faltante", faltan: "faltante", manchado: "mancha", manchada: "mancha", manchas: "mancha", retrovisores: "retrovisor", espejos: "espejo" };
+  const VOZ_STOP = new Set(["de", "del", "la", "el", "los", "las", "y", "a", "al", "en", "con", "lado", "parte", "un", "una", "por", "que", "es", "esta", "ya", "lo", "le", "se", "mecanico", "lo"]);
+  const VOZ_MEC = [["agente externo", "AGENTE EXTERNO"], ["externo", "AGENTE EXTERNO"], ["ali", "ALI"], ["carlos", "CARLOS"], ["hugo", "HUGO"]];
+  const VOZ_ACC_DANO = [[/\breparad[oa]s?\b/, "REPARADO"], [/\basumid[oa]s?\b/, "ASUMIDO"], [/\bcuantificad[oa]s?\b/, "CUANTIFICADO"], [/\bhistoric[oa]s?\b/, "HISTORICO"]];
+  const vozKey = (w) => w.length > 5 ? w.slice(0, 5) : w;
+  const vozPalabras = (t) => vozNorm(t).replace(/iz quierd/g, "izquierd").replace(/[^a-z0-9ñ]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  const vozMecDe = (t) => { const n = " " + vozNorm(t).replace(/[^a-z0-9ñ]+/g, " ") + " "; for (const [w, m] of VOZ_MEC) if (n.includes(" " + w + " ")) return m; return null; };
+  // Busca el daño que mejor encaja con lo dicho ("parachoques trasero rotura").
+  const vozBuscarDano = (texto, damages) => {
+    const dicho = vozPalabras(texto).filter((w) => !VOZ_STOP.has(w) && !/^\d+$/.test(w) && VOZ_NUM[w] === undefined).map((w) => VOZ_SIN[w] || w).map(vozKey);
+    if (!dicho.length) return { dicho, lista: [] };
+    const lista = (damages || []).map((d) => {
+      const txt = [d.description || "", d.zona || "", d.tipoDano || ""].join(" ");
+      const ks = new Set(vozPalabras(txt).map((w) => VOZ_SIN[w] || w).map(vozKey));
+      const ok = dicho.filter((k) => ks.has(k)).length;
+      return { d, score: ok / dicho.length, ok };
+    }).filter((x) => x.ok > 0).sort((a, b) => b.score - a.score);
+    return { dicho, lista };
+  };
+  const VozGlobal = ({ vehicles, damages, fichaId, oculto, onAbrirDanos, onReparar, onCargo, onRestaurar }) => {
+    const h = React.createElement;
+    const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+    const [on, setOn] = React.useState(false);
+    const [abierto, setAbierto] = React.useState(false);
+    const [oido, setOido] = React.useState("");
+    const [msg, setMsg] = React.useState(null); // { txt, tipo }
+    const [eleccion, setEleccion] = React.useState(null); // { accion, mec, lista: [d] }
+    const [undo, setUndo] = React.useState(null); // { snap, txt }
+    const recRef = React.useRef(null), onRef = React.useRef(false), bufRef = React.useRef(""), timerRef = React.useRef(null), mecRef = React.useRef(null), undoTimer = React.useRef(null);
+    const ctx = React.useRef({}); ctx.current = { vehicles, damages, fichaId, eleccion };
+    React.useEffect(() => () => { onRef.current = false; try { recRef.current && recRef.current.abort(); } catch (e) {} }, []);
+    if (oculto && on) { onRef.current = false; try { recRef.current && recRef.current.abort(); } catch (e) {} }
+    const decir = (txt, tipo = "ok", hablar = true) => { setMsg({ txt, tipo }); if (hablar) vozHablar(txt); };
+    const desc = (d) => d.description || [d.zona, d.tipoDano].filter(Boolean).join(" — ") || d.id;
+    const fmtF = (iso) => { try { return new Date(iso).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" }); } catch (e) { return ""; } };
+    const ver = (detail) => { try { window.dispatchEvent(new CustomEvent("acllar-voz-ver", { detail })); } catch (e) {} };
+    const ponerUndo = (snap, txt) => { clearTimeout(undoTimer.current); setUndo({ snap, txt }); undoTimer.current = setTimeout(() => setUndo(null), 20000); };
+    const aplicar = (d, accion, mec) => {
+      const v = (ctx.current.vehicles || []).find((x) => x.id === d.vehicleId) || {};
+      const snap = { damage: d, vehicle: { id: v.id, workflowStatus: v.workflowStatus, readyAt: v.readyAt, lastReturnHasNewDamages: v.lastReturnHasNewDamages } };
+      if (accion === "REPARADO") {
+        onReparar(d.id, mec);
+        decir(`${desc(d)}: reparado, ${mec.toLowerCase()}`);
+      } else {
+        onCargo(d.id, accion);
+        decir(`${desc(d)}: ${accion === "HISTORICO" ? "hist\xF3rico" : accion.toLowerCase()}`);
+      }
+      ponerUndo(snap, `${d.id} → ${accion === "REPARADO" ? "REPARADO (" + mec + ")" : accion}`);
+      setEleccion(null); mecRef.current = null;
+      ver({ danoId: d.id });
+    };
+    const resolverAccion = (texto, accion, mec) => {
+      const { fichaId: fid, damages: all } = ctx.current;
+      const delVeh = (all || []).filter((d) => d.vehicleId === fid);
+      const { dicho, lista } = vozBuscarDano(texto, delVeh);
+      if (!dicho.length) { decir("No he entendido qu\xE9 da\xF1o", "warn"); return; }
+      // Solo se aplica directamente si coinciden TODAS las palabras dichas. Si es parcial, no se toca
+      // nada: se enseñan los parecidos para elegir por número ("ventana trasera rota" ≠ "paragolpes trasero rotura").
+      let cands = lista.filter((x) => x.score === 1).map((x) => x.d);
+      if (!cands.length) {
+        const parecidos = lista.filter((x) => x.score >= 0.5).slice(0, 3).map((x) => x.d).filter((d) => accion !== "REPARADO" || damageRepair(d) !== "REPARADO");
+        if (!parecidos.length) { decir(`No encuentro ese da\xF1o en el ${vozNombre(fid)}`, "warn"); return; }
+        setEleccion({ accion, mec, lista: parecidos });
+        decir(`No encuentro ese da\xF1o exacto. \xBFEs alguno de estos? Di uno${parecidos.length > 1 ? ", dos" : ""}${parecidos.length > 2 ? ", tres" : ""}, o cancelar`, "warn");
+        return;
+      }
+      if (accion === "REPARADO") {
+        const pend = cands.filter((d) => damageRepair(d) !== "REPARADO");
+        if (!pend.length) { decir(`${desc(cands[0])} ya est\xE1 reparado`, "warn"); return; }
+        cands = pend;
+      }
+      if (cands.length > 1) {
+        setEleccion({ accion, mec, lista: cands.slice(0, 6) });
+        decir(`Hay ${cands.length}. Di uno, dos${cands.length > 2 ? ", tres" : ""}…`, "warn");
+        ver({ danoId: cands[0].id });
+        return;
+      }
+      if (accion === "REPARADO" && !mec) { mecRef.current = { d: cands[0] }; setEleccion(null); decir(`${desc(cands[0])}. \xBFQu\xE9 mec\xE1nico?`, "warn"); ver({ danoId: cands[0].id }); return; }
+      aplicar(cands[0], accion, mec);
+    };
+    const procesar = (alts) => {
+      const t0 = alts[0] || "";
+      const n = vozNorm(t0);
+      // 1) Esperando mecánico
+      if (mecRef.current) { const m = vozMecDe(t0); if (m) { const d = mecRef.current.d; mecRef.current = null; aplicar(d, "REPARADO", m); return; } }
+      // 2) Esperando elegir entre varios
+      const el = ctx.current.eleccion;
+      if (el) {
+        if (/\bcancela/.test(n)) { setEleccion(null); decir("Cancelado"); return; }
+        const ORD = { primero: 1, primera: 1, segundo: 2, segunda: 2, tercero: 3, tercera: 3, cuarto: 4, cuarta: 4 };
+        const tok = vozTokens(t0); let k = null;
+        for (const w of tok) { if (/^\d+$/.test(w)) { k = Number(w); break; } if (ORD[w]) { k = ORD[w]; break; } }
+        if (k && k >= 1 && k <= el.lista.length) {
+          const d = el.lista[k - 1]; const mec = el.mec || vozMecDe(t0);
+          setEleccion(null);
+          if (el.accion === "REPARADO" && !mec) { mecRef.current = { d }; decir(`${desc(d)}. \xBFQu\xE9 mec\xE1nico?`, "warn"); return; }
+          aplicar(d, el.accion, mec); return;
+        }
+      }
+      const texto = (bufRef.current + " " + t0).trim(), tn = vozNorm(texto);
+      // 3) "312, mostrar daños"
+      if (/\bdan(o|os)\b/.test(tn)) {
+        bufRef.current = ""; clearTimeout(timerRef.current); setOido("");
+        const limpio = (a) => vozNorm((bufRef.current + " " + a)).replace(/\b(mostrar|muestrame|muestra|ver|abrir|abre|ensename|los|sus|del|de|la|ficha|danos|dano)\b/g, " ");
+        const { res } = vozResolver(alts.map(limpio).concat([limpio(texto)]), ctx.current.vehicles, null);
+        const id = res.length && res[0].id;
+        if (!id) { decir("No he entendido el n\xFAmero del veh\xEDculo", "warn"); return; }
+        onAbrirDanos(id); setEleccion(null); mecRef.current = null;
+        const nd = (ctx.current.damages || []).filter((d) => d.vehicleId === id && damageRepair(d) !== "REPARADO").length;
+        decir(`${vozNombre(id)}: ${nd} da\xF1o${nd === 1 ? "" : "s"} sin reparar`);
+        return;
+      }
+      // 4) Con la ficha abierta: "<daño>, reparado, Carlos" / "asumido" / "cuantificado" / "histórico"
+      const acc = VOZ_ACC_DANO.find(([re]) => re.test(tn));
+      if (acc) {
+        bufRef.current = ""; clearTimeout(timerRef.current); setOido("");
+        if (!ctx.current.fichaId) { decir("Primero abre un veh\xEDculo: di el n\xFAmero y mostrar da\xF1os", "warn"); return; }
+        const mec = vozMecDe(texto);
+        const desc0 = tn.replace(acc[0], " ").replace(/\b(agente externo|externo|ali|carlos|hugo|mecanico)\b/g, " ");
+        resolverAccion(desc0, acc[1], mec);
+        return;
+      }
+      // 5) Aún sin comando: se acumula (pausas)
+      bufRef.current = texto; setOido(texto);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => { if (bufRef.current) { decir(`No he entendido: “${bufRef.current}”`, "warn", false); bufRef.current = ""; setOido(""); } }, 10000);
+    };
+    const arrancar = () => {
+      if (!SR) { decir("Este navegador no permite dictado (usa Chrome).", "warn", false); setAbierto(true); return; }
+      const rec = new SR();
+      rec.lang = "es-ES"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 5;
+      rec.onresult = (ev) => {
+        let interino = "";
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          if (ev.results[i].isFinal) procesar(Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean));
+          else interino += ev.results[i][0].transcript;
+        }
+        if (interino) setOido([bufRef.current, interino].filter(Boolean).join(" "));
+      };
+      rec.onerror = (e) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") { onRef.current = false; setOn(false); decir("Sin permiso para el micr\xF3fono", "warn", false); } };
+      rec.onend = () => { if (onRef.current) { try { rec.start(); } catch (e) {} } else setOn(false); };
+      recRef.current = rec; onRef.current = true;
+      try { rec.start(); setOn(true); setAbierto(true); setMsg(null); } catch (e) {}
+    };
+    const parar = () => { onRef.current = false; try { recRef.current && recRef.current.stop(); } catch (e) {} setOn(false); bufRef.current = ""; setOido(""); };
+    const deshacer = () => { if (!undo) return; onRestaurar(undo.snap); vozHablar("Deshecho"); setMsg({ txt: "Deshecho: " + undo.txt, tipo: "ok" }); setUndo(null); };
+    if (oculto) return null;
+    const col = { ok: T.ok, warn: T.warn };
+    return h("div", { "data-voz-global": "1", style: { position: "fixed", left: "16px", bottom: "16px", zIndex: 1500, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "8px", fontFamily: F.body, maxWidth: "calc(100vw - 32px)" } },
+      abierto && h("div", { "data-voz-global-panel": "1", style: { width: "340px", maxWidth: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", boxShadow: "0 10px 30px rgba(0,0,0,.18)", padding: "12px 14px", fontSize: "13px", color: T.ink } },
+        h("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" } },
+          h("b", null, "\u{1F399}️ Voz"),
+          h("span", { style: { fontSize: "11.5px", color: on ? "#B91C1C" : T.inkFaint, fontWeight: 700 } }, on ? "escuchando" : "apagado"),
+          h("div", { style: { flex: 1 } }),
+          h("button", { onClick: () => setAbierto(false), style: { background: "none", border: "none", cursor: "pointer", color: T.inkFaint, fontSize: "18px", lineHeight: 1 } }, "\xD7")),
+        fichaId ? h("div", { style: { fontSize: "11.5px", color: T.inkSoft, marginBottom: "6px" } }, "Ficha abierta: ", h("b", { style: { fontFamily: F.mono } }, fichaId), " \xB7 di el da\xF1o y la acci\xF3n: “parachoques trasero, rotura, reparado, Carlos”")
+          : h("div", { style: { fontSize: "11.5px", color: T.inkSoft, marginBottom: "6px" } }, "Di: “312, mostrar da\xF1os”"),
+        oido && h("div", { style: { fontStyle: "italic", color: T.inkSoft, marginBottom: "6px" } }, "“", oido, "…”"),
+        msg && h("div", { "data-voz-global-msg": "1", style: { fontWeight: 700, color: col[msg.tipo] || T.ink, marginBottom: "6px" } }, msg.txt),
+        eleccion && h("div", { "data-voz-eleccion": "1", style: { display: "flex", flexDirection: "column", gap: "4px", marginBottom: "6px" } },
+          eleccion.lista.map((d, i) => h("button", { key: d.id, onClick: () => { const mec = eleccion.mec; setEleccion(null); if (eleccion.accion === "REPARADO" && !mec) { mecRef.current = { d }; decir(`${desc(d)}. \xBFQu\xE9 mec\xE1nico?`, "warn"); } else aplicar(d, eleccion.accion, mec); },
+            style: { textAlign: "left", cursor: "pointer", border: `1px solid ${T.border}`, background: T.bg, borderRadius: "8px", padding: "6px 8px", fontSize: "12.5px", color: T.ink } },
+            h("b", null, `${i + 1}. `), desc(d), h("span", { style: { color: T.inkFaint } }, ` \xB7 ${d.id}${d.gravedad ? " \xB7 " + d.gravedad.toLowerCase() : ""}${d.detectedAt || d.importedAt ? " \xB7 " + fmtF(d.detectedAt || d.importedAt) : ""}`)))),
+        undo && h("div", { style: { display: "flex", alignItems: "center", gap: "8px", background: T.bg, borderRadius: "8px", padding: "6px 8px" } },
+          h("span", { style: { flex: 1, fontSize: "12px", color: T.inkSoft } }, undo.txt),
+          h("button", { "data-voz-deshacer": "1", onClick: deshacer, style: { cursor: "pointer", border: `1px solid ${T.border}`, background: T.surface, borderRadius: "8px", padding: "4px 10px", fontWeight: 700, fontSize: "12.5px", color: T.rust } }, "↶ Deshacer"))),
+      h("button", { "data-voz-global-mic": "1", title: "Comandos de voz", onClick: on ? parar : arrancar,
+        style: { width: "54px", height: "54px", borderRadius: "50%", border: "none", cursor: "pointer", fontSize: "24px", color: "#fff", background: on ? "#B91C1C" : T.rust, boxShadow: on ? "0 0 0 8px rgba(185,28,28,.18), 0 6px 18px rgba(0,0,0,.25)" : "0 6px 18px rgba(0,0,0,.25)" } }, on ? "■" : "\u{1F399}️"));
+  };
   const GRUPOS = [{ id: "alquiler", label: "Alquiler" }, { id: "taller", label: "Taller" }];
   const GroupBar = ({ grupo, onChange }) => React.createElement("div", { style: { background: T.bg, padding: "0 28px" } },
     React.createElement("div", { role: "tablist", "aria-label": "Área", style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "6px", padding: "12px 0 10px" } },
@@ -3419,6 +3594,15 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
     const [activoId, setActivoId] = useState(null);
     const sal704 = proximaSalida704(vehicle);
     const dias704 = sal704 ? daysBetween(todayKey(), String(sal704.salida).slice(0, 10)) : null;
+    React.useEffect(() => {
+      const fn = (ev) => {
+        const det = (ev && ev.detail) || {};
+        if (det.danoId) { verDano(det.danoId); return; }
+        if (det.danos) { const el = document.querySelector("[data-danos-header]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+      };
+      window.addEventListener("acllar-voz-ver", fn);
+      return () => window.removeEventListener("acllar-voz-ver", fn);
+    });
     const verDano = (id) => {
       setFilterCargo("todos"); setFilterRepair("todos"); setFilterGravedad("todas"); setActivoId(id);
       setTimeout(() => { const el = document.querySelector(`[data-dano-id="${id}"]`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);
@@ -3642,7 +3826,7 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       justifyContent: "space-between",
       alignItems: "center",
       marginBottom: "12px"
-    } }, /* @__PURE__ */ React.createElement("h3", { style: {
+    } }, /* @__PURE__ */ React.createElement("h3", { "data-danos-header": "1", style: {
       margin: 0,
       fontFamily: F.display,
       fontSize: "20px",
@@ -13154,6 +13338,25 @@ No se tocan los da\xF1os \xFAnicos. \xBFContinuar?`,
         return { ...s, damages, vehicles };
       });
     };
+    // Voz: REPARADO con mecánico (igual que el botón "Reparado" de la ficha) y deshacer.
+    const handleVozReparar = (id, mecanico) => {
+      setState((s) => {
+        const damages = s.damages.map((d) => d.id === id ? { ...d, repair: "REPARADO", state: "REPARADO", repairedAt: nowIso(), mecanico, repairedVia: "voz" } : d);
+        const damage = s.damages.find((d) => d.id === id);
+        if (!damage) return { ...s, damages };
+        const stillActive = damages.filter((d) => d.vehicleId === damage.vehicleId && d.state !== "REPARADO" && d.state !== "ASUMIDO").length;
+        const vehicles = stillActive === 0 ? s.vehicles.map((v) => v.id === damage.vehicleId ? { ...v, workflowStatus: "LISTO", readyAt: nowIso() } : v) : s.vehicles;
+        return { ...s, damages, vehicles };
+      });
+    };
+    const handleVozRestaurar = (snap) => {
+      if (!snap || !snap.damage) return;
+      setState((s) => ({
+        ...s,
+        damages: s.damages.map((d) => d.id === snap.damage.id ? snap.damage : d),
+        vehicles: snap.vehicle && snap.vehicle.id ? s.vehicles.map((v) => v.id === snap.vehicle.id ? { ...v, ...snap.vehicle } : v) : s.vehicles
+      }));
+    };
     const handleUpdatePart = (id, patch) => {
       setState((s) => {
         let parts = (s.partsToOrder || []).map((p) => p.id === id ? { ...p, ...patch } : p);
@@ -14877,7 +15080,10 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         theme,
         onToggleTheme: toggleTheme
       }
-    ), React.createElement(MantBanner, { vehicles: state.vehicles, onOpen: (id) => { setGrupo("alquiler"); setActiveTab("fleet"); setDetailOrigin("fleet"); setSelectedVehicleId(id); setView("detail"); } }), React.createElement(GroupBar, { grupo, onChange: setGrupo }), grupo === "alquiler" && /* @__PURE__ */ React.createElement(TabBar, { active: activeTab, onChange: setActiveTab }), grupo === "taller" && React.createElement(TallerView, null), grupo === "alquiler" && watchStatus === "active" && /* @__PURE__ */ React.createElement("div", { style: {
+    ), React.createElement(MantBanner, { vehicles: state.vehicles, onOpen: (id) => { setGrupo("alquiler"); setActiveTab("fleet"); setDetailOrigin("fleet"); setSelectedVehicleId(id); setView("detail"); } }),
+      React.createElement(VozGlobal, { vehicles: state.vehicles, damages: state.damages, fichaId: grupo === "alquiler" && activeTab === "fleet" && view === "detail" ? selectedVehicleId : null, oculto: activeTab === "voz",
+        onAbrirDanos: (id) => { setGrupo("alquiler"); setActiveTab("fleet"); setDetailOrigin("fleet"); setSelectedVehicleId(id); setView("detail"); setTimeout(() => { try { window.dispatchEvent(new CustomEvent("acllar-voz-ver", { detail: { danos: true } })); } catch (e) {} }, 350); },
+        onReparar: handleVozReparar, onCargo: handleChangeDamageCargo, onRestaurar: handleVozRestaurar }), React.createElement(GroupBar, { grupo, onChange: setGrupo }), grupo === "alquiler" && /* @__PURE__ */ React.createElement(TabBar, { active: activeTab, onChange: setActiveTab }), grupo === "taller" && React.createElement(TallerView, null), grupo === "alquiler" && watchStatus === "active" && /* @__PURE__ */ React.createElement("div", { style: {
       display: "flex",
       alignItems: "center",
       gap: "10px",
