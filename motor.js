@@ -2038,25 +2038,41 @@ const inicioOT =
   };
   const vozHablar = (t) => { try { if (!window.speechSynthesis) return; const u = new SpeechSynthesisUtterance(t); u.lang = "es-ES"; u.rate = 1.1; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch (e) {} };
   // ---- Diccionario personal: "cómo te entiende el móvil" → vehículo real (se guarda en la nube por usuario) ----
-  const VOZ_RELLENO = new Set(["volvio", "volvi", "vuelve", "volvieron", "ha", "ya", "esta", "en", "campa", "el", "la", "los", "de", "y", "ok", "vale", "venga", "listo"]);
+  const VOZ_RELLENO = new Set(["volvio", "volvi", "vuelve", "volvieron", "ha", "ya", "esta", "en", "campa", "el", "la", "los", "de", "y", "ok", "vale", "venga", "listo", "fianza", "fianzas", "presupuesto", "presupuestos", "devolver", "devuelve", "devolucion", "pase", "paso", "whatsapp", "wasap", "guasap", "a", "al", "para", "por", "mandar", "enviar", "pedro", "rosana"]);
   const vozCore = (t) => vozTokens(t).filter((w) => !VOZ_RELLENO.has(w)).join(" ");
-  // Palabra de cierre: nada se interpreta hasta oír "volvió" (o "listo"); lo anterior se acumula.
-  const VOZ_FIN_RE = /\b(volvio|volvi|vuelve|volvieron|listo)\b/;
+  // Palabra de cierre: nada se interpreta hasta oír la acción. Lo anterior se acumula.
+  //   "volvió"/"listo" → VOLVIÓ · "fianza" → devolver fianza · "presupuesto" → presupuesto enviado
+  const VOZ_KW = "volvio|volvi|vuelve|volvieron|listo|fianza|fianzas|presupuesto|presupuestos";
+  const VOZ_FIN_RE = new RegExp("\\b(" + VOZ_KW + ")\\b");
+  const vozAccion = (kw) => /^fianza/.test(kw) ? "fianza" : /^presupuesto/.test(kw) ? "presupuesto" : "volvio";
+  const VOZ_DEST_RE = /\b(pedro|rosana)\b/;
+  const vozDestDe = (t) => { const m = vozNorm(t).match(VOZ_DEST_RE); return m ? (m[1] === "pedro" ? "Pedro" : "Rosana") : null; };
+  const vozSoloDest = (t) => { const c = vozNorm(t).replace(/\b(a|para|whatsapp|wasap|guasap|por|al|enviar|mandar|manda)\b/g, " ").trim(); return /^(pedro|rosana)$/.test(c) ? vozDestDe(c) : null; };
   const vozTieneFin = (alts) => alts.some((a) => VOZ_FIN_RE.test(vozNorm(a)));
-  // Une lo acumulado con el trozo actual y lo corta en frases cerradas por "volvió".
-  // Devuelve { frases: [alts por frase], resto: texto que queda esperando su "volvió" }.
+  // Une lo acumulado con el trozo actual y lo corta en frases cerradas por una acción.
+  // Devuelve { frases: [{ alts, accion, dest }], resto }.
   const vozTrocear = (prefijo, alts) => {
     const comb = alts.map((a) => vozNorm((prefijo ? prefijo + " " : "") + a));
-    const cortes = comb.map((c) => c.split(/\b(?:volvio|volvi|vuelve|volvieron|listo)\b/));
+    const sp = new RegExp("\\b(" + VOZ_KW + ")\\b");
+    const cortes = comb.map((c) => c.split(sp));
     const base = cortes.find((x) => x.length > 1) || cortes[0];
-    const nFrases = base.length - 1;
+    const nFrases = (base.length - 1) / 2;
     const frases = [];
+    let resto = (base[base.length - 1] || "").trim();
     for (let i = 0; i < nFrases; i++) {
-      const f = cortes.filter((x) => x.length === base.length).map((x) => x[i].trim()).filter(Boolean);
-      if (f.length) frases.push(Array.from(new Set(f)));
+      const accion = vozAccion(base[2 * i + 1]);
+      let txt = base[2 * i], sig = base[2 * i + 2] || "";
+      let dest = vozDestDe(txt);
+      // "269 fianza a Pedro": el nombre que va justo DESPUÉS de la acción también es de esta frase
+      const lead = sig.match(/^\s*(?:(?:a|para|whatsapp|wasap|guasap|por|al)\s+)*(pedro|rosana)\b/);
+      if (lead) { if (!dest) dest = lead[1] === "pedro" ? "Pedro" : "Rosana"; base[2 * i + 2] = sig.slice(lead[0].length); if (i === nFrases - 1) resto = base[2 * i + 2].trim(); }
+      const f = cortes.filter((x) => x.length === base.length).map((x, k) => (k === 0 ? base : x)[2 * i].replace(VOZ_DEST_RE, " ").trim()).filter(Boolean);
+      if (f.length) frases.push({ alts: Array.from(new Set(f)), accion, dest });
     }
-    return { frases, resto: (base[base.length - 1] || "").trim() };
+    return { frases, resto };
   };
+  const VOZ_ACC = { volvio: { txt: "VOLVI\xD3", col: "#2A44D6" }, fianza: { txt: "DEVOLVER FIANZA", col: "#1F5E2A" }, presupuesto: { txt: "PRESUPUESTO", col: "#B45309" } };
+  const VOZ_DEST_LS = "acllar_voz_dest";
   const vozDiccKey = () => { try { const u = window.acllarCloud && window.acllarCloud.usuario && window.acllarCloud.usuario(); return "voz_dicc_" + String(u || "local").toLowerCase(); } catch (e) { return "voz_dicc_local"; } };
   // Elige, entre las interpretaciones del móvil, la que corresponde a vehículos reales.
   const vozResolver = (alts, vehicles, dicc) => {
@@ -2110,7 +2126,7 @@ const inicioOT =
           if (!vozTieneFin(alts)) { bufC.current = (bufC.current + " " + (alts[0] || "")).trim(); setOyendo(bufC.current); continue; }
           const { frases } = vozTrocear(bufC.current, alts);
           bufC.current = ""; setOyendo("");
-          if (frases.length && objRef.current) evaluar(frases[0], objRef.current);
+          if (frases.length && objRef.current) evaluar(frases[0].alts, objRef.current);
         }
       };
       rec.onerror = () => {};
@@ -2162,7 +2178,7 @@ const inicioOT =
                   h("button", { onClick: () => onBorrar(k), title: "Borrar", style: { background: "none", border: "none", cursor: "pointer", color: T.inkFaint, fontSize: "16px" } }, "\xD7")))))));
   };
   const VOZ_LS = "acllar_voz_ronda";
-  const VozCampaView = ({ vehicles, onMarkReturned, onOpenVehicle }) => {
+  const VozCampaView = ({ vehicles, depositLog, onMarkReturned, onDepositEvent, onMarkAviso, onOpenVehicle }) => {
     const h = React.createElement;
     const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
     const [items, setItems] = React.useState(() => { try { return JSON.parse(localStorage.getItem(VOZ_LS) || "[]"); } catch (e) { return []; } });
@@ -2187,35 +2203,57 @@ const inicioOT =
     React.useEffect(() => () => { onRef.current = false; try { recRef.current && recRef.current.abort(); } catch (e) {} }, []);
     const byId = React.useMemo(() => Object.fromEntries((vehicles || []).map((v) => [v.id, v])), [vehicles]);
     const ahora = () => new Date().toISOString();
-    const anadir = (entrada, origen) => {
+    const destPorDefecto = () => { try { return localStorage.getItem(VOZ_DEST_LS) || null; } catch (e) { return null; } };
+    const anadir = (entrada, origen, accion = "volvio", dest = null) => {
       const alts = Array.isArray(entrada) ? entrada : [entrada];
       const { res: r, texto } = vozResolver(alts, vehicles, diccRef.current);
       if (!r.length) { if (origen === "voz") vozHablar("No he entendido el n\xFAmero"); return 0; }
       const nuevos = [], dichos = [];
+      const d = accion === "volvio" ? null : (dest || destPorDefecto());
       for (const x of r) {
-        if (x.id && itemsRef.current.some((it) => it.id === x.id)) { dichos.push(`${x.id.replace("-", " ")} ya estaba`); continue; }
-        nuevos.push({ key: Math.random().toString(36).slice(2), dicho: x.dicho.trim(), texto, id: x.id, candidatos: x.candidatos || [], at: ahora(), sel: true, unico: r.length === 1, aprendido: !!x.aprendido });
-        dichos.push(x.id ? x.id.replace("-", " ") : `${x.dicho.trim()}, revisar`);
+        if (x.id && itemsRef.current.some((it) => it.id === x.id && (it.accion || "volvio") === accion)) { dichos.push(`${x.id.replace("-", " ")} ya estaba`); continue; }
+        nuevos.push({ key: Math.random().toString(36).slice(2), dicho: x.dicho.trim(), texto, id: x.id, candidatos: x.candidatos || [], at: ahora(), sel: true, unico: r.length === 1, aprendido: !!x.aprendido, accion, dest: d });
+        dichos.push((x.id ? x.id.replace("-", " ") : `${x.dicho.trim()}, revisar`) + (accion === "fianza" ? ", fianza" : accion === "presupuesto" ? ", presupuesto" : "") + (d ? " para " + d : ""));
       }
       if (nuevos.length) setItems((s) => [...s, ...nuevos]);
       if (origen === "voz") vozHablar(dichos.join(". "));
       return nuevos.length;
+    };
+    // Asigna destinatario a la última fianza/presupuesto (cuando el nombre llega en otro trozo)
+    const destAlUltimo = (dest) => {
+      const ult = [...itemsRef.current].reverse().find((it) => it.accion && it.accion !== "volvio");
+      if (!ult) return false;
+      setItems((s) => s.map((x) => x.key === ult.key ? { ...x, dest } : x));
+      try { localStorage.setItem(VOZ_DEST_LS, dest); } catch (e) {}
+      vozHablar("Para " + dest);
+      return true;
+    };
+    const anadirTexto = (txt) => {
+      const { frases } = vozTrocear("", [txt]);
+      if (frases.length) { for (const f of frases) anadir(f.alts, "texto", f.accion, f.dest); }
+      else anadir(txt, "texto", "volvio");
     };
     const bufRef = React.useRef(""), bufTimer = React.useRef(null);
     const [pendiente, setPendiente] = React.useState("");
     const [aviso, setAviso] = React.useState("");
     const recibir = (alts) => {
       if (!vozTieneFin(alts)) {
+        const sd = !bufRef.current && vozSoloDest(alts[0] || "");
+        if (sd && destAlUltimo(sd)) return;
         bufRef.current = (bufRef.current + " " + (alts[0] || "")).trim(); setPendiente(bufRef.current);
         clearTimeout(bufTimer.current);
-        bufTimer.current = setTimeout(() => { if (bufRef.current) { setAviso(`Descartado “${bufRef.current}”: no dijiste “volvi\xF3”`); vozHablar("Falta decir volvi\xF3"); bufRef.current = ""; setPendiente(""); } }, 12000);
+        bufTimer.current = setTimeout(() => { if (bufRef.current) { setAviso(`Descartado “${bufRef.current}”: falta la acci\xF3n (volvi\xF3 / fianza / presupuesto)`); vozHablar("Falta decir volvi\xF3, fianza o presupuesto"); bufRef.current = ""; setPendiente(""); } }, 12000);
         return;
       }
       clearTimeout(bufTimer.current); setAviso("");
-      const { frases, resto } = vozTrocear(bufRef.current, alts);
+      // "a Pedro" al principio de este trozo: es de la fianza/presupuesto anterior
+      const lead = !bufRef.current && vozNorm(alts[0] || "").match(/^\s*(?:(?:a|para|whatsapp|wasap|guasap|por|al)\s+)*(pedro|rosana)\b/);
+      if (lead) destAlUltimo(lead[1] === "pedro" ? "Pedro" : "Rosana");
+      const { frases, resto } = vozTrocear(bufRef.current, alts.map((a) => lead ? vozNorm(a).replace(/^\s*(?:(?:a|para|whatsapp|wasap|guasap|por|al)\s+)*(pedro|rosana)\b/, "") : a));
       bufRef.current = resto; setPendiente(resto);
-      if (!frases.length) { vozHablar("No he entendido el n\xFAmero"); return; }
-      for (const f of frases) anadir(f, "voz");
+      const conNum = frases.filter((f) => f.alts.some((a) => /\d|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|cien|veint|treint|cuarent|cincuent|sesent|setent|ochent|novent/.test(a)));
+      if (!conNum.length) { if (!lead) vozHablar("No he entendido el n\xFAmero"); return; }
+      for (const f of conNum) { anadir(f.alts, "voz", f.accion, f.dest); if (f.dest) { try { localStorage.setItem(VOZ_DEST_LS, f.dest); } catch (e) {} } }
     };
     React.useEffect(() => () => clearTimeout(bufTimer.current), []);
     const arrancar = () => {
@@ -2239,11 +2277,25 @@ const inicioOT =
       recRef.current = rec; onRef.current = true;
       try { rec.start(); setEscuchando(true); vozHablar("Te escucho"); } catch (e) { setErr(String(e.message || e)); }
     };
-    const parar = () => { onRef.current = false; try { recRef.current && recRef.current.stop(); } catch (e) {} setEscuchando(false); clearTimeout(bufTimer.current); if (bufRef.current) setAviso(`Descartado \u201C${bufRef.current}\u201D: no dijiste \u201Cvolvi\xF3\u201D`); bufRef.current = ""; setPendiente(""); };
+    const parar = () => { onRef.current = false; try { recRef.current && recRef.current.stop(); } catch (e) {} setEscuchando(false); clearTimeout(bufTimer.current); if (bufRef.current) setAviso(`Descartado “${bufRef.current}”: falta la acción (volvió / fianza / presupuesto)`); bufRef.current = ""; setPendiente(""); };
+    const gestionDe = (v) => {
+      const desde = v.returnedAt || v.lastReturnAt || new Date(Date.now() - 3 * 864e5).toISOString();
+      return (depositLog || []).filter((e) => e.vehicleId === v.id && String(e.at || "") >= String(desde)).slice(-1)[0] || null;
+    };
     const estadoDe = (it) => {
       if (!it.id) return { tipo: "duda", txt: it.candidatos && it.candidatos.length ? "\xBFCu\xE1l es?" : "No existe en la flota" };
       const v = byId[it.id];
       if (!v) return { tipo: "duda", txt: "No existe en la flota" };
+      const acc = it.accion || "volvio";
+      if (acc !== "volvio") {
+        const g = gestionDe(v);
+        if (g) return { tipo: "ya", txt: `Ya gestionada el ${fmtFechaCorta(g.at)} (${g.tipo === "fianza" ? "fianza" : "presupuesto"})` };
+        const vuelveAhora = items.some((x) => x.id === it.id && (x.accion || "volvio") === "volvio" && x.sel);
+        if (v.workflowStatus === "EN_USO" && !vuelveAhora) return { tipo: "duda", txt: "Figura EN USO: no consta que haya vuelto" };
+        if (!it.dest) return { tipo: "duda", txt: "Elige a qui\xE9n va el WhatsApp" };
+        const sinRev = v.workflowStatus === "DEVUELTO" || vuelveAhora;
+        return { tipo: "ok", txt: `WhatsApp a ${it.dest}` + (v.currentClient || (v.last720Rental && v.last720Rental.cliente) ? ` \xB7 ${v.currentClient || v.last720Rental.cliente}` : "") + (sinRev ? " \xB7 ⚠ a\xFAn sin revisar" : "") };
+      }
       if (v.workflowStatus !== "EN_USO") return { tipo: "ya", txt: `Ya estaba en campa (${(WORKFLOW_STATES[v.workflowStatus] || {}).short || v.workflowStatus || "sin estado"})` };
       const fin = v.rentalEndDate ? String(v.rentalEndDate).slice(0, 10) : null;
       if (fin && fin > todayKey()) return { tipo: "ok", txt: `En uso \xB7 devoluci\xF3n prevista ${fmtFechaCorta(v.rentalEndDate)} (vuelve antes)` };
@@ -2251,17 +2303,41 @@ const inicioOT =
     };
     const lista = items.map((it) => ({ it, e: estadoDe(it) }));
     const aRegistrar = lista.filter((x) => x.e.tipo === "ok" && x.it.sel);
+    const [envios, setEnvios] = React.useState(null); // { Pedro: { lineas, ids, enviado }, Rosana: {...} }
     const registrar = async () => {
-      setRegistrando(true);
-      const hechos = [];
-      for (const { it } of aRegistrar) {
-        try { await onMarkReturned(it.id, it.at); hechos.push(it.id); } catch (e) { console.warn("[voz]", e); }
+      setRegistrando(true); setEnvios(null);
+      const hechos = [], wa = {};
+      const orden = [...aRegistrar].sort((a, b) => ((a.it.accion || "volvio") === "volvio" ? 0 : 1) - ((b.it.accion || "volvio") === "volvio" ? 0 : 1));
+      for (const { it } of orden) {
+        const acc = it.accion || "volvio";
+        try {
+          if (acc === "volvio") { await onMarkReturned(it.id, it.at); }
+          else {
+            const entryId = await onDepositEvent(it.id, acc);
+            const d = it.dest;
+            wa[d] = wa[d] || { lineas: [], ids: [], enviado: false };
+            wa[d].lineas.push(mensajeAvisoOficina({ vehicleId: it.id, tipo: acc }));
+            if (entryId != null) wa[d].ids.push(entryId);
+          }
+          hechos.push({ id: it.id, accion: acc, key: it.key });
+        } catch (e) { console.warn("[voz]", e); }
       }
       setRegistrando(false);
       setResumen(hechos);
-      vozHablar(`${hechos.length} veh\xEDculo${hechos.length === 1 ? "" : "s"} registrado${hechos.length === 1 ? "" : "s"}`);
-      setItems((s) => s.filter((it) => !hechos.includes(it.id)));
+      if (Object.keys(wa).length) setEnvios(wa);
+      const nWa = Object.keys(wa).length;
+      vozHablar(`${hechos.length} registrado${hechos.length === 1 ? "" : "s"}` + (nWa ? `. Pulsa enviar WhatsApp` : ""));
+      const keys = new Set(hechos.map((x) => x.key));
+      setItems((s) => s.filter((it) => !keys.has(it.key)));
     };
+    const enviarWa = (dest) => {
+      const e = envios && envios[dest];
+      if (!e) return;
+      lanzarWhatsappOficina(telOficina(dest), e.lineas.join("\n"));
+      if (e.ids.length && onMarkAviso) onMarkAviso(e.ids);
+      setEnvios((x) => ({ ...x, [dest]: { ...x[dest], enviado: true } }));
+    };
+    const ponerDest = (key, dest) => { setItems((s) => s.map((x) => x.key === key ? { ...x, dest } : x)); try { localStorage.setItem(VOZ_DEST_LS, dest); } catch (e) {} };
     const quitar = (key) => setItems((s) => s.filter((x) => x.key !== key));
     const elegir = (key, id) => {
       const it = itemsRef.current.find((x) => x.key === key);
@@ -2276,7 +2352,7 @@ const inicioOT =
           : h("button", { "data-voz-full": "1", onClick: () => ponerFull(true), title: "Para el m\xF3vil: abre solo esta pantalla. Guarda el enlace como acceso directo.", style: { background: "none", border: `1px solid ${T.border}`, borderRadius: "10px", padding: "6px 12px", cursor: "pointer", color: T.inkSoft, fontSize: "13px" } }, "\u{1F4F1} Pantalla completa (m\xF3vil)")),
       h("div", { style: { textAlign: "center", padding: "8px 0 18px" } },
         h("h2", { style: { margin: "0 0 4px", fontFamily: F.display, fontSize: "24px", color: T.ink } }, "\u{1F399}️ Campa por voz"),
-        h("div", { style: { fontSize: "13px", color: T.inkSoft } }, "Pulsa el micr\xF3fono y di siempre: ", h("b", null, "N\xDAMERO + VOLVI\xD3"), " (“309 volvi\xF3”). Las CB, con su prefijo (“CB 3 volvi\xF3”). No se apunta nada hasta o\xEDr “volvi\xF3”, as\xED que puedes hacer pausas. Al terminar la ronda, revisa la lista y pulsa ", h("b", null, "Registrar todos"), ".")),
+        h("div", { style: { fontSize: "13px", color: T.inkSoft } }, "Pulsa el micr\xF3fono y di siempre: ", h("b", null, "N\xDAMERO + ACCI\xD3N"), ": “309 volvi\xF3”, “269 fianza Pedro”, “301 presupuesto Rosana”. Las CB, con su prefijo (“CB 3 volvi\xF3”). No se apunta nada hasta o\xEDr la acci\xF3n (volvi\xF3 / fianza / presupuesto), as\xED que puedes hacer pausas. Al terminar la ronda, revisa la lista y pulsa ", h("b", null, "Registrar todos"), ".")),
       h("div", { style: { display: "flex", justifyContent: "center", marginBottom: "14px" } },
         h("button", { "data-voz-mic": "1", onClick: escuchando ? parar : arrancar, "aria-pressed": escuchando,
           style: { width: "128px", height: "128px", borderRadius: "50%", border: "none", cursor: "pointer", fontSize: "48px", color: "#fff",
@@ -2287,12 +2363,18 @@ const inicioOT =
       aviso && h("div", { "data-voz-aviso": "1", style: { textAlign: "center", fontSize: "12.5px", color: T.warn, fontWeight: 700, marginBottom: "6px" } }, aviso),
       err && h("div", { style: { background: "#FEE2E2", color: "#991B1B", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", marginBottom: "12px" } }, err),
       h("div", { style: { display: "flex", gap: "8px", marginBottom: "16px" } },
-        h("input", { "aria-label": "Escribir veh\xEDculo", value: manual, onChange: (e) => setManual(e.target.value), placeholder: "o escribe el n\xFAmero: 309, CB 3…", inputMode: "text",
-          onKeyDown: (e) => { if (e.key === "Enter" && manual.trim()) { anadir(manual, "texto"); setManual(""); } },
+        h("input", { "aria-label": "Escribir veh\xEDculo", value: manual, onChange: (e) => setManual(e.target.value), placeholder: "o escribe: 309, 269 fianza Pedro…", inputMode: "text",
+          onKeyDown: (e) => { if (e.key === "Enter" && manual.trim()) { anadirTexto(manual); setManual(""); } },
           style: { flex: 1, padding: "10px 12px", border: `1px solid ${T.border}`, borderRadius: "10px", fontSize: "15px", background: T.surface, color: T.ink } }),
-        h(Btn, { variant: "secondary", disabled: !manual.trim(), onClick: () => { anadir(manual, "texto"); setManual(""); } }, "A\xF1adir")),
+        h(Btn, { variant: "secondary", disabled: !manual.trim(), onClick: () => { anadirTexto(manual); setManual(""); } }, "A\xF1adir")),
       resumen && h("div", { "data-voz-resumen": "1", style: { background: "#D7EFDA", color: "#1F5E2A", borderRadius: "10px", padding: "10px 12px", fontSize: "13.5px", fontWeight: 700, marginBottom: "12px" } },
-        `✔ ${resumen.length} registrado${resumen.length === 1 ? "" : "s"} como VOLVI\xD3: ${resumen.join(", ") || "ninguno"}`),
+        `✔ ${resumen.length} registrado${resumen.length === 1 ? "" : "s"}: ${resumen.map((x) => x.id + ((x.accion || "volvio") === "volvio" ? " volvi\xF3" : x.accion === "fianza" ? " fianza" : " presupuesto")).join(", ") || "ninguno"}`),
+      envios && h("div", { "data-voz-envios": "1", style: { display: "flex", flexDirection: "column", gap: "8px", marginBottom: "14px" } },
+        Object.entries(envios).map(([dest, e]) => h("button", { key: dest, "data-voz-wa": dest, onClick: () => enviarWa(dest),
+          style: { width: "100%", padding: "14px", borderRadius: "12px", border: e.enviado ? `1px solid ${T.border}` : "none", cursor: "pointer", fontSize: "15px", fontWeight: 800, textAlign: "left",
+            background: e.enviado ? T.surface : "#25D366", color: e.enviado ? T.inkSoft : "#fff" } },
+          e.enviado ? `✔ WhatsApp a ${dest} abierto (pulsa para reenviar)` : `\u{1F4F2} Enviar WhatsApp a ${dest} (${e.lineas.length})`,
+          h("div", { style: { fontSize: "12px", fontWeight: 600, opacity: 0.9, marginTop: "4px", whiteSpace: "pre-line" } }, e.lineas.join("\n"))))),
       h("div", { style: { display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "6px" } },
         h("span", { style: { fontWeight: 800, color: T.ink, fontSize: "15px" } }, "Ronda"),
         h("span", { style: { fontSize: "12.5px", color: T.inkSoft } }, `${items.length} dicho${items.length === 1 ? "" : "s"} \xB7 ${aRegistrar.length} a registrar`),
@@ -2306,8 +2388,13 @@ const inicioOT =
               h("div", { style: { display: "flex", gap: "8px", alignItems: "baseline", flexWrap: "wrap" } },
                 it.id ? h("button", { onClick: () => onOpenVehicle && onOpenVehicle(it.id), style: { background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: F.mono, fontWeight: 800, fontSize: "16px", color: T.ink } }, it.id)
                   : h("span", { style: { fontFamily: F.mono, fontWeight: 800, fontSize: "16px", color: T.warn } }, it.dicho || "?"),
+                h("span", { "data-voz-accion": it.accion || "volvio", style: { fontSize: "10.5px", fontWeight: 800, color: "#fff", background: (VOZ_ACC[it.accion || "volvio"] || VOZ_ACC.volvio).col, borderRadius: "6px", padding: "1px 7px" } }, (VOZ_ACC[it.accion || "volvio"] || VOZ_ACC.volvio).txt),
                 h("span", { style: { fontSize: "11px", color: T.inkFaint } }, hora(it.at), " \xB7 o\xEDdo: “", String(it.texto || "").trim().slice(0, 40), "”", it.aprendido ? " \xB7 \u{1F3AF} corregido por tu diccionario" : "")),
               h("div", { style: { fontSize: "12.5px", color: color[e.tipo], fontWeight: 600 } }, e.txt),
+              it.id && it.accion && it.accion !== "volvio" && e.tipo !== "ya" && h("div", { style: { display: "flex", gap: "6px", alignItems: "center", marginTop: "6px" } },
+                h("span", { style: { fontSize: "11.5px", color: T.inkSoft } }, "WhatsApp a:"),
+                OFICINA_CONTACTOS.map((c) => h("button", { key: c.nombre, "data-voz-dest": c.nombre, onClick: () => ponerDest(it.key, c.nombre),
+                  style: { cursor: "pointer", borderRadius: "8px", padding: "4px 12px", fontSize: "13px", fontWeight: 700, border: `1px solid ${it.dest === c.nombre ? "#25D366" : T.border}`, background: it.dest === c.nombre ? "#25D366" : T.bg, color: it.dest === c.nombre ? "#fff" : T.ink } }, c.nombre))),
               !it.id && it.candidatos && it.candidatos.length > 0 && h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "6px" } },
                 it.candidatos.map((c) => h("button", { key: c, onClick: () => elegir(it.key, c), style: { cursor: "pointer", border: `1px solid ${T.border}`, background: T.bg, borderRadius: "8px", padding: "4px 10px", fontFamily: F.mono, fontWeight: 700, fontSize: "13px", color: T.ink } }, c)))),
             h("button", { onClick: () => quitar(it.key), title: "Quitar de la lista", style: { background: "none", border: "none", cursor: "pointer", color: T.inkFaint, fontSize: "20px", lineHeight: 1 } }, "\xD7")))),
@@ -2315,10 +2402,10 @@ const inicioOT =
         h("button", { "data-voz-registrar": "1", disabled: !aRegistrar.length || registrando, onClick: registrar,
           style: { width: "100%", padding: "16px", borderRadius: "14px", border: "none", cursor: aRegistrar.length ? "pointer" : "default", fontSize: "16px", fontWeight: 800,
             background: aRegistrar.length ? T.ok : T.border, color: aRegistrar.length ? "#fff" : T.inkFaint, boxShadow: aRegistrar.length ? "0 6px 18px rgba(0,0,0,.18)" : "none" } },
-          registrando ? "Registrando…" : `✔ Registrar todos (${aRegistrar.length}) como VOLVI\xD3`)),
+          registrando ? "Registrando…" : `✔ Registrar todos (${aRegistrar.length})`)),
       h(VozCalibracion, { vehicles, dicc, onAprender: aprender, onBorrar: olvidar, SR }),
       h("div", { style: { fontSize: "11.5px", color: T.inkFaint, textAlign: "center", marginTop: "10px", lineHeight: 1.5 } },
-        "Cada registro equivale a pulsar VOLVI\xD3 a la hora en que lo dictaste. Los que ya estaban en campa no se tocan. La lista se guarda en este m\xF3vil hasta que registres."));
+        "VOLVI\xD3 equivale a pulsar el bot\xF3n a la hora en que lo dictaste. FIANZA y PRESUPUESTO se registran en Fianzas igual que con sus botones; el WhatsApp se abre con el texto escrito y solo tienes que enviarlo. Los que ya estaban en campa o ya gestionados no se tocan. La lista se guarda en este m\xF3vil hasta que registres."));
     if (!full) return contenido;
     return h("div", { "data-voz-pantalla": "1", style: { position: "fixed", inset: 0, zIndex: 2000, background: T.bg, overflowY: "auto", padding: "16px 16px 24px", boxSizing: "border-box" } }, contenido);
   };
@@ -12454,6 +12541,7 @@ No se puede deshacer.`,
       }));
     };
     const handleDepositEvent = async (vehicleId, tipo, fechaManual, hqReservaOverride) => {
+      const nuevoId = Date.now() + Math.random();
       // Si la gestión viene de una tarjeta pendiente, usamos ESA reserva exacta.
       // Solo en registros manuales fuera de la lista buscamos la última reserva
       // completada de HQ.
@@ -12485,7 +12573,7 @@ No se puede deshacer.`,
         const reviewAt = cycleReview && cycleReview.reviewStartedAt || v.lastInspectedAt || null;
         const hrs = (from) => from ? Math.round((new Date(now) - new Date(from)) / 36e5 * 100) / 100 : null;
         const entry = {
-          id: Date.now() + Math.random(),
+          id: nuevoId,
           vehicleId,
           tipo,
           at: now,
@@ -12510,6 +12598,7 @@ No se puede deshacer.`,
         const vehicles = tipo === "fianza" ? s.vehicles.map((x) => x.id === vehicleId ? { ...x, fianzaAvisoEnviado: true, fianzaAvisoEnviadoAt: now } : x) : s.vehicles;
         return { ...s, depositLog, vehicles };
       });
+      return nuevoId;
     };
     const handleEditDepositDate = (eventId, fechaIso) => {
       if (!fechaIso) return;
@@ -14981,7 +15070,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
           onMarkOrdered: handleMarkOrdered
         }
       )
-    ), activeTab === "buscador" && /* @__PURE__ */ React.createElement(BuscadorView, { state: filteredState, onSelectVehicle: (id) => { setSelectedVehicleId(id); setView("detail"); setActiveTab("fleet"); } }), activeTab === "voz" && React.createElement(VozCampaView, { vehicles: state.vehicles, onMarkReturned: handleMarkReturned, onOpenVehicle: (id) => { setSelectedVehicleId(id); setView("detail"); setActiveTab("fleet"); } }), activeTab === "stats" && /* @__PURE__ */ React.createElement(StatsView, { state: filteredState, activeTab, quantHistorySnapshot })), /* @__PURE__ */ React.createElement(
+    ), activeTab === "buscador" && /* @__PURE__ */ React.createElement(BuscadorView, { state: filteredState, onSelectVehicle: (id) => { setSelectedVehicleId(id); setView("detail"); setActiveTab("fleet"); } }), activeTab === "voz" && React.createElement(VozCampaView, { vehicles: state.vehicles, depositLog: state.depositLog, onMarkReturned: handleMarkReturned, onDepositEvent: handleDepositEvent, onMarkAviso: handleMarkAvisoOficina, onOpenVehicle: (id) => { setSelectedVehicleId(id); setView("detail"); setActiveTab("fleet"); } }), activeTab === "stats" && /* @__PURE__ */ React.createElement(StatsView, { state: filteredState, activeTab, quantHistorySnapshot })), /* @__PURE__ */ React.createElement(
       VehicleModal,
       {
         open: !!vehicleModal,
