@@ -2313,7 +2313,16 @@ const inicioOT =
         try {
           if (acc === "volvio") { await onMarkReturned(it.id, it.at); }
           else {
-            const entryId = await onDepositEvent(it.id, acc);
+            // MISMA reserva que la fila de Fianzas (ciclo actual del vehículo, del 720 al VOLVIÓ).
+            // Sin esto se buscaba en el Excel de completadas y podía coger un alquiler anterior (AC-286, 16-oct-2026).
+            const vv = byId[it.id] || {};
+            const resCiclo = (vv.currentReservaId || vv.currentClient) ? {
+              cliente: vv.currentClient || "",
+              fechaEntrega: vv.rentalStartDate || vv.lastExitAt || "",
+              fechaDevolucion: vv.fianzaDevolucionPrevista || vv.returnedAt || vv.lastReturnAt || "",
+              reservaId: vv.currentReservaId || ""
+            } : undefined;
+            const entryId = await onDepositEvent(it.id, acc, undefined, resCiclo);
             const d = it.dest;
             wa[d] = wa[d] || { lineas: [], ids: [], enviado: false };
             wa[d].lineas.push(mensajeAvisoOficina({ vehicleId: it.id, tipo: acc }));
