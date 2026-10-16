@@ -2043,12 +2043,12 @@ const inicioOT =
   // Palabra de cierre: nada se interpreta hasta oír la acción. Lo anterior se acumula.
   //   "volvió"/"listo" → VOLVIÓ · "fianza" → devolver fianza · "presupuesto" → presupuesto enviado
   // Comandos (uno por botón). Los de varias palabras van primero para que ganen a los cortos.
-  const VOZ_KW = "mostrar danos|ver danos|mostrar dano|danos|se fue sin revisar|sin revisar|en reparacion|reparando|volvio|volvi|vuelve|volvieron|fianza|fianzas|presupuesto|presupuestos|entregado|entregada|entregar|listo|lista|revisado|revisada|inspeccionado|inspeccionada";
+  const VOZ_KW = "mostrar danos|ver danos|mostrar dano|danos|se fue sin revisar|sin revisar|revisar y confirmar|revisar|en reparacion|reparando|volvio|volvi|vuelve|volvieron|fianza|fianzas|presupuesto|presupuestos|entregado|entregada|entregar|listo|lista|revisado|revisada|inspeccionado|inspeccionada";
   const VOZ_FIN_RE = new RegExp("\\b(" + VOZ_KW + ")\\b");
-  const vozAccion = (kw) => /dano/.test(kw) ? "danos" : /revisar/.test(kw) ? "sinrevisar" : /reparacion|reparando/.test(kw) ? "reparando"
+  const vozAccion = (kw) => /dano/.test(kw) ? "danos" : /^revisar/.test(kw) ? "revisarot" : /revisar/.test(kw) ? "sinrevisar" : /reparacion|reparando/.test(kw) ? "reparando"
     : /^fianza/.test(kw) ? "fianza" : /^presupuesto/.test(kw) ? "presupuesto" : /^entreg/.test(kw) ? "entregado" : /^list/.test(kw) ? "listo"
     : /^(revisad|inspeccionad)/.test(kw) ? "revisado" : "volvio";
-  const VOZ_HABLA = { volvio: "volvi\xF3", fianza: "devolver fianza", presupuesto: "pas\xE9 presupuesto", entregado: "entregado", listo: "listo", revisado: "revisado", reparando: "en reparaci\xF3n", sinrevisar: "se fue sin revisar", danos: "mostrar da\xF1os" };
+  const VOZ_HABLA = { volvio: "volvi\xF3", fianza: "devolver fianza", presupuesto: "pas\xE9 presupuesto", entregado: "entregado", listo: "listo", revisado: "revisado", reparando: "en reparaci\xF3n", sinrevisar: "se fue sin revisar", danos: "mostrar da\xF1os", revisarot: "revisar y confirmar" };
   const VOZ_ESTADO = { entregado: "EN_USO", listo: "LISTO", revisado: "REVISADO", reparando: "EN_REPARACION" };
   // Daños que impiden estar LISTO (misma regla que el botón "Reparado": ni reparados ni asumidos).
   const vozPendientes = (damages, id) => (damages || []).filter((d) => d.vehicleId === id && d.state !== "REPARADO" && d.state !== "ASUMIDO" && damageRepair(d) !== "REPARADO").length;
@@ -2081,7 +2081,7 @@ const inicioOT =
   };
   const VOZ_ACC = { volvio: { txt: "VOLVI\xD3", col: "#2A44D6" }, fianza: { txt: "DEVOLVER FIANZA", col: "#1F5E2A" }, presupuesto: { txt: "PAS\xC9 PRESUPUESTO", col: "#B45309" },
     entregado: { txt: "ENTREGADO", col: "#6D28D9" }, listo: { txt: "LISTO", col: "#2A7A38" }, revisado: { txt: "REVISADO", col: "#0E7490" },
-    reparando: { txt: "EN REPARACI\xD3N", col: "#9061F9" }, sinrevisar: { txt: "SE FUE SIN REVISAR", col: "#B91C1C" }, danos: { txt: "MOSTRAR DA\xD1OS", col: "#556274" } };
+    reparando: { txt: "EN REPARACI\xD3N", col: "#9061F9" }, sinrevisar: { txt: "SE FUE SIN REVISAR", col: "#B91C1C" }, revisarot: { txt: "REVISAR Y CONFIRMAR", col: "#C2410C" }, danos: { txt: "MOSTRAR DA\xD1OS", col: "#556274" } };
   // Cómo se lee en voz alta un vehículo: las AC solo con el número ("286"), las CB con su prefijo.
   const vozNombre = (id) => /^AC-/.test(id) ? String(Number(id.slice(3).replace(/[A-Z]/g, ""))) : String(id).replace("-", " ").replace(/ 0+/, " ");
   const VOZ_DEST_LS = "acllar_voz_dest";
@@ -2266,7 +2266,7 @@ const inicioOT =
       bufRef.current = resto; setPendiente(resto);
       const conNum = frases.filter((f) => f.alts.some((a) => /\d|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|cien|veint|treint|cuarent|cincuent|sesent|setent|ochent|novent/.test(a)));
       if (!conNum.length) { if (!lead) vozHablar("No he entendido el n\xFAmero"); return; }
-      for (const f of conNum) { if (f.accion === "danos") { vozHablar("Mostrar da\xF1os, con el micr\xF3fono del cockpit"); continue; } anadir(f.alts, "voz", f.accion, f.dest); if (f.dest) { try { localStorage.setItem(VOZ_DEST_LS, f.dest); } catch (e) {} } }
+      for (const f of conNum) { if (f.accion === "danos" || f.accion === "revisarot") { vozHablar((f.accion === "danos" ? "Mostrar da\xF1os" : "Revisar y confirmar") + ", con el micr\xF3fono del cockpit"); continue; } anadir(f.alts, "voz", f.accion, f.dest); if (f.dest) { try { localStorage.setItem(VOZ_DEST_LS, f.dest); } catch (e) {} } }
     };
     React.useEffect(() => () => clearTimeout(bufTimer.current), []);
     const arrancar = () => {
@@ -2490,7 +2490,7 @@ const inicioOT =
     }).filter((x) => x.ok > 0).sort((a, b) => b.score - a.score);
     return { dicho, lista };
   };
-  const VozGlobal = ({ vehicles, damages, depositLog, fichaId, oculto, onAbrirDanos, onReparar, onCargo, onRestaurar, onMarkReturned, onSetEstado, onLeftUnreviewed, onDepositEvent, onMarkAviso }) => {
+  const VozGlobal = ({ vehicles, damages, depositLog, fichaId, oculto, onAbrirOT, onAbrirDanos, onReparar, onCargo, onRestaurar, onMarkReturned, onSetEstado, onLeftUnreviewed, onDepositEvent, onMarkAviso }) => {
     const h = React.createElement;
     const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
     const [on, setOn] = React.useState(false);
@@ -2501,8 +2501,21 @@ const inicioOT =
     const [undo, setUndo] = React.useState(null); // { snap, txt }
     const recRef = React.useRef(null), onRef = React.useRef(false), bufRef = React.useRef(""), timerRef = React.useRef(null), mecRef = React.useRef(null), undoTimer = React.useRef(null), confirmRef = React.useRef(null);
     const [wa, setWa] = React.useState(null); // { id, tipo, entryId, dest, enviado }
-    const ctx = React.useRef({}); ctx.current = { vehicles, damages, depositLog, fichaId, eleccion };
+    const ctx = React.useRef({}); ctx.current = { vehicles, damages, depositLog, fichaId, eleccion, onAbrirOT };
+    const esperaOT = React.useRef(0);
     React.useEffect(() => () => { onRef.current = false; try { recRef.current && recRef.current.abort(); } catch (e) {} }, []);
+    // OT abierta por voz: cuando el modal termina de leerla, se dice qué trae.
+    React.useEffect(() => {
+      const on = () => {
+        if (!esperaOT.current || Date.now() - esperaOT.current > 120000) return;
+        esperaOT.current = 0;
+        const det = { accion: "estado" };
+        try { window.dispatchEvent(new CustomEvent("acllar-voz-ot", { detail: det })); } catch (e) {}
+        if (det.r) { setMsg({ txt: det.r.txt, tipo: det.r.tipo || "ok" }); vozHablar(det.r.txt); }
+      };
+      window.addEventListener("acllar-voz-ot-listo", on);
+      return () => window.removeEventListener("acllar-voz-ot-listo", on);
+    }, []);
     if (oculto && on) { onRef.current = false; try { recRef.current && recRef.current.abort(); } catch (e) {} }
     const decir = (txt, tipo = "ok", hablar = true) => { setMsg({ txt, tipo }); if (hablar) vozHablar(txt); };
     const desc = (d) => d.description || [d.zona, d.tipoDano].filter(Boolean).join(" — ") || d.id;
@@ -2566,6 +2579,14 @@ const inicioOT =
         onAbrirDanos(id); setEleccion(null); mecRef.current = null;
         decir(`${nom}: ${dTxt}`); return;
       }
+      if (accion === "revisarot") {
+        setEleccion(null); mecRef.current = null;
+        const r = ctx.current.onAbrirOT ? ctx.current.onAbrirOT(id) : "none";
+        if (r === "busy") { decir("Ya hay una OT abierta: di confirmar o cancelar", "warn"); return; }
+        if (r !== "ok") { decir(`${nom}: no tiene ninguna OT pendiente de confirmar`, "warn"); return; }
+        esperaOT.current = Date.now();
+        decir(`Abriendo la OT del ${nom}`); return;
+      }
       if (accion === "volvio") {
         if (est !== "EN_USO") { decir(`${nom} ya estaba en campa (${nomEst})`, "warn"); return; }
         const snap = snapVeh(v); onMarkReturned(id); hecho(`${nom}, volvi\xF3`, snap); return;
@@ -2626,6 +2647,13 @@ const inicioOT =
         }
       }
       const texto = (bufRef.current + " " + t0).trim(), tn = vozNorm(texto);
+      // 2b) OT abierta en pantalla: "confirmar" = botón azul · "cancelar" = Cancelar · "cerrar" = Cerrar
+      if (!vozTieneFin(alts) && /\b(confirmar|confirma|confirmo|confirmada|cancelar|cancela|cerrar|cierra|cierrala)\b/.test(n)) {
+        const det = { accion: /\bconfirm/.test(n) ? "confirmar" : /\bcancel/.test(n) ? "cancelar" : "cerrar" };
+        try { window.dispatchEvent(new CustomEvent("acllar-voz-ot", { detail: det })); } catch (e) {}
+        if (det.r) { bufRef.current = ""; setOido(""); clearTimeout(timerRef.current); decir(det.r.txt, det.r.tipo || "ok"); return; }
+        if (!/\d/.test(texto)) { bufRef.current = ""; setOido(""); clearTimeout(timerRef.current); decir("No hay ninguna OT abierta", "warn"); return; }
+      }
       // 3) Comandos de vehículo: "269, listo" / "297, entregado" / "312, mostrar daños"…
       if (vozTieneFin([texto]) || vozTieneFin(alts)) {
         const { frases, resto } = vozTrocear(bufRef.current, alts);
@@ -2688,7 +2716,7 @@ const inicioOT =
           h("div", { style: { flex: 1 } }),
           h("button", { onClick: () => setAbierto(false), style: { background: "none", border: "none", cursor: "pointer", color: T.inkFaint, fontSize: "18px", lineHeight: 1 } }, "\xD7")),
         fichaId ? h("div", { style: { fontSize: "11.5px", color: T.inkSoft, marginBottom: "6px" } }, "Ficha abierta: ", h("b", { style: { fontFamily: F.mono } }, fichaId), " \xB7 di el da\xF1o y la acci\xF3n: “parachoques trasero, rotura, reparado, Carlos”")
-          : h("div", { style: { fontSize: "11.5px", color: T.inkSoft, marginBottom: "6px" } }, "Di el n\xFAmero y el comando: “312, mostrar da\xF1os”, “269, listo”, “297, entregado”, “314, devolver fianza”…"),
+          : h("div", { style: { fontSize: "11.5px", color: T.inkSoft, marginBottom: "6px" } }, "Di el n\xFAmero y el comando: “312, mostrar da\xF1os”, “269, listo”, “297, entregado”, “314, devolver fianza”, “286, revisar y confirmar”…"),
         oido && h("div", { style: { fontStyle: "italic", color: T.inkSoft, marginBottom: "6px" } }, "“", oido, "…”"),
         msg && h("div", { "data-voz-global-msg": "1", style: { fontWeight: 700, color: col[msg.tipo] || T.ink, marginBottom: "6px" } }, msg.txt),
         eleccion && h("div", { "data-voz-eleccion": "1", style: { display: "flex", flexDirection: "column", gap: "4px", marginBottom: "6px" } },
@@ -4467,6 +4495,15 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
         onInitialConsumed?.();
       }
     }, [open, initialFiles]);
+    // Voz: el micrófono pulsa los MISMOS botones de este modal (nada se salta).
+    const vozRef = useRef(null);
+    useEffect(() => {
+      if (!open) return;
+      const on = (e) => { if (vozRef.current && e.detail) vozRef.current(e.detail); };
+      window.addEventListener("acllar-voz-ot", on);
+      return () => window.removeEventListener("acllar-voz-ot", on);
+    }, [open]);
+    useEffect(() => { if (open && stage === "preview") { try { window.dispatchEvent(new CustomEvent("acllar-voz-ot-listo")); } catch (e) {} } }, [open, stage]);
     if (!open) return null;
     const handleFiles = async (filesList) => {
       const files = Array.from(filesList).filter(
@@ -4618,7 +4655,7 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       });
       if (payload.length === 0 && partsToOrder.length === 0 && !allowEmpty) {
         setError("No hay cambios para aplicar.");
-        return;
+        return false;
       }
       const photoOps = { upserts: [], deletes: [] };
       try {
@@ -4644,6 +4681,7 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       } catch (e) {}
       onConfirm(payload, partsToOrder, photoOps);
       setStage("done");
+      return true;
     };
     const totalSelected = parsedResults.reduce(
       (acc, r) => acc + r.damages.filter((d) => d._selected).length,
@@ -4666,6 +4704,25 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       0
     );
     const unmatchedVehicles = parsedResults.filter((r) => r.parsed && !r.vehicle);
+    vozRef.current = (det) => {
+      det.abierto = true;
+      const vehs = Array.from(new Set(parsedResults.filter((r) => r.vehicle).map((r) => vozNombre(r.vehicle.id))));
+      const quien = vehs.length === 1 ? vehs[0] : vehs.join(", ");
+      const resumen = `${totalSelected} da\xF1o${totalSelected === 1 ? "" : "s"} nuevo${totalSelected === 1 ? "" : "s"}${totalToRepair > 0 ? ` y ${totalToRepair} a cerrar` : ""}`;
+      if (stage === "upload" || stage === "parsing") { det.r = { txt: "La OT a\xFAn se est\xE1 cargando", tipo: "warn" }; return; }
+      if (det.accion === "estado") { det.r = stage === "preview" ? { txt: `${quien}: ${resumen}${totalSimilar > 0 ? `, ${totalSimilar} parecido${totalSimilar === 1 ? "" : "s"} a uno que ya estaba` : ""}. Rev\xEDsala y di confirmar` } : { txt: "Revisi\xF3n ya confirmada. Di cerrar" }; return; }
+      if (stage === "done") {
+        if (det.accion === "confirmar") { det.r = { txt: "Ya est\xE1 confirmada. Di cerrar", tipo: "warn" }; return; }
+        onClose(); det.r = { txt: "Cerrada" }; return;
+      }
+      if (det.accion === "confirmar") {
+        if (parsedResults.filter((r) => r.parsed && r.vehicle).length === 0) { det.r = { txt: "Esta OT no tiene nada que confirmar", tipo: "warn" }; return; }
+        const ok = handleConfirm();
+        det.r = ok ? { txt: `${quien} confirmada: ${totalSelected === 0 && totalToRepair === 0 ? "revisi\xF3n sin cambios" : resumen}. Di cerrar` } : { txt: "No hay cambios para aplicar", tipo: "warn" };
+        return;
+      }
+      onClose(); det.r = { txt: "Cancelado, no se ha cargado nada" };
+    };
     return /* @__PURE__ */ React.createElement(Modal, { open: true, onClose, title: "Importar OT desde PDF", width: 820 }, stage === "upload" && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: { fontSize: "14px", color: T.inkSoft, marginTop: 0, marginBottom: "18px", lineHeight: 1.55 } }, "Sub\xED uno o varios PDFs de ", /* @__PURE__ */ React.createElement("strong", { style: { color: T.ink } }, "Orden de Trabajo"), " (formato AC-LLAR). Los da\xF1os se extraer\xE1n autom\xE1ticamente y podr\xE1s revisarlos antes de cargarlos. Todos los da\xF1os se importan como", " ", /* @__PURE__ */ React.createElement("strong", { style: { color: T.warn } }, "Detectados (activos)"), "."), /* @__PURE__ */ React.createElement(
       "div",
       {
@@ -15203,7 +15260,15 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         onToggleTheme: toggleTheme
       }
     ), React.createElement(MantBanner, { vehicles: state.vehicles, onOpen: (id) => { setGrupo("alquiler"); setActiveTab("fleet"); setDetailOrigin("fleet"); setSelectedVehicleId(id); setView("detail"); } }),
-      React.createElement(VozGlobal, { vehicles: state.vehicles, damages: state.damages, depositLog: state.depositLog, onMarkReturned: handleMarkReturned, onSetEstado: handleSetWorkflowStatus, onLeftUnreviewed: handleLeftUnreviewed, onDepositEvent: handleDepositEvent, onMarkAviso: handleMarkAvisoOficina, fichaId: grupo === "alquiler" && activeTab === "fleet" && view === "detail" ? selectedVehicleId : null, oculto: activeTab === "voz",
+      React.createElement(VozGlobal, { vehicles: state.vehicles, damages: state.damages, depositLog: state.depositLog,
+        onAbrirOT: (id) => {
+          const idn = (x) => String(x || "").toUpperCase().replace(/[A-Z]+$/, "").replace(/-0*/, "-");
+          const row = (revPend || []).find((r) => idn(r.veh_id) === idn(id)); // la más antigua del vehículo (misma regla que el botón)
+          if (!row) return "none";
+          if (importModalOpen || revOpening) return "busy";
+          setGrupo("alquiler"); setActiveTab("today");
+          openRevision(row); return "ok";
+        }, onMarkReturned: handleMarkReturned, onSetEstado: handleSetWorkflowStatus, onLeftUnreviewed: handleLeftUnreviewed, onDepositEvent: handleDepositEvent, onMarkAviso: handleMarkAvisoOficina, fichaId: grupo === "alquiler" && activeTab === "fleet" && view === "detail" ? selectedVehicleId : null, oculto: activeTab === "voz",
         onAbrirDanos: (id) => { setGrupo("alquiler"); setActiveTab("fleet"); setDetailOrigin("fleet"); setSelectedVehicleId(id); setView("detail"); setTimeout(() => { try { window.dispatchEvent(new CustomEvent("acllar-voz-ver", { detail: { danos: true } })); } catch (e) {} }, 350); },
         onReparar: handleVozReparar, onCargo: handleChangeDamageCargo, onRestaurar: handleVozRestaurar }), React.createElement(GroupBar, { grupo, onChange: setGrupo }), grupo === "alquiler" && /* @__PURE__ */ React.createElement(TabBar, { active: activeTab, onChange: setActiveTab }), grupo === "taller" && React.createElement(TallerView, null), grupo === "alquiler" && watchStatus === "active" && /* @__PURE__ */ React.createElement("div", { style: {
       display: "flex",
