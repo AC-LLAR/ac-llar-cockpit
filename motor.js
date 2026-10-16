@@ -2058,20 +2058,23 @@ const inicioOT =
     const base = cortes.find((x) => x.length > 1) || cortes[0];
     const nFrases = (base.length - 1) / 2;
     const frases = [];
-    let resto = (base[base.length - 1] || "").trim();
+    const limpio = (t) => (/[a-z0-9ñ]/.test(t || "") ? String(t).trim() : "");
+    let resto = limpio(base[base.length - 1]);
     for (let i = 0; i < nFrases; i++) {
       const accion = vozAccion(base[2 * i + 1]);
       let txt = base[2 * i], sig = base[2 * i + 2] || "";
       let dest = vozDestDe(txt);
       // "269 fianza a Pedro": el nombre que va justo DESPUÉS de la acción también es de esta frase
       const lead = sig.match(/^\s*(?:(?:a|para|whatsapp|wasap|guasap|por|al)\s+)*(pedro|rosana)\b/);
-      if (lead) { if (!dest) dest = lead[1] === "pedro" ? "Pedro" : "Rosana"; base[2 * i + 2] = sig.slice(lead[0].length); if (i === nFrases - 1) resto = base[2 * i + 2].trim(); }
+      if (lead) { if (!dest) dest = lead[1] === "pedro" ? "Pedro" : "Rosana"; base[2 * i + 2] = sig.slice(lead[0].length); if (i === nFrases - 1) resto = limpio(base[2 * i + 2]); }
       const f = cortes.filter((x) => x.length === base.length).map((x, k) => (k === 0 ? base : x)[2 * i].replace(VOZ_DEST_RE, " ").trim()).filter(Boolean);
       if (f.length) frases.push({ alts: Array.from(new Set(f)), accion, dest });
     }
     return { frases, resto };
   };
-  const VOZ_ACC = { volvio: { txt: "VOLVI\xD3", col: "#2A44D6" }, fianza: { txt: "DEVOLVER FIANZA", col: "#1F5E2A" }, presupuesto: { txt: "PRESUPUESTO", col: "#B45309" } };
+  const VOZ_ACC = { volvio: { txt: "VOLVI\xD3", col: "#2A44D6" }, fianza: { txt: "DEVOLVER FIANZA", col: "#1F5E2A" }, presupuesto: { txt: "PAS\xC9 PRESUPUESTO", col: "#B45309" } };
+  // Cómo se lee en voz alta un vehículo: las AC solo con el número ("286"), las CB con su prefijo.
+  const vozNombre = (id) => /^AC-/.test(id) ? String(Number(id.slice(3).replace(/[A-Z]/g, ""))) : String(id).replace("-", " ").replace(/ 0+/, " ");
   const VOZ_DEST_LS = "acllar_voz_dest";
   const vozDiccKey = () => { try { const u = window.acllarCloud && window.acllarCloud.usuario && window.acllarCloud.usuario(); return "voz_dicc_" + String(u || "local").toLowerCase(); } catch (e) { return "voz_dicc_local"; } };
   // Elige, entre las interpretaciones del móvil, la que corresponde a vehículos reales.
@@ -2213,7 +2216,7 @@ const inicioOT =
       for (const x of r) {
         if (x.id && itemsRef.current.some((it) => it.id === x.id && (it.accion || "volvio") === accion)) { dichos.push(`${x.id.replace("-", " ")} ya estaba`); continue; }
         nuevos.push({ key: Math.random().toString(36).slice(2), dicho: x.dicho.trim(), texto, id: x.id, candidatos: x.candidatos || [], at: ahora(), sel: true, unico: r.length === 1, aprendido: !!x.aprendido, accion, dest: d });
-        dichos.push((x.id ? x.id.replace("-", " ") : `${x.dicho.trim()}, revisar`) + (accion === "fianza" ? ", fianza" : accion === "presupuesto" ? ", presupuesto" : "") + (d ? " para " + d : ""));
+        dichos.push((x.id ? vozNombre(x.id) : `${x.dicho.trim()}, revisar`) + (accion === "fianza" ? ", devolver fianza" : accion === "presupuesto" ? ", pas\xE9 presupuesto" : ", volvi\xF3") + (d ? ", para " + d : ""));
       }
       if (nuevos.length) setItems((s) => [...s, ...nuevos]);
       if (origen === "voz") vozHablar(dichos.join(". "));
@@ -2240,6 +2243,7 @@ const inicioOT =
       if (!vozTieneFin(alts)) {
         const sd = !bufRef.current && vozSoloDest(alts[0] || "");
         if (sd && destAlUltimo(sd)) return;
+        if (!/[a-z0-9ñ]/i.test(vozNorm(alts[0] || ""))) return; // solo puntuación o ruido
         bufRef.current = (bufRef.current + " " + (alts[0] || "")).trim(); setPendiente(bufRef.current);
         clearTimeout(bufTimer.current);
         bufTimer.current = setTimeout(() => { if (bufRef.current) { setAviso(`Descartado “${bufRef.current}”: falta la acci\xF3n (volvi\xF3 / fianza / presupuesto)`); vozHablar("Falta decir volvi\xF3, fianza o presupuesto"); bufRef.current = ""; setPendiente(""); } }, 12000);
@@ -2361,7 +2365,12 @@ const inicioOT =
           : h("button", { "data-voz-full": "1", onClick: () => ponerFull(true), title: "Para el m\xF3vil: abre solo esta pantalla. Guarda el enlace como acceso directo.", style: { background: "none", border: `1px solid ${T.border}`, borderRadius: "10px", padding: "6px 12px", cursor: "pointer", color: T.inkSoft, fontSize: "13px" } }, "\u{1F4F1} Pantalla completa (m\xF3vil)")),
       h("div", { style: { textAlign: "center", padding: "8px 0 18px" } },
         h("h2", { style: { margin: "0 0 4px", fontFamily: F.display, fontSize: "24px", color: T.ink } }, "\u{1F399}️ Campa por voz"),
-        h("div", { style: { fontSize: "13px", color: T.inkSoft } }, "Pulsa el micr\xF3fono y di siempre: ", h("b", null, "N\xDAMERO + ACCI\xD3N"), ": “309 volvi\xF3”, “269 fianza Pedro”, “301 presupuesto Rosana”. Las CB, con su prefijo (“CB 3 volvi\xF3”). No se apunta nada hasta o\xEDr la acci\xF3n (volvi\xF3 / fianza / presupuesto), as\xED que puedes hacer pausas. Al terminar la ronda, revisa la lista y pulsa ", h("b", null, "Registrar todos"), ".")),
+        h("div", { style: { fontSize: "13px", color: T.inkSoft } }, "Pulsa el micr\xF3fono y di siempre ", h("b", null, "primero el N\xDAMERO y despu\xE9s el COMANDO"), ". Puedes hacer pausas: no se apunta nada hasta o\xEDr el comando. Al terminar la ronda, revisa la lista y pulsa ", h("b", null, "Registrar todos"), "."),
+        h("div", { "data-voz-comandos": "1", style: { display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 12px", textAlign: "left", maxWidth: "420px", margin: "12px auto 0", background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "10px 14px", fontSize: "13.5px" } },
+          h("b", { style: { fontFamily: F.mono, color: T.ink } }, "286, VOLVI\xD3"), h("span", { style: { color: T.inkSoft } }, "lleg\xF3 a la campa"),
+          h("b", { style: { fontFamily: F.mono, color: T.ink } }, "314, DEVOLVER FIANZA"), h("span", { style: { color: T.inkSoft } }, "+ “Pedro” o “Rosana” (opcional)"),
+          h("b", { style: { fontFamily: F.mono, color: T.ink } }, "320, PAS\xC9 PRESUPUESTO"), h("span", { style: { color: T.inkSoft } }, "+ “Pedro” o “Rosana” (opcional)"),
+          h("span", { style: { gridColumn: "1 / -1", fontSize: "12px", color: T.inkFaint } }, "Las CB, con su prefijo: “CB 3, volvi\xF3”."))),
       h("div", { style: { display: "flex", justifyContent: "center", marginBottom: "14px" } },
         h("button", { "data-voz-mic": "1", onClick: escuchando ? parar : arrancar, "aria-pressed": escuchando,
           style: { width: "128px", height: "128px", borderRadius: "50%", border: "none", cursor: "pointer", fontSize: "48px", color: "#fff",
