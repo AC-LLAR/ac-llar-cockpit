@@ -2648,11 +2648,12 @@ const inicioOT =
       }
       const texto = (bufRef.current + " " + t0).trim(), tn = vozNorm(texto);
       // 2b) OT abierta en pantalla: "confirmar" = botón azul · "cancelar" = Cancelar · "cerrar" = Cerrar
-      if (!vozTieneFin(alts) && /\b(confirmar|confirma|confirmo|confirmada|cancelar|cancela|cerrar|cierra|cierrala)\b/.test(n)) {
-        const det = { accion: /\bconfirm/.test(n) ? "confirmar" : /\bcancel/.test(n) ? "cancelar" : "cerrar" };
+      //     "importar (daños nuevos)" también = botón azul (es lo que pone el botón). Con número, debe ser el de la OT abierta.
+      if (!/\brevisar\b/.test(n) && /\b(confirmar|confirma|confirmo|confirmada|importar|importa|importalos|importa los|cancelar|cancela|cerrar|cierra|cierrala)\b/.test(n)) {
+        const det = { accion: /\b(confirm|import)/.test(n) ? "confirmar" : /\bcancel/.test(n) ? "cancelar" : "cerrar", texto: n };
         try { window.dispatchEvent(new CustomEvent("acllar-voz-ot", { detail: det })); } catch (e) {}
         if (det.r) { bufRef.current = ""; setOido(""); clearTimeout(timerRef.current); decir(det.r.txt, det.r.tipo || "ok"); return; }
-        if (!/\d/.test(texto)) { bufRef.current = ""; setOido(""); clearTimeout(timerRef.current); decir("No hay ninguna OT abierta", "warn"); return; }
+        if (!/\d/.test(texto) || /\bimporta/.test(n)) { bufRef.current = ""; setOido(""); clearTimeout(timerRef.current); decir("No hay ninguna OT abierta", "warn"); return; }
       }
       // 3) Comandos de vehículo: "269, listo" / "297, entregado" / "312, mostrar daños"…
       if (vozTieneFin([texto]) || vozTieneFin(alts)) {
@@ -4710,6 +4711,8 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       const quien = vehs.length === 1 ? vehs[0] : vehs.join(", ");
       const resumen = `${totalSelected} da\xF1o${totalSelected === 1 ? "" : "s"} nuevo${totalSelected === 1 ? "" : "s"}${totalToRepair > 0 ? ` y ${totalToRepair} a cerrar` : ""}`;
       if (stage === "upload" || stage === "parsing") { det.r = { txt: "La OT a\xFAn se est\xE1 cargando", tipo: "warn" }; return; }
+      const nums = (String(det.texto || "").match(/\d+/g) || []).map(Number);
+      if (nums.length && vehs.length && !nums.some((x) => vehs.some((v) => Number(String(v).replace(/\D/g, "")) === x))) { det.r = { txt: `La OT abierta es del ${quien}. No he tocado nada`, tipo: "warn" }; return; }
       if (det.accion === "estado") { det.r = stage === "preview" ? { txt: `${quien}: ${resumen}${totalSimilar > 0 ? `, ${totalSimilar} parecido${totalSimilar === 1 ? "" : "s"} a uno que ya estaba` : ""}. Rev\xEDsala y di confirmar` } : { txt: "Revisi\xF3n ya confirmada. Di cerrar" }; return; }
       if (stage === "done") {
         if (det.accion === "confirmar") { det.r = { txt: "Ya est\xE1 confirmada. Di cerrar", tipo: "warn" }; return; }
