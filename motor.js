@@ -8996,7 +8996,28 @@ const fmtFechaHora = (valor) => {
   // Misma lectura que la subida manual de Estadísticas (detectExcelType + parse*Excel).
   const matrizDeBlob = async (blob) => {
     const wb = XLSX.read(new Uint8Array(await blob.arrayBuffer()), { type: "array", cellDates: true });
-    return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null, raw: false });
+    const m = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null, raw: false });
+    try { m.__hojas = wb.SheetNames.map((n) => ({ n, filas: XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1 }).length })); } catch (e) {}
+    return m;
+  };
+  // Diagnóstico de un acumulado (se guarda en el estado para poder ver por qué se leyó así).
+  const diagMatriz = (m) => {
+    try {
+      const tipo = detectExcelType(m);
+      const req = tipo === "ingresos" ? ["fecha", "vehículo", "total entrante", "lugar de entrega"] : ["fecha de devolución", "estatus", "lugar de entrega", "vehículo"];
+      const hr = findHeaderRow(m, req);
+      const col = hr >= 0 ? m[hr].map((v) => String(v || "").toLowerCase().trim()).indexOf(tipo === "ingresos" ? "fecha" : "fecha de devolución") : -1;
+      const noLeidas = []; let datos = 0, sinFecha = 0;
+      for (let k = hr + 1; k < m.length; k++) {
+        const r = m[k] || [];
+        if (!r.some((v) => v != null && String(v).trim() !== "")) continue;
+        datos++;
+        if (col >= 0 && !parseFechaEs(r[col])) { sinFecha++; if (noLeidas.length < 6) noLeidas.push(String(r[col])); }
+      }
+      const corta = (r) => (r || []).slice(0, 10).map((v) => (v == null ? null : String(v).slice(0, 40)));
+      return { tipo, hojas: m.__hojas || null, filasTotales: m.length, cabeceraFila: hr, cabecera: hr >= 0 ? corta(m[hr]) : m.slice(0, 4).map(corta),
+        datos, sinFecha, noLeidas, muestra: m.slice(hr + 1, hr + 3).map(corta), ultima: corta(m[m.length - 1]) };
+    } catch (e) { return { error: String((e && e.message) || e) }; }
   };
   const yoyDesdeMatriz = (matrix, fileName) => {
     const tipo = detectExcelType(matrix);
@@ -14185,7 +14206,7 @@ const scanResWatchFolder = async (handle) => {
         let est = {};
         try { const x = await window.storage.get(HQ_ANUAL_ESTADO); est = x ? JSON.parse(x.value) || {} : {}; } catch (e) {}
         const prevOk = est[r.tipo] && est[r.tipo].okAt;
-        est[r.tipo] = { at: nowIso(), ok, msg, filas: n || null, archivo: nombre, recibido: recibido || null, okAt: ok ? nowIso() : prevOk || null };
+        est[r.tipo] = { at: nowIso(), ok, msg, filas: n || null, archivo: nombre, recibido: recibido || null, okAt: ok ? nowIso() : prevOk || null, diag: diagMatriz(matrix) };
         try { await window.storage.set(HQ_ANUAL_ESTADO, JSON.stringify(est)); } catch (e) {}
         window.dispatchEvent(new Event("acllar-hq-anual"));
         return { ok, msg };
