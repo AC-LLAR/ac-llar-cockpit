@@ -1954,58 +1954,31 @@ const inicioOT =
     treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90, cien: 100, ciento: 100, doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500,
     seiscientos: 600, setecientos: 700, ochocientos: 800, novecientos: 900 };
   const vozNorm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  // Convierte el texto dictado en tokens; las palabras-número se agrupan en una cifra
-  // ("trescientos nueve" → 309; "tres cero nueve" → 309, dicho cifra a cifra).
+  // Cifras que se dictan una a una ("dos nueve ocho") + errores típicos con que el móvil las transcribe.
+  const VOZ_DIG = { cero: 0, sero: 0, zero: 0, cerro: 0, un: 1, uno: 1, una: 1, dos: 2, do: 2, tres: 3, cuatro: 4, cuadro: 4, cinco: 5, sinco: 5, cingo: 5,
+    seis: 6, sais: 6, ceis: 6, seiz: 6, siete: 7, sete: 7, ciete: 7, ocho: 8, nueve: 9, nuebe: 9 };
+  // Convierte el texto dictado en tokens. SOLO cifras sueltas: las cifras seguidas (en palabras o en dígitos)
+  // se juntan y cada 3 forman un vehículo: "dos nueve ocho tres cero cuatro" → "298" "304".
+  // Ya no se interpretan números largos ("trescientos noventa y ocho", "tres cientos"...).
+  // Si las cifras no cuadran en grupos de 3, lo que sobra sale como número incompleto y el
+  // intérprete lo marca como dudoso con candidatos (no adivina).
   const vozTokens = (texto) => {
-    const raw0 = vozNorm(texto).replace(/(\d)([a-z])/g, "$1 $2").replace(/([a-z])(\d)/g, "$1 $2").replace(/[^a-z0-9ñ]+/g, " ").trim().split(/\s+/).filter(Boolean);
-    // "tres cientos" / "3 cientos" (la pausa parte la palabra) → "trescientos"
-    const CIEN = { 2: "doscientos", 3: "trescientos", 4: "cuatrocientos", 5: "quinientos", 6: "seiscientos", 7: "setecientos", 8: "ochocientos", 9: "novecientos" };
-    const raw = [];
-    for (let i = 0; i < raw0.length; i++) {
-      const w = raw0[i], nx = raw0[i + 1];
-      const u = /^\d$/.test(w) ? Number(w) : VOZ_NUM[w];
-      if ((nx === "cientos" || nx === "cientas") && CIEN[u]) { raw.push(CIEN[u]); i++; continue; }
-      if (w === "docientos") { raw.push("doscientos"); continue; }
-      raw.push(w);
-    }
+    const raw = vozNorm(texto).replace(/(\d)([a-z])/g, "$1 $2").replace(/([a-z])(\d)/g, "$1 $2").replace(/[^a-z0-9ñ]+/g, " ").trim().split(/\s+/).filter(Boolean);
     const out = [];
-    let run = [];
+    let run = "";
     const flush = () => {
-      if (!run.length) return;
-      const vals = run.map((w) => VOZ_NUM[w]);
-      let n;
-      if (vals.length > 1 && vals.every((x) => x < 10)) n = Number(vals.join(""));
-      else {
-        n = 0; let grupo = 0;
-        for (const x of vals) {
-          if (x >= 100) { if (grupo) { n = n * 1000 + grupo; grupo = 0; } grupo = x; }
-          else if (x >= 10 && grupo % 100 >= 10) { n = Number(String(n || "") + String(grupo)); grupo = x; }
-          else if (x < 10 && grupo % 10 !== 0) { n = Number(String(n || "") + String(grupo)); grupo = x; }
-          else grupo += x;
-        }
-        n = n ? Number(String(n) + String(grupo)) : grupo;
-      }
-      out.push(String(n)); run = [];
+      if (!run) return;
+      if (run.length === 4) out.push(run); // una cifra de más o de menos: dudoso, se propone el parecido
+      else for (let i = 0; i < run.length; i += 3) out.push(run.slice(i, i + 3));
+      run = "";
     };
-    for (let i = 0; i < raw.length; i++) {
-      const w = raw[i];
-      if (VOZ_NUM[w] !== undefined) { run.push(w); continue; }
-      if (w === "y" && run.length && VOZ_NUM[raw[i + 1]] !== undefined && VOZ_NUM[raw[i + 1]] < 10 && VOZ_NUM[run[run.length - 1]] >= 20 && VOZ_NUM[run[run.length - 1]] < 100) continue;
+    for (const w of raw) {
+      if (/^\d+$/.test(w)) { run += w; continue; }
+      if (VOZ_DIG[w] !== undefined) { run += String(VOZ_DIG[w]); continue; }
       flush(); out.push(w);
     }
     flush();
-    // "3 0 9" (cifras sueltas seguidas) → "309"
-    const unido = [];
-    for (const t of out) {
-      const last = unido[unido.length - 1];
-      if (/^\d$/.test(t) && last && /^\d+$/.test(last.v) && last.solo) { last.v += t; continue; }
-      // "3 09" / "2 98" (pausa a mitad del número) → "309" / "298"
-      if (/^\d+$/.test(t) && last && /^\d+$/.test(last.v) && (last.v + t).length <= 3 && !/^\d00$/.test(last.v)) { last.v += t; last.solo = false; continue; }
-      // "300 9" / "300 20" → 309 / 320
-      if (/^\d{1,2}$/.test(t) && last && /^\d00$/.test(last.v)) { last.v = String(Number(last.v) + Number(t)); last.solo = false; continue; }
-      unido.push({ v: t, solo: /^\d$/.test(t) });
-    }
-    return unido.map((x) => x.v);
+    return out;
   };
   const vozNumDe = (id) => { const m = String(id || "").match(/^([A-Z]+)-?0*(\d+)/i); return m ? { pre: m[1].toUpperCase(), n: Number(m[2]) } : null; };
   const vozDist1 = (a, b) => {
@@ -2028,7 +2001,8 @@ const inicioOT =
       const prev = toks.slice(Math.max(0, i - 2), i).join(" ");
       const pre = /\b(cb|c b|ce be|cebe|sebe|ce b|c be)$/.test(prev) ? "CB" : /\b(ac|a c|a ce|ace|hace|a se|ase)$/.test(prev) ? "AC" : null;
       const n = Number(num);
-      let exact = flota.filter((x) => x.k.n === n && (!pre || x.k.pre === pre));
+      // Un vehículo se dicta con 3 cifras: con menos (el móvil se comió alguna) nunca casa solo, queda como dudoso.
+      let exact = num.length < 3 ? [] : flota.filter((x) => x.k.n === n && (!pre || x.k.pre === pre));
       if (exact.length > 1 && !pre) exact = exact.filter((x) => x.k.pre === "AC").length ? exact.filter((x) => x.k.pre === "AC") : exact;
       if (exact.length === 1) { res.push({ dicho: (pre || "") + " " + num, id: exact[0].v.id }); continue; }
       const cands = flota.filter((x) => (!pre || x.k.pre === pre) && vozDist1(String(x.k.n), num)).map((x) => x.v.id).slice(0, 6);
@@ -2146,7 +2120,7 @@ const inicioOT =
       recRef.current = rec;
       try { rec.start(); setEscucha(true); } catch (e) {}
     };
-    const empezar = () => { setIntentos([]); usados.current = new Set(); setActivo(true); activoRef.current = true; siguiente(); vozHablar("Di el veh\xEDculo y termina con volvi\xF3"); setTimeout(() => escuchar(), 1800); };
+    const empezar = () => { setIntentos([]); usados.current = new Set(); setActivo(true); activoRef.current = true; siguiente(); vozHablar("Di el veh\xEDculo cifra a cifra y termina con volvi\xF3"); setTimeout(() => escuchar(), 1800); };
     const terminar = () => { activoRef.current = false; setActivo(false); setObjetivo(null); objRef.current = null; try { recRef.current && recRef.current.abort(); } catch (e) {} setEscucha(false); };
     const saltar = () => siguiente();
     const N = intentos.length, dir = intentos.filter((x) => x.directo).length, sis = intentos.filter((x) => x.conSistema).length;
@@ -2461,7 +2435,7 @@ const inicioOT =
           registrando ? "Registrando…" : `✔ Registrar todos (${aRegistrar.length})`)),
       h(VozCalibracion, { vehicles, dicc, onAprender: aprender, onBorrar: olvidar, SR }),
       h("div", { style: { fontSize: "11.5px", color: T.inkFaint, textAlign: "center", marginTop: "10px", lineHeight: 1.5 } },
-        "VOLVI\xD3 equivale a pulsar el bot\xF3n a la hora en que lo dictaste. FIANZA y PRESUPUESTO se registran en Fianzas igual que con sus botones; el WhatsApp se abre con el texto escrito y solo tienes que enviarlo. Los que ya estaban en campa o ya gestionados no se tocan. La lista se guarda en este m\xF3vil hasta que registres."));
+        "Dicta los n\xFAmeros cifra a cifra (“dos nueve ocho, tres cero cuatro, volvi\xF3”). VOLVI\xD3 equivale a pulsar el bot\xF3n a la hora en que lo dictaste. FIANZA y PRESUPUESTO se registran en Fianzas igual que con sus botones; el WhatsApp se abre con el texto escrito y solo tienes que enviarlo. Los que ya estaban en campa o ya gestionados no se tocan. La lista se guarda en este m\xF3vil hasta que registres."));
     if (!full) return contenido;
     return h("div", { "data-voz-pantalla": "1", style: { position: "fixed", inset: 0, zIndex: 2000, background: T.bg, overflowY: "auto", padding: "16px 16px 24px", boxSizing: "border-box" } }, contenido);
   };
@@ -2717,7 +2691,7 @@ const inicioOT =
           h("div", { style: { flex: 1 } }),
           h("button", { onClick: () => setAbierto(false), style: { background: "none", border: "none", cursor: "pointer", color: T.inkFaint, fontSize: "18px", lineHeight: 1 } }, "\xD7")),
         fichaId ? h("div", { style: { fontSize: "11.5px", color: T.inkSoft, marginBottom: "6px" } }, "Ficha abierta: ", h("b", { style: { fontFamily: F.mono } }, fichaId), " \xB7 di el da\xF1o y la acci\xF3n: “parachoques trasero, rotura, reparado, Carlos”")
-          : h("div", { style: { fontSize: "11.5px", color: T.inkSoft, marginBottom: "6px" } }, "Di el n\xFAmero y el comando: “312, mostrar da\xF1os”, “269, listo”, “297, entregado”, “314, devolver fianza”, “286, revisar y confirmar”…"),
+          : h("div", { style: { fontSize: "11.5px", color: T.inkSoft, marginBottom: "6px" } }, "Di el n\xFAmero cifra a cifra y el comando: “tres uno dos, mostrar da\xF1os”, “269, listo”, “297, entregado”, “314, devolver fianza”, “286, revisar y confirmar”…"),
         oido && h("div", { style: { fontStyle: "italic", color: T.inkSoft, marginBottom: "6px" } }, "“", oido, "…”"),
         msg && h("div", { "data-voz-global-msg": "1", style: { fontWeight: 700, color: col[msg.tipo] || T.ink, marginBottom: "6px" } }, msg.txt),
         eleccion && h("div", { "data-voz-eleccion": "1", style: { display: "flex", flexDirection: "column", gap: "4px", marginBottom: "6px" } },
