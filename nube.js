@@ -483,6 +483,30 @@
       if (estado === "importado") upd.importado_at = new Date().toISOString();
       await sb.from("hq_buzon").update(upd).eq("id", id);
     },
+    // ---- Acumulados anuales de HQ (Reservas 2026 / Ingresos 2026) ----
+    // hq-inbound los guarda como tipo 'otro' en estado 'descartado' (su nombre no acaba en
+    // 704/720), así los cockpits de versiones anteriores no los tocan. Sin procesar =
+    // importado_at vacío; "· procesando" de hace más de 5 min = se quedó colgado, se reintenta.
+    async anuales() {
+      const desde = new Date(Date.now() - 7 * 864e5).toISOString();
+      const atasco = new Date(Date.now() - 5 * 60000).toISOString();
+      const { data, error } = await sb.from("hq_buzon").select("id, recibido_at, nombre_archivo, storage_path, importado_at, importado_por")
+        .eq("tipo", "otro").gt("recibido_at", desde)
+        .or(`importado_at.is.null,and(importado_por.like.*procesando,importado_at.lt."${atasco}")`)
+        .order("recibido_at");
+      if (error) throw error;
+      return data || [];
+    },
+    // Lo reserva para este equipo (solo uno lo procesa aunque haya varios cockpits abiertos).
+    async reservarAnual(id) {
+      const atasco = new Date(Date.now() - 5 * 60000).toISOString();
+      const { data, error } = await sb.from("hq_buzon").update({ importado_at: new Date().toISOString(), importado_por: who() + " · procesando" })
+        .eq("id", id).or(`importado_at.is.null,and(importado_por.like.*procesando,importado_at.lt."${atasco}")`).select("id");
+      return !error && !!(data && data.length);
+    },
+    async cerrarAnual(id, estado, nota) {
+      await sb.from("hq_buzon").update({ estado, importado_at: new Date().toISOString(), importado_por: (who() + " · " + (nota || "")).slice(0, 300) }).eq("id", id);
+    },
   };
 
   // ---------- login ----------

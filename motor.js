@@ -2788,6 +2788,7 @@ const inicioOT =
   })));
   function HqStatus() {
     const [est, setEst] = React.useState(null);
+    const [anual, setAnual] = React.useState({});
     const [open, setOpen] = React.useState(false);
     const [, tick] = React.useState(0);
     const ref = React.useRef(null);
@@ -2795,13 +2796,15 @@ const inicioOT =
       const B = window.acllarCloud && window.acllarCloud.buzon;
       if (!B || !B.estado) return;
       let vivo = true;
-      const load = async () => { try { const e = await B.estado(); if (vivo) setEst(e); } catch (e) { console.warn("[Datos HQ]", e); } };
+      const loadAnual = async () => { try { const x = await window.storage.get(HQ_ANUAL_ESTADO); if (vivo) setAnual(x ? JSON.parse(x.value) || {} : {}); } catch (e) {} };
+      const load = async () => { loadAnual(); try { const e = await B.estado(); if (vivo) setEst(e); } catch (e) { console.warn("[Datos HQ]", e); } };
       load();
       const iv = setInterval(() => { load(); tick((n) => n + 1); }, 60000);
       const on = () => setTimeout(load, 1500);
-      window.addEventListener("acllar-buzon", on); window.addEventListener("acllar-buzon-estado", on);
+      const onRemoto = (e) => { if (e && e.detail && e.detail.key === HQ_ANUAL_ESTADO) loadAnual(); };
+      window.addEventListener("acllar-buzon", on); window.addEventListener("acllar-buzon-estado", on); window.addEventListener("acllar-hq-anual", loadAnual); window.addEventListener("acllar-remote-update", onRemoto);
       document.addEventListener("visibilitychange", on);
-      return () => { vivo = false; clearInterval(iv); window.removeEventListener("acllar-buzon", on); window.removeEventListener("acllar-buzon-estado", on); document.removeEventListener("visibilitychange", on); };
+      return () => { vivo = false; clearInterval(iv); window.removeEventListener("acllar-buzon", on); window.removeEventListener("acllar-buzon-estado", on); window.removeEventListener("acllar-hq-anual", loadAnual); window.removeEventListener("acllar-remote-update", onRemoto); document.removeEventListener("visibilitychange", on); };
     }, []);
     React.useEffect(() => {
       if (!open) return;
@@ -2825,13 +2828,24 @@ const inicioOT =
       return { num, color: ROJO, txt: "sin importar", f, aviso: `Llegó el ${num} (${fechaLarga(f.recibido_at)}) pero no se ha podido importar. Abre o recarga el cockpit; si sigue así, avisa.` };
     };
     const items = [info("704", est.estasemana), info("720", est.enalquiler)];
+    // Acumulados anuales para Estadísticas (llegan por correo una vez al día).
+    const infoA = (label, e) => {
+      if (!e) return { label, color: T.inkFaint, txt: "todavía no ha llegado ninguno" };
+      if (!e.ok) return { label, e, color: ROJO, txt: "no actualizado", aviso: `${label}: el último archivo no se ha cargado (${e.msg}).` };
+      const hoy = dia(e.recibido || e.at) === dia(Date.now());
+      return hoy ? { label, e, color: VERDE, icono: "✓", txt: e.msg } : { label, e, color: AMBAR, txt: e.msg, aviso: `${label}: hoy aún no ha llegado el archivo de HQ (el último es de ${cuando(e.recibido || e.at)}).` };
+    };
+    const anuales = [infoA("Reservas 2026", anual.reservas), infoA("Ingresos 2026", anual.ingresos)];
+    const conAnual = anuales.some((a) => a.e);
+    const peorA = anuales.some((a) => a.color === ROJO) ? ROJO : anuales.some((a) => a.color === AMBAR) ? AMBAR : VERDE;
     const quien = (q) => { if (!q) return "—"; const [mail, eq] = String(q).split("·"); return eq ? `${mail} (equipo ${eq})` : mail; };
-    const titulo = items.filter((i) => i.aviso).map((i) => i.aviso).join("\n") || "Datos de HQ al día";
+    const titulo = [...items, ...anuales].filter((i) => i.aviso).map((i) => i.aviso).join("\n") || "Datos de HQ al día";
     return React.createElement("div", { ref, style: { position: "relative" } },
       React.createElement("button", { onClick: () => setOpen(!open), title: titulo, "aria-label": "Datos HQ", "aria-expanded": open,
         style: { cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", background: open ? T.border : T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "6px 10px", fontFamily: F.body } },
         React.createElement("span", { style: { fontSize: "9px", textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, color: T.inkFaint } }, "Datos HQ"),
-        items.map((i) => React.createElement("span", { key: i.num, style: { fontSize: "11.5px", fontWeight: 700, color: i.color, whiteSpace: "nowrap", fontFamily: F.mono } }, `${i.num} ${i.icono ? i.icono + " " : ""}${i.txt}`))),
+        items.map((i) => React.createElement("span", { key: i.num, style: { fontSize: "11.5px", fontWeight: 700, color: i.color, whiteSpace: "nowrap", fontFamily: F.mono } }, `${i.num} ${i.icono ? i.icono + " " : ""}${i.txt}`)),
+        conAnual && React.createElement("span", { style: { fontSize: "11.5px", fontWeight: 700, color: peorA, whiteSpace: "nowrap", fontFamily: F.mono } }, peorA === VERDE ? "Estad. ✓" : "Estad. ⚠")),
       open && React.createElement("div", { role: "dialog", "aria-label": "Datos HQ", style: { position: "absolute", right: 0, top: "calc(100% + 8px)", zIndex: 9500, width: "300px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", boxShadow: "0 12px 32px rgba(15,27,46,.18)", padding: "16px", fontFamily: F.body, textAlign: "left" } },
         React.createElement("div", { style: { fontFamily: F.display, fontSize: "15px", fontWeight: 700, color: T.ink, marginBottom: "12px" } }, "Último input de HQ"),
         items.map((i) => React.createElement("div", { key: i.num, style: { marginBottom: "12px", paddingBottom: "10px", borderBottom: `1px solid ${T.border}` } },
@@ -2841,6 +2855,13 @@ const inicioOT =
             React.createElement("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Importado: ", i.f.importado_at ? React.createElement("b", { style: { color: T.ink } }, fechaLarga(i.f.importado_at)) : "—"),
             React.createElement("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Por: ", quien(i.f.importado_por))) : null,
           i.aviso && React.createElement("div", { style: { fontSize: "12px", fontWeight: 600, color: i.color, marginTop: "6px" } }, i.aviso))),
+        anuales.map((a) => React.createElement("div", { key: a.label, style: { marginBottom: "12px", paddingBottom: "10px", borderBottom: `1px solid ${T.border}` } },
+          React.createElement("div", { style: { fontSize: "13px", fontWeight: 700, color: T.ink, marginBottom: "4px" } }, a.label + " · Estadísticas"),
+          a.e ? React.createElement(React.Fragment, null,
+            React.createElement("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Llegó: ", React.createElement("b", { style: { color: T.ink } }, a.e.recibido ? fechaLarga(a.e.recibido) : "—")),
+            React.createElement("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Cargado: ", React.createElement("b", { style: { color: a.e.ok ? T.ink : ROJO } }, a.e.ok ? a.e.msg : "no"),
+              a.e.okAt && !a.e.ok ? " (el último bueno es de " + fechaLarga(a.e.okAt) + ")" : "")) : React.createElement("div", { style: { fontSize: "12px", color: T.inkFaint } }, a.txt),
+          a.aviso && React.createElement("div", { style: { fontSize: "12px", fontWeight: 600, color: a.color, marginTop: "6px" } }, a.aviso))),
         React.createElement("div", { style: { fontSize: "11px", color: T.inkFaint } }, "Se actualiza solo cuando llega un archivo nuevo.")));
   }
   const MECANICOS = ["ALI", "CARLOS", "HUGO", "AGENTE EXTERNO"];
@@ -8971,6 +8992,41 @@ const fmtFechaHora = (valor) => {
     return { min, max };
   };
 
+  // ===== Acumulados anuales de HQ por correo (Reservas 2026 / Ingresos 2026) =====
+  // Misma lectura que la subida manual de Estadísticas (detectExcelType + parse*Excel).
+  const matrizDeBlob = async (blob) => {
+    const wb = XLSX.read(new Uint8Array(await blob.arrayBuffer()), { type: "array", cellDates: true });
+    return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null, raw: false });
+  };
+  const yoyDesdeMatriz = (matrix, fileName) => {
+    const tipo = detectExcelType(matrix);
+    if (tipo !== "ingresos" && tipo !== "reservas") return { ignorar: true, error: "no es un Excel de reservas ni de cargos a fianza" };
+    const parsed = tipo === "ingresos" ? parseIngresosExcel(matrix) : parseReservasExcel(matrix);
+    if (parsed.error) return { tipo, error: parsed.error };
+    if (!parsed.rows.length) return { tipo, error: "no trae ninguna fila útil" };
+    const fechaKey = tipo === "ingresos" ? "fecha" : "fechaDevolucion";
+    const yearDetected = detectYear(parsed.rows, fechaKey);
+    const range = dateRange(parsed.rows, fechaKey);
+    return { tipo, yearDetected, dataset: {
+      meta: { fileName, uploadedAt: (new Date()).toISOString(), rowCount: parsed.rows.length,
+        dateMin: range.min ? range.min.toISOString().slice(0, 10) : null, dateMax: range.max ? range.max.toISOString().slice(0, 10) : null,
+        yearDetected, tipo, descartadas: parsed.descartadas, origen: "correo HQ" },
+      rows: parsed.rows } };
+  };
+  // ¿Es un acumulado anual y no un 704/720? Protección por si uno llegara con nombre acabado en 704/720:
+  // el 704/720 tiene devoluciones de hoy en adelante; el anual, sobre todo devoluciones de hace meses.
+  const esAcumuladoAnual = (matrix) => {
+    if (detectExcelType(matrix) === "ingresos") return true;
+    const hr = findHeaderRow(matrix, ["fecha de devolución", "estatus"]);
+    if (hr < 0) return false;
+    const col = matrix[hr].map((v) => String(v || "").toLowerCase().trim()).indexOf("fecha de devolución");
+    const limite = Date.now() - 45 * 864e5;
+    let total = 0, viejas = 0;
+    for (let k = hr + 1; k < matrix.length; k++) { const f = parseFechaEs(matrix[k][col]); if (!f) continue; total++; if (f.getTime() < limite) viejas++; }
+    return total >= 20 && viejas / total > 0.5;
+  };
+  const HQ_ANUAL_ESTADO = "hq_anual_estado";
+
   // Fecha de inicio de Sebastián en el puesto: 18 de mayo de 2026.
   // Usada para calcular acumulados "desde que empezó".
   const SEBASTIAN_START_DATE = new Date(2026, 4, 18);
@@ -11150,11 +11206,19 @@ const findHqReservaActual = async (vehicleId) => {
           if (r && alive) setter(JSON.parse(r.value));
         } catch {}
       };
-      loadSlot(YOY_STORAGE_KEYS.ingresos2025, setYoyIngresos2025);
-      loadSlot(YOY_STORAGE_KEYS.ingresos2026, setYoyIngresos2026);
-      loadSlot(YOY_STORAGE_KEYS.reservas2025, setYoyReservas2025);
-      loadSlot(YOY_STORAGE_KEYS.reservas2026, setYoyReservas2026);
-      return () => { alive = false; };
+      const cargar = () => {
+        loadSlot(YOY_STORAGE_KEYS.ingresos2025, setYoyIngresos2025);
+        loadSlot(YOY_STORAGE_KEYS.ingresos2026, setYoyIngresos2026);
+        loadSlot(YOY_STORAGE_KEYS.reservas2025, setYoyReservas2025);
+        loadSlot(YOY_STORAGE_KEYS.reservas2026, setYoyReservas2026);
+      };
+      cargar();
+      // Se recarga sola cuando entra un acumulado nuevo por correo (en este equipo o en otro).
+      const onYoy = () => cargar();
+      const onRemoto = (e) => { const k = e && e.detail && e.detail.key; if (k && String(k).startsWith("ac_yoy_")) cargar(); };
+      window.addEventListener("acllar-yoy", onYoy);
+      window.addEventListener("acllar-remote-update", onRemoto);
+      return () => { alive = false; window.removeEventListener("acllar-yoy", onYoy); window.removeEventListener("acllar-remote-update", onRemoto); };
     }, []);
     const detectionDate = (d) => d.detectedAt || d.importedAt || d.createdAt || null;
     const [diag, setDiag] = useState("");
@@ -14071,6 +14135,15 @@ const scanResWatchFolder = async (handle) => {
             if (!(await B.reservar(f.id))) continue;
             try {
               const blob = await B.descargar(f.storage_path);
+              // Protección: un acumulado anual con nombre acabado en 704/720 NO se importa como reservas de la semana.
+              let matAnual = null;
+              try { const m = await matrizDeBlob(blob); if (esAcumuladoAnual(m)) matAnual = m; } catch (e) {}
+              if (matAnual) {
+                await B.marcar(f.id, "descartado");
+                await procesarAnualRef.current(matAnual, f.nombre_archivo, f.recibido_at);
+                window.dispatchEvent(new Event("acllar-buzon-estado"));
+                continue;
+              }
               const nombre = f.tipo === "enalquiler" ? "carrental.reservations202608200720.xlsx" : "carrental.reservations202608200704.xlsx";
               const fh = { getFile: async () => new File([blob], nombre, { lastModified: Date.parse(f.recibido_at) || Date.now() }) };
               const res = await applyResRef.current(fh);
@@ -14101,6 +14174,69 @@ const scanResWatchFolder = async (handle) => {
         clearInterval(iv);
         window.removeEventListener("acllar-buzon", onNew);
       };
+    }, [loaded]);
+    // NUBE · BUZÓN HQ (acumulados anuales): "Reservas 2026" e "Ingresos 2026" llegan cada día
+    // con todo el año (1 de enero → hoy) y SUSTITUYEN lo guardado en Estadísticas, con protecciones:
+    // no se sustituye si trae menos de la mitad de filas, si llega hasta una fecha anterior o si no es de 2026.
+    const procesarAnual = async (matrix, nombre, recibido) => {
+      const r = yoyDesdeMatriz(matrix, nombre);
+      if (r.ignorar) return { ok: false, ignorar: true, msg: r.error };
+      const fin = async (ok, msg, n) => {
+        let est = {};
+        try { const x = await window.storage.get(HQ_ANUAL_ESTADO); est = x ? JSON.parse(x.value) || {} : {}; } catch (e) {}
+        const prevOk = est[r.tipo] && est[r.tipo].okAt;
+        est[r.tipo] = { at: nowIso(), ok, msg, filas: n || null, archivo: nombre, recibido: recibido || null, okAt: ok ? nowIso() : prevOk || null };
+        try { await window.storage.set(HQ_ANUAL_ESTADO, JSON.stringify(est)); } catch (e) {}
+        window.dispatchEvent(new Event("acllar-hq-anual"));
+        return { ok, msg };
+      };
+      if (r.error) return fin(false, r.error);
+      if (r.yearDetected !== 2026) return fin(false, `los datos parecen de ${r.yearDetected || "?"}, no de 2026: no se sustituye`);
+      const key = r.tipo === "ingresos" ? YOY_STORAGE_KEYS.ingresos2026 : YOY_STORAGE_KEYS.reservas2026;
+      let prev = null;
+      try { const x = await window.storage.get(key); prev = x ? JSON.parse(x.value) : null; } catch (e) {}
+      const n = r.dataset.rows.length, nPrev = prev && Array.isArray(prev.rows) ? prev.rows.length : 0;
+      if (nPrev && n < nPrev * 0.5) return fin(false, `trae ${n} filas y había ${nPrev}: no se sustituye`);
+      const maxPrev = prev && prev.meta && prev.meta.dateMax, maxNew = r.dataset.meta.dateMax;
+      if (maxPrev && maxNew && maxNew < maxPrev) return fin(false, `llega hasta el ${maxNew} y lo guardado llega hasta el ${maxPrev}: no se sustituye`);
+      await window.storage.set(key, JSON.stringify(r.dataset));
+      window.dispatchEvent(new CustomEvent("acllar-yoy", { detail: { key } }));
+      return fin(true, `${n} filas · hasta el ${maxNew || "?"}`, n);
+    };
+    const procesarAnualRef = useRef(null);
+    procesarAnualRef.current = procesarAnual;
+    useEffect(() => {
+      if (!loaded || !window.acllarCloud || !window.acllarCloud.buzon || !window.acllarCloud.buzon.anuales) return;
+      const B = window.acllarCloud.buzon;
+      let busy = false, cancelled = false;
+      const run = async () => {
+        if (busy || cancelled) return;
+        busy = true;
+        try {
+          const lista = await B.anuales(); // del más antiguo al más nuevo: el último que llega es el que queda
+          for (const f of lista) {
+            if (cancelled) break;
+            if (!(await B.reservarAnual(f.id))) continue;
+            try {
+              const m = await matrizDeBlob(await B.descargar(f.storage_path));
+              const res = await procesarAnualRef.current(m, f.nombre_archivo, f.recibido_at);
+              await B.cerrarAnual(f.id, res.ok ? "importado" : "descartado", res.ignorar ? "no es acumulado anual" : res.ok ? "anual: " + res.msg : "anual rechazado: " + res.msg);
+            } catch (e) {
+              console.warn("[buzón HQ · anual] fallo", f, e);
+              await B.cerrarAnual(f.id, "descartado", "anual error: " + (e && e.message || e));
+            }
+          }
+        } catch (e) {
+          console.warn("[buzón HQ · anual]", e);
+        } finally {
+          busy = false;
+        }
+      };
+      const first = setTimeout(run, 5000);
+      const iv = setInterval(run, 60000);
+      const onNew = () => setTimeout(run, 3000);
+      window.addEventListener("acllar-buzon", onNew);
+      return () => { cancelled = true; clearTimeout(first); clearInterval(iv); window.removeEventListener("acllar-buzon", onNew); };
     }, [loaded]);
     // NUBE · copia de las OT en OneDrive
     const [archInfo, setArchInfo] = useState(null);
