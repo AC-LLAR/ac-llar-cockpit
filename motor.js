@@ -1968,6 +1968,9 @@ const inicioOT =
     let run = "";
     const flush = () => {
       if (!run) return;
+      // Eco de Android: la primera cifra llega repetida ("tres tres uno nueve" = 3319 → 319).
+      // Con 4 o 7 cifras y las dos primeras iguales, sobra la primera (los vehículos tienen 3 cifras).
+      if (run.length >= 4 && run.length % 3 === 1 && run[0] === run[1]) run = run.slice(1);
       if (run.length === 4) out.push(run); // una cifra de más o de menos: dudoso, se propone el parecido
       else for (let i = 0; i < run.length; i += 3) out.push(run.slice(i, i + 3));
       run = "";
@@ -1979,6 +1982,19 @@ const inicioOT =
     }
     flush();
     return out;
+  };
+  // Android (Chrome) a veces da por cerrada la primera palabra y después manda la frase entera:
+  // "tres" + "tres uno nueve". Si un trozo nuevo empieza repitiendo el anterior (y trae algo más),
+  // se quita la parte repetida. Uno por reconocedor; solo compara con el trozo de hace < 15 s.
+  const vozEco = () => {
+    let prev = "", at = 0;
+    const lim = (t) => vozNorm(t).replace(/[^a-z0-9ñ]+/g, " ").trim();
+    return (alts) => {
+      const p = Date.now() - at < 15000 ? prev : "";
+      const out = p ? alts.map((a) => { const n = lim(a); return n.length > p.length && n.startsWith(p + " ") ? n.slice(p.length + 1) : a; }) : alts;
+      prev = lim(alts[0] || ""); at = Date.now();
+      return out;
+    };
   };
   const vozNumDe = (id) => { const m = String(id || "").match(/^([A-Z]+)-?0*(\d+)/i); return m ? { pre: m[1].toUpperCase(), n: Number(m[2]) } : null; };
   const vozDist1 = (a, b) => {
@@ -2105,10 +2121,11 @@ const inicioOT =
       if (!SR) return;
       const rec = new SR();
       rec.lang = "es-ES"; rec.continuous = true; rec.interimResults = false; rec.maxAlternatives = 5;
+      const sinEco = vozEco();
       rec.onresult = (ev) => {
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
           if (!ev.results[i].isFinal) continue;
-          const alts = Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean);
+          const alts = sinEco(Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean));
           if (!vozTieneFin(alts)) { bufC.current = (bufC.current + " " + (alts[0] || "")).trim(); setOyendo(bufC.current); continue; }
           const { frases } = vozTrocear(bufC.current, alts);
           bufC.current = ""; setOyendo("");
@@ -2248,11 +2265,12 @@ const inicioOT =
       if (!SR) { setErr("Este navegador no permite dictado. En el m\xF3vil usa Chrome (Android) o Safari (iPhone)."); return; }
       const rec = new SR();
       rec.lang = "es-ES"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 5;
+      const sinEco = vozEco();
       rec.onresult = (ev) => {
         let interino = "";
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
           const t = ev.results[i][0].transcript;
-          if (ev.results[i].isFinal) recibir(Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean)); else interino += t;
+          if (ev.results[i].isFinal) recibir(sinEco(Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean))); else interino += t;
         }
         setParcial(interino);
       };
@@ -2666,10 +2684,11 @@ const inicioOT =
       if (!SR) { decir("Este navegador no permite dictado (usa Chrome).", "warn", false); setAbierto(true); return; }
       const rec = new SR();
       rec.lang = "es-ES"; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 5;
+      const sinEco = vozEco();
       rec.onresult = (ev) => {
         let interino = "";
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
-          if (ev.results[i].isFinal) procesar(Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean));
+          if (ev.results[i].isFinal) procesar(sinEco(Array.from(ev.results[i]).map((a) => a.transcript).filter(Boolean)));
           else interino += ev.results[i][0].transcript;
         }
         if (interino) setOido([bufRef.current, interino].filter(Boolean).join(" "));
@@ -9022,6 +9041,16 @@ const fmtFechaHora = (valor) => {
   const yoyDesdeMatriz = (matrix, fileName) => {
     const tipo = detectExcelType(matrix);
     if (tipo !== "ingresos" && tipo !== "reservas") return { ignorar: true, error: "no es un Excel de reservas ni de cargos a fianza" };
+    if (tipo === "ingresos") {
+      // Solo el informe filtrado por "Cargo a Fianza" (con Sub Total / Total Entrante), nunca el de todos los pagos
+      // (ese trae columnas Alquiler, Seguros… y meterías pagos de alquiler como cargos a fianza).
+      const hr = findHeaderRow(matrix, ["fecha", "vehículo", "total entrante", "lugar de entrega"]);
+      const arriba = matrix.slice(0, Math.max(0, hr)).flat().map((v) => String(v || "").toLowerCase().trim());
+      const cab = hr >= 0 ? matrix[hr].map((v) => String(v || "").toLowerCase().trim()) : [];
+      const extra = cab.slice(cab.indexOf("vehículo") + 1).filter((c) => c && c !== "sub total" && c !== "total entrante");
+      if (!arriba.includes("cargo a fianza") || extra.length)
+        return { tipo, error: "no es el informe de Cargo a Fianza" + (extra.length ? " (trae columnas " + extra.slice(0, 3).join(", ") + "…, de todos los pagos)" : "") };
+    }
     const parsed = tipo === "ingresos" ? parseIngresosExcel(matrix) : parseReservasExcel(matrix);
     if (parsed.error) return { tipo, error: parsed.error };
     if (!parsed.rows.length) return { tipo, error: "no trae ninguna fila útil" };
