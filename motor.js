@@ -1777,6 +1777,8 @@ const inicioOT =
     { id: "voz", label: "Campa por voz", icon: Mic, ready: true },
     { id: "stats", label: "Estad\xEDsticas", icon: BarChart3, ready: true }
   ];
+  // Atajo de teclado de cada pestaña (la inicial; Fianzas = X y Campa por voz = V para no repetir).
+  const TAB_TECLAS = { H: "today", F: "fleet", A: "agenda", C: "quantifier", X: "deposits", R: "recambios", B: "buscador", V: "voz", E: "stats" };
   // Franja de mantenimiento: muy visible, en todas las pestañas (Alquiler y Taller).
   const MantBanner = ({ vehicles, onOpen }) => {
     const [abierto, setAbierto] = React.useState(false);
@@ -2933,6 +2935,10 @@ const inicioOT =
           React.createElement("button", { onClick: onClose, "aria-label": "Cerrar", style: { cursor: "pointer", padding: "6px 10px", borderRadius: "9px", border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontWeight: 700 } }, "✕")),
         React.createElement("label", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "12px", fontSize: "13.5px", fontWeight: 600, cursor: "pointer" } },
           React.createElement("input", { type: "checkbox", checked: a.activos, onChange: (e) => { const n = { ...a, activos: e.target.checked }; setA(n); setAtajos(n); } }), "Atajos activados"),
+        titulo("Pestañas", "Una letra te lleva a cada pestaña (no funcionan escribiendo ni con una ventana abierta)."),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px 10px", fontSize: "12.5px", color: T.ink, marginBottom: "6px" } },
+          Object.entries(TAB_TECLAS).map(([t, id]) => React.createElement("div", { key: t }, React.createElement("b", { style: { fontFamily: F.mono, display: "inline-block", minWidth: "18px" } }, t), (TABS.find((x) => x.id === id) || {}).label))),
+        titulo("Agenda", "1 Devuelto · 2 Revisado / En reparación · 3 Listo · 4 En uso. ↑ ↓ recorre la columna, ← → cambia de columna, Enter abre la ficha, Esc quita la marca."),
         titulo("Estado de reparación", "En la lista de daños de un vehículo: pon el ratón sobre un daño (o muévete con ↑ ↓) y pulsa la tecla."),
         Object.keys(REPAIR_STATES).map((k) => fila("estado", k, REPAIR_STATES[k].label)),
         titulo("Quién lo reparó", "En la ventana \"¿Quién lo reparó?\": la tecla guarda directamente."),
@@ -6835,6 +6841,8 @@ const fechas = llegadaReal
     outline: "none",
     boxSizing: "border-box"
   };
+  let agendaMarca = null; // vehículo marcado con el teclado en la Agenda (se conserva al abrir y cerrar la ficha)
+  const AGENDA_COLS = ["Devuelto", "Revisado / En reparaci\xF3n", "Listo", "En uso"];
   const AgendaView = ({ state, depositHistoryByVehicle = {}, onSelectVehicle, onImport, onImportReservations, onImportEnAlquiler, onSetStatus, onOpenRentalModal, onConfirmArrival, onMarkReturned, onAdelantoRegreso, onSetReturnDate, requestConfirm }) => {
     const [sortMode, setSortMode] = useState("fecha");
     const agendaHistoryForVehicle = (vehicleId) => depositHistoryByVehicle[vehicleId] || [];
@@ -6888,6 +6896,39 @@ const fechas = llegadaReal
       for (const k of ["DEVUELTO", "REVISADO", "EN_REPARACION", "LISTO"]) out[k].sort(sortByNextSale);
       return out;
     }, [state.vehicles, state.damages, sortMode]);
+    // Atajos: 1-4 elige columna · ↑ ↓ recorre · ← → cambia de columna · Enter abre la ficha · Esc quita la marca.
+    const colsTeclado = [buckets.DEVUELTO, [...buckets.REVISADO, ...buckets.EN_REPARACION], buckets.LISTO, buckets.EN_USO];
+    const [marca, setMarcaState] = useState(() => agendaMarca);
+    const setMarca = (m) => { agendaMarca = m; setMarcaState(m); };
+    const colsRef = useRef(colsTeclado); colsRef.current = colsTeclado;
+    const marcaRef = useRef(marca); marcaRef.current = marca;
+    const selRef = useRef(onSelectVehicle); selRef.current = onSelectVehicle;
+    useEffect(() => {
+      const verla = (id) => setTimeout(() => { const el = document.querySelector(`[data-agenda-veh="${id}"]`); if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, 0);
+      if (agendaMarca && agendaMarca.id) verla(agendaMarca.id);
+      const k = (e) => {
+        if (e.defaultPrevented || escribiendo(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (document.querySelector('[role=dialog], [data-modal], [data-voz-pantalla]')) return;
+        const at = getAtajos(); if (!at.activos) return;
+        const cols = colsRef.current, m = marcaRef.current;
+        const ir = (c, i) => {
+          const lista = cols[c] || [];
+          if (!lista.length) { setMarca({ col: c, id: null }); avisoAtajo(`${AGENDA_COLS[c]}: no hay veh\xEDculos`); return; }
+          const v = lista[Math.max(0, Math.min(lista.length - 1, i))];
+          setMarca({ col: c, id: v.id }); verla(v.id);
+        };
+        if (/^[1-4]$/.test(e.key)) { e.preventDefault(); const c = Number(e.key) - 1; ir(c, 0); if ((cols[c] || []).length) avisoAtajo(`${e.key} \xB7 ${AGENDA_COLS[c]}`); return; }
+        if (!m) return;
+        const lista = cols[m.col] || [];
+        const idx = lista.findIndex((v) => v.id === m.id);
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); ir(m.col, idx < 0 ? 0 : idx + (e.key === "ArrowDown" ? 1 : -1)); return; }
+        if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); const c = Math.max(0, Math.min(3, m.col + (e.key === "ArrowRight" ? 1 : -1))); if (c !== m.col) ir(c, Math.max(0, idx)); return; }
+        if (e.key === "Enter" && m.id) { e.preventDefault(); selRef.current(m.id); return; }
+        if (e.key === "Escape") setMarca(null);
+      };
+      document.addEventListener("keydown", k); return () => document.removeEventListener("keydown", k);
+    }, []);
+    const marcaDe = (c) => ({ marcada: !!(marca && marca.col === c), marcadoId: marca && marca.col === c ? marca.id : null });
     const tomorrowISO = (() => {
       const d = /* @__PURE__ */ new Date();
       d.setDate(d.getDate() + 1);
@@ -6972,6 +7013,7 @@ const fechas = llegadaReal
     } }, /* @__PURE__ */ React.createElement(
       KanbanColumn,
       {
+        ...marcaDe(0),
         status: "DEVUELTO",
         vehicles: buckets.DEVUELTO,
         damages: state.damages,
@@ -6988,6 +7030,7 @@ const fechas = llegadaReal
     ), /* @__PURE__ */ React.createElement(
       KanbanColumn,
       {
+        ...marcaDe(1),
         status: "EN_REPARACION",
         vehicles: [...buckets.REVISADO, ...buckets.EN_REPARACION],
         damages: state.damages,
@@ -7005,6 +7048,7 @@ const fechas = llegadaReal
     ), /* @__PURE__ */ React.createElement(
       KanbanColumn,
       {
+        ...marcaDe(2),
         status: "LISTO",
         vehicles: buckets.LISTO,
         damages: state.damages,
@@ -7021,6 +7065,7 @@ const fechas = llegadaReal
     ), /* @__PURE__ */ React.createElement(
       KanbanColumn,
       {
+        ...marcaDe(3),
         status: "EN_USO",
         vehicles: buckets.EN_USO,
         damages: state.damages,
@@ -7037,7 +7082,7 @@ const fechas = llegadaReal
       }
     )));
   };
-  const KanbanColumn = ({ status, vehicles, damages, onSelectVehicle, onSetStatus, onOpenRentalModal, onConfirmArrival, onMarkReturned, onAdelantoRegreso, onSetReturnDate, emptyMessage, extraStatuses = [], requestConfirm, depositHistoryByVehicle = {} }) => {
+  const KanbanColumn = ({ marcada, marcadoId, status, vehicles, damages, onSelectVehicle, onSetStatus, onOpenRentalModal, onConfirmArrival, onMarkReturned, onAdelantoRegreso, onSetReturnDate, emptyMessage, extraStatuses = [], requestConfirm, depositHistoryByVehicle = {} }) => {
     const theme = WORKFLOW_STATES[status] || WORKFLOW_STATES.DEVUELTO;
     return /* @__PURE__ */ React.createElement("div", { style: {
       background: T.surface,
@@ -7045,7 +7090,8 @@ const fechas = llegadaReal
       borderTop: `3px solid ${theme.accent}`,
       borderRadius: "10px",
       padding: "12px 12px 14px",
-      minHeight: "300px"
+      minHeight: "300px",
+      boxShadow: marcada ? `0 0 0 2px ${theme.accent}` : "none"
     } }, /* @__PURE__ */ React.createElement("div", { style: {
       display: "flex",
       alignItems: "center",
@@ -7080,6 +7126,7 @@ const fechas = llegadaReal
         key: v.id,
         vehicle: v,
         damages,
+        marcado: marcadoId === v.id,
         onClick: () => onSelectVehicle(v.id),
         onSetStatus: (newStatus) => onSetStatus(v.id, newStatus),
         onOpenRentalModal,
@@ -7092,7 +7139,7 @@ const fechas = llegadaReal
       }
     ))));
   };
-  const KanbanCard = ({ vehicle, damages, depositHistory = [], onClick, onSetStatus, onOpenRentalModal, onConfirmArrival, onMarkReturned, onAdelantoRegreso, onSetReturnDate, requestConfirm }) => {
+  const KanbanCard = ({ marcado, vehicle, damages, depositHistory = [], onClick, onSetStatus, onOpenRentalModal, onConfirmArrival, onMarkReturned, onAdelantoRegreso, onSetReturnDate, requestConfirm }) => {
     const status = computeVehicleStatus(vehicle, damages);
     const theme = WORKFLOW_STATES[status] || WORKFLOW_STATES.DEVUELTO;
     const counts = countByGravedad(damages, vehicle.id);
@@ -7141,10 +7188,13 @@ Los da\xF1os quedan registrados como activos.`,
     return /* @__PURE__ */ React.createElement(
       "div",
       {
+        "data-agenda-veh": vehicle.id,
         onMouseEnter: () => setHover(true),
         onMouseLeave: () => setHover(false),
         style: {
           background: T.bg,
+          outline: marcado ? `3px solid ${T.rust || theme.accent}` : "none",
+          outlineOffset: "1px",
           border: `1px solid ${hover ? theme.accent : T.border}`,
           borderLeft: `3px solid ${isUrgent ? T.danger : forcedReady ? T.warn : theme.accent}`,
           borderRadius: "10px",
@@ -12539,6 +12589,25 @@ const [globalSede, setGlobalSede] = useState([]);
     };
     const [view, setView] = useState("list");
     const [selectedVehicleId, setSelectedVehicleId] = useState(null);
+    // Atajos: una letra por pestaña (TAB_TECLAS). Cierra la ficha si está abierta y pasa a ALQUILER.
+    const fichaAbiertaRef = useRef(false); fichaAbiertaRef.current = view === "detail" && !!selectedVehicleId;
+    useEffect(() => {
+      const k = (e) => {
+        if (e.defaultPrevented || escribiendo(e) || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+        if (document.querySelector('[role=dialog], [data-modal], [data-voz-pantalla]')) return;
+        const at = getAtajos(); if (!at.activos) return;
+        const t = teclaDe(e); const tab = t && TAB_TECLAS[t]; if (!tab) return;
+        // En la ficha, si esa letra está asignada a un estado de daño, manda el daño.
+        if (fichaAbiertaRef.current && Object.values(at.estado || {}).includes(t)) return;
+        e.preventDefault();
+        setGrupo("alquiler");
+        if (fichaAbiertaRef.current) { setView("list"); setSelectedVehicleId(null); }
+        setActiveTab(tab);
+        const lab = (TABS.find((x) => x.id === tab) || {}).label;
+        if (lab) avisoAtajo(`${t} · ${lab}`);
+      };
+      document.addEventListener("keydown", k); return () => document.removeEventListener("keydown", k);
+    }, []);
     const [vehicleModal, setVehicleModal] = useState(null);
     const [damageModal, setDamageModal] = useState(null);
     const [backupModalOpen, setBackupModalOpen] = useState(false);
