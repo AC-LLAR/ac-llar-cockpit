@@ -182,7 +182,7 @@
 
   // ================= subida =================
   // Diagnóstico remoto: qué ve el móvil al intentar subir (solo lo lee el administrador).
-  const diag = (info) => { try { Promise.resolve(sb.from("rev_diag").insert({ device: typeof EQUIPO !== "undefined" ? EQUIPO : "", info: { v: 17, ...info } })).catch(() => {}); } catch (e) {} };
+  const diag = (info) => { try { Promise.resolve(sb.from("rev_diag").insert({ device: typeof EQUIPO !== "undefined" ? EQUIPO : "", info: { v: 18, ...info } })).catch(() => {}); } catch (e) {} };
   async function push() {
     // Red de seguridad: si una subida anterior quedó "colgada" más de 5 min, se libera.
     if (Nube.syncing && Nube.syncingSince && Date.now() - Nube.syncingSince > 300000) Nube.syncing = false;
@@ -290,6 +290,7 @@
   }
   async function syncAll() { await push(); await pull(); }
   Nube.sync = syncAll;
+  Nube.diag = diag;
 
   // Limpieza: las fotos guardadas en el móvil de hace más de 30 días ya están en la nube.
   async function cleanupLocalPhotos() {
@@ -358,6 +359,7 @@
       toast(online() ? "Guardada · subiendo a la nube…" : "Guardada en el móvil · se subirá al tener conexión", "ok");
       state.currentInsp = null; state.editingId = null; state.view = "home"; state.tab = "history";
       render();
+      if (window.Borrador) Borrador.limpiar(); // ya está guardada: el borrador sobra
       push();
     } catch (e) {
       toast("Error al guardar: " + (e.message || e), "err");
@@ -760,6 +762,7 @@
       sortRecords(); recomputeCache();
       Nube.ready = true;
       render();
+      if (window.Borrador) Borrador.ofrecer(); // revisión sin terminar en este móvil
       // 3) Nube: subir lo pendiente y traer lo nuevo.
       syncAll();
       cleanupLocalPhotos();
