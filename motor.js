@@ -5858,7 +5858,8 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
   // Solo se consideran "pendientes de avisar" las gestiones registradas desde
   // que esta función está activa (30-ago-2026). El histórico anterior se avisó a mano.
   const AVISO_OFICINA_DESDE = "2026-08-29T22:00:00.000Z"; // 30-ago-2026 00:00 Europe/Madrid
-  const DepositsView = ({ state, onSelectVehicle, onMarkFianzaAvisada, onMarkAvisoOficina, onDepositEvent, onLeftUnreviewed, onImportDepositEvents, onAsumir, onGoToTab, requestConfirm, onEditDepositDate, onDeleteDepositEvent, onEditDepositTipo, onSetDepositNota, onSetDepositDisputa }) => {
+  const NO_GEST_DESDE = "2026-10-01T00:00:00"; // "Fianzas que no se gestionaron": alquileres terminados desde esta fecha
+  const DepositsView = ({ onNoGestDescartar, state, onSelectVehicle, onMarkFianzaAvisada, onMarkAvisoOficina, onDepositEvent, onLeftUnreviewed, onImportDepositEvents, onAsumir, onGoToTab, requestConfirm, onEditDepositDate, onDeleteDepositEvent, onEditDepositTipo, onSetDepositNota, onSetDepositDisputa }) => {
     const today2 = todayKey();
     const [depSearch, setDepSearch] = React.useState("");
     const [depSede, setDepSede] = React.useState("Todas");
@@ -5900,7 +5901,10 @@ Los da\xF1os no se eliminan ni se marcan como reparados \u2014 quedan registrado
       };
       loadSlot("ac_yoy_reservas_2026", setHqReservas2026);
       loadSlot("ac_yoy_reservas_2025", setHqReservas2025);
-      return () => { alive = false; };
+      const recarga = () => loadSlot("ac_yoy_reservas_2026", setHqReservas2026);
+      const onRemoto = (e) => { if (e && e.detail && e.detail.key === "ac_yoy_reservas_2026") recarga(); };
+      window.addEventListener("acllar-yoy", recarga); window.addEventListener("acllar-remote-update", onRemoto);
+      return () => { alive = false; window.removeEventListener("acllar-yoy", recarga); window.removeEventListener("acllar-remote-update", onRemoto); };
     }, []);
     // Agrupa reservas HQ por AC del vehículo, ordenadas por fecha de devolución DESC.
     // Reutiliza el mismo matchKey del informe: "284" (historial) matchea con "AC-284A" (flota).
@@ -6274,6 +6278,73 @@ const isHqReservaGestionada = (vehicleId, hqReserva, allDepositEvents) => {
         return hay.includes(q);
       });
     }, [lists.pendientesGestion, depSearch, depSede]);
+    // ===== FIANZAS QUE NO SE GESTIONARON =====
+    // Alquileres que HQ da por terminados (Excel de reservas, llega cada día) desde NO_GEST_DESDE,
+    // sin ninguna gestión en el cockpit (fianza, presupuesto o "se fue sin revisar"): misma reserva
+    // o una gestión del mismo vehículo a ±3 días de la devolución. No repite lo de la lista principal.
+    const [showNoGest, setShowNoGest] = React.useState(false);
+    const noGestionadas = useMemo(() => {
+      const rows = hqReservas2026?.rows || [];
+      const logs = [...(state.depositLog || []), ...(state.leftUnreviewedLog || [])];
+      const descartadas = new Set((state.fianzasNoGestDescartadas || []).map((d) => d.id));
+      const enPrincipal = new Set(lists.pendientesGestion.map((r) => normReservaKey((r.tit && r.tit._hqReservaId) || (r.hqReserva && r.hqReserva.reservaId))).filter(Boolean));
+      const desde = new Date(NO_GEST_DESDE).getTime(), ahora = Date.now();
+      const out = [], vistos = new Set();
+      for (const r of rows) {
+        const dev = new Date(r.fechaDevolucion || "").getTime();
+        if (!Number.isFinite(dev) || dev < desde || dev > ahora) continue;
+        const ac = acMatchKeyFn(String(r.vehiculo || "").trim().split(/\s+/)[0]);
+        const v = state.vehicles.find((x) => acMatchKeyFn(x.id) === ac);
+        if (!v) continue;
+        const rk = normReservaKey(r.reservaId);
+        const id = ac + "|" + (rk || String(r.fechaDevolucion).slice(0, 10));
+        if (vistos.has(id)) continue;
+        vistos.add(id);
+        if (descartadas.has(id) || (rk && enPrincipal.has(rk))) continue;
+        const gestionada = logs.some((e) => {
+          if (acMatchKeyFn(e.vehicleId) !== ac) return false;
+          const ek = normReservaKey(e.reservaId);
+          if (rk && ek && ek === rk) return true;
+          const ed = new Date(e.alquilerDevolucion || e.returnedAt || e.at || "").getTime();
+          return Number.isFinite(ed) && Math.abs(ed - dev) <= 3 * 864e5;
+        });
+        if (gestionada) continue;
+        out.push({ id, v, estado: computeVehicleStatus(v, state.damages), sede: r.sede || v.location || "",
+          reserva: { cliente: r.cliente || "", fechaEntrega: r.fechaEntrega || "", fechaDevolucion: r.fechaDevolucion || "", reservaId: r.reservaId || "" } });
+      }
+      out.sort((a, b) => new Date(b.reserva.fechaDevolucion) - new Date(a.reserva.fechaDevolucion));
+      return out;
+    }, [hqReservas2026, state.depositLog, state.leftUnreviewedLog, state.fianzasNoGestDescartadas, state.vehicles, state.damages, lists.pendientesGestion]);
+    const noGestFiltradas = noGestionadas.filter(({ v, reserva }) => {
+      if (depSede !== "Todas" && v.location !== depSede) return false;
+      const q = depSearch.toLowerCase().trim();
+      return !q || [v.id, v.plate, reserva.cliente, reserva.reservaId].join(" ").toLowerCase().includes(q);
+    });
+    const descartadasNoGest = (state.fianzasNoGestDescartadas || []).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const fCorta = (x) => { const d = new Date(x || ""); return Number.isFinite(d.getTime()) ? d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" }) : "\u2014"; };
+    const noGestBloque = /* @__PURE__ */ React.createElement("div", { style: { marginBottom: "12px" } },
+      React.createElement("button", { onClick: () => setShowNoGest((x) => !x), style: { fontSize: "13px", fontWeight: 600, color: noGestFiltradas.length ? "#B45309" : T.inkSoft, background: "transparent", border: `1px solid ${noGestFiltradas.length ? "#F2D27A" : T.border}`, borderRadius: "12px", padding: "7px 12px", cursor: "pointer" } },
+        showNoGest ? "\u25BE" : "\u25B8", " Fianzas que no se gestionaron (", noGestFiltradas.length, ") \u2014 alquileres terminados desde el 01/10 sin gesti\xF3n"),
+      showNoGest && React.createElement("div", { style: { marginTop: "10px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: "18px", overflow: "hidden" } },
+        React.createElement("div", { style: { padding: "10px 14px", fontSize: "12px", color: T.inkSoft, borderBottom: `1px solid ${T.border}`, lineHeight: 1.5 } },
+          "Alquileres que HQ da por terminados y que no tienen fianza, presupuesto ni \u201Cse fue sin revisar\u201D en el cockpit (normalmente, porque no se marc\xF3 VOLVI\xD3). Se registran con los datos de ESA reserva, aunque el veh\xEDculo ya est\xE9 con otro cliente.",
+          !hqReservas2026 && React.createElement("b", { style: { color: "#B45309" } }, " Falta el Excel de reservas 2026.")),
+        noGestFiltradas.length === 0 ? React.createElement("div", { style: { padding: "16px", textAlign: "center", fontSize: "13px", color: T.inkFaint } }, "No hay fianzas sin gestionar \u2714") :
+        noGestFiltradas.map((it) => React.createElement("div", { key: it.id, style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", padding: "10px 14px", borderBottom: `1px solid ${T.border}` } },
+          React.createElement("div", { style: { flex: 1, minWidth: "230px", cursor: "pointer" }, onClick: () => onSelectVehicle(it.v.id) },
+            React.createElement("div", { style: { fontSize: "13.5px", color: T.ink } }, React.createElement("b", { style: { fontFamily: F.mono } }, it.v.id), " \xB7 ", it.reserva.cliente || "\u2014",
+              React.createElement("span", { style: { fontSize: "11px", color: T.inkSoft } }, "  ", it.reserva.reservaId)),
+            React.createElement("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "2px" } }, "Alquiler ", fCorta(it.reserva.fechaEntrega), " \u2192 ", fCorta(it.reserva.fechaDevolucion), " \xB7 ", it.v.location || it.sede, " \xB7 ahora: ",
+              React.createElement("b", null, ((WORKFLOW_STATES[it.estado] || {}).short || it.estado || "").toString()))),
+          React.createElement(Btn, { variant: "primary", sm: true, onClick: () => onDepositEvent(it.v.id, "fianza", undefined, it.reserva, { cicloHq: true }) }, "\u{1F4B0} Devolv\xED fianza"),
+          React.createElement(Btn, { variant: "secondary", sm: true, onClick: () => onDepositEvent(it.v.id, "presupuesto", undefined, it.reserva, { cicloHq: true }) }, "\u{1F4C4} Pas\xE9 presupuesto"),
+          onNoGestDescartar && React.createElement("button", { title: "Ya se resolvi\xF3 fuera del cockpit: quitar de esta lista", onClick: () => onNoGestDescartar({ id: it.id, vehicleId: it.v.id, reservaId: it.reserva.reservaId, cliente: it.reserva.cliente, devolucion: it.reserva.fechaDevolucion }),
+            style: { fontSize: "12px", color: T.inkSoft, background: "transparent", border: `1px solid ${T.border}`, borderRadius: "10px", padding: "5px 9px", cursor: "pointer" } }, "\u2713 Gestionada fuera"))),
+        descartadasNoGest.length > 0 && onNoGestDescartar && React.createElement("details", { style: { padding: "8px 14px", fontSize: "12px", color: T.inkSoft } },
+          React.createElement("summary", { style: { cursor: "pointer" } }, "Marcadas como gestionadas fuera (", descartadasNoGest.length, ")"),
+          descartadasNoGest.map((d) => React.createElement("div", { key: d.id, style: { display: "flex", gap: "8px", alignItems: "center", padding: "4px 0" } },
+            React.createElement("span", { style: { flex: 1 } }, React.createElement("b", { style: { fontFamily: F.mono } }, d.vehicleId), " \xB7 ", d.cliente, " \xB7 ", d.reservaId, " \xB7 devoluci\xF3n ", fCorta(d.devolucion)),
+            React.createElement("button", { onClick: () => onNoGestDescartar(d, true), style: { fontSize: "11.5px", color: T.inkSoft, background: "transparent", border: `1px solid ${T.border}`, borderRadius: "8px", padding: "3px 8px", cursor: "pointer" } }, "Deshacer"))))));
     const buildRosanaText = () => {
       const lines = lists.devolverCompleta.map(({ v }) => {
         const parts = [`\u2022 ${v.id}`];
@@ -6407,7 +6478,7 @@ React.createElement("input", {
       letterSpacing: "-0.025em",
       color: T.ink,
       lineHeight: 1.1
-    } }, totalDevolver === 0 && totalRetencion === 0 ? "Sin fianzas pendientes" : `${totalDevolver} para devolver \xB7 ${totalRetencion} con retenci\xF3n`)), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("button", { onClick: () => setManualModal({ vehicleId: "", tipo: "presupuesto", fecha: `${today2}T${new Date().toTimeString().slice(0, 5)}`, search: "" }), style: { cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "white", background: T.rust, border: "none", borderRadius: "12px", padding: "8px 12px", whiteSpace: "nowrap" } }, "+ Registrar gesti\xF3n pasada"), /* @__PURE__ */ React.createElement("label", { style: { cursor: "pointer", fontSize: "13px", fontWeight: 600, color: T.inkSoft, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "8px 12px", whiteSpace: "nowrap" } }, "\u{1F4E5} Importar eventos (JSON)", /* @__PURE__ */ React.createElement("input", { type: "file", accept: ".json", onChange: onImportDepositEvents, style: { display: "none" } })))), avisosPendientes.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: "20px", padding: "14px 16px", background: T.surface, border: `1px solid ${T.border}`, borderLeft: "4px solid #1E7A34", borderRadius: "18px" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "10px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: "14px", color: T.ink, fontWeight: 700 } }, "\u{1F4E2} Avisar a Oficina", /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 400, color: T.inkSoft } }, " — ", avisosPendientes.length, " sin avisar")), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Destinatario:"), OFICINA_CONTACTOS.map((c) => /* @__PURE__ */ React.createElement("button", { key: c.nombre, onClick: () => setAvisoTarget(c.nombre), style: { cursor: "pointer", fontSize: "13px", fontWeight: 700, color: avisoTarget === c.nombre ? "white" : T.inkSoft, background: avisoTarget === c.nombre ? "#1E7A34" : T.bgAlt, border: `1px solid ${avisoTarget === c.nombre ? "#1E7A34" : T.border}`, borderRadius: "999px", padding: "5px 12px" } }, c.nombre)), /* @__PURE__ */ React.createElement("button", { onClick: () => { lanzarWhatsappOficina(telOficina(avisoTarget), avisosPendientes.map(mensajeAvisoOficina).join("\n")); onMarkAvisoOficina && onMarkAvisoOficina(avisosPendientes.map((e) => e.id)); }, style: { cursor: "pointer", fontSize: "14px", fontWeight: 700, color: "white", background: T.rust, border: "none", borderRadius: "12px", padding: "8px 14px", whiteSpace: "nowrap" } }, "\u{1F4AC} Avisar todas (", avisosPendientes.length, ")")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } }, avisosPendientes.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, style: { display: "flex", alignItems: "center", gap: "8px", background: T.bgAlt, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "7px 10px" } }, /* @__PURE__ */ React.createElement("code", { style: { fontFamily: F.mono, fontSize: "14px", fontWeight: 700, color: e.tipo === "fianza" ? "#15803D" : "#9061F9", flex: 1 } }, mensajeAvisoOficina(e)), /* @__PURE__ */ React.createElement("button", { onClick: () => { lanzarWhatsappOficina(telOficina(avisoTarget), mensajeAvisoOficina(e)); onMarkAvisoOficina && onMarkAvisoOficina(e.id); }, style: { cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "white", background: "#1E7A34", border: "none", borderRadius: "10px", padding: "6px 12px", whiteSpace: "nowrap" } }, "\u{1F4AC} Avisar"), /* @__PURE__ */ React.createElement("button", { onClick: () => onMarkAvisoOficina && onMarkAvisoOficina(e.id), title: "Descartar sin avisar", style: { cursor: "pointer", fontSize: "13px", fontWeight: 600, color: T.inkSoft, background: "transparent", border: `1px solid ${T.border}`, borderRadius: "10px", padding: "6px 9px" } }, "✕")))), /* @__PURE__ */ React.createElement("div", { style: { fontSize: "11px", color: T.inkFaint, marginTop: "8px", fontStyle: "italic" } }, "“Avisar todas” manda un solo WhatsApp a ", avisoTarget, " con todas las l\xEDneas. Cada gesti\xF3n desaparece al avisar o descartar.")),  (Array.isArray(state.depositLog) && state.depositLog.some((e) => e.tipo === "presupuesto")) && (() => { const presu2 = state.depositLog.filter((e) => e.tipo === "presupuesto"); const sinCol = presu2.filter((e) => !e.nivelDisputa).length; return /* @__PURE__ */ React.createElement("div", { style: { marginBottom: "14px" } }, /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "8px", padding: "8px 14px", borderRadius: "999px", fontSize: "13px", fontWeight: 700, background: sinCol > 0 ? "#FEF3C7" : "#DCFCE7", color: sinCol > 0 ? "#B45309" : "#15803D", border: `1px solid ${sinCol > 0 ? "#FDE047" : "#86EFAC"}` } }, sinCol > 0 ? `⚠️ ${sinCol} de ${presu2.length} presupuestos sin clasificar (sin color)` : `✓ Los ${presu2.length} presupuestos est\xE1n clasificados`)); })(), (onEditDepositDate || onDeleteDepositEvent) && (Array.isArray(state.depositLog) && state.depositLog.length > 0) && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: "20px" } }, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowRecent((v) => !v), style: {
+    } }, totalDevolver === 0 && totalRetencion === 0 ? "Sin fianzas pendientes" : `${totalDevolver} para devolver \xB7 ${totalRetencion} con retenci\xF3n`)), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("button", { onClick: () => setManualModal({ vehicleId: "", tipo: "presupuesto", fecha: `${today2}T${new Date().toTimeString().slice(0, 5)}`, search: "" }), style: { cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "white", background: T.rust, border: "none", borderRadius: "12px", padding: "8px 12px", whiteSpace: "nowrap" } }, "+ Registrar gesti\xF3n pasada"), /* @__PURE__ */ React.createElement("label", { style: { cursor: "pointer", fontSize: "13px", fontWeight: 600, color: T.inkSoft, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "8px 12px", whiteSpace: "nowrap" } }, "\u{1F4E5} Importar eventos (JSON)", /* @__PURE__ */ React.createElement("input", { type: "file", accept: ".json", onChange: onImportDepositEvents, style: { display: "none" } })))), avisosPendientes.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: "20px", padding: "14px 16px", background: T.surface, border: `1px solid ${T.border}`, borderLeft: "4px solid #1E7A34", borderRadius: "18px" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "10px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: "14px", color: T.ink, fontWeight: 700 } }, "\u{1F4E2} Avisar a Oficina", /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 400, color: T.inkSoft } }, " — ", avisosPendientes.length, " sin avisar")), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }), /* @__PURE__ */ React.createElement("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Destinatario:"), OFICINA_CONTACTOS.map((c) => /* @__PURE__ */ React.createElement("button", { key: c.nombre, onClick: () => setAvisoTarget(c.nombre), style: { cursor: "pointer", fontSize: "13px", fontWeight: 700, color: avisoTarget === c.nombre ? "white" : T.inkSoft, background: avisoTarget === c.nombre ? "#1E7A34" : T.bgAlt, border: `1px solid ${avisoTarget === c.nombre ? "#1E7A34" : T.border}`, borderRadius: "999px", padding: "5px 12px" } }, c.nombre)), /* @__PURE__ */ React.createElement("button", { onClick: () => { lanzarWhatsappOficina(telOficina(avisoTarget), avisosPendientes.map(mensajeAvisoOficina).join("\n")); onMarkAvisoOficina && onMarkAvisoOficina(avisosPendientes.map((e) => e.id)); }, style: { cursor: "pointer", fontSize: "14px", fontWeight: 700, color: "white", background: T.rust, border: "none", borderRadius: "12px", padding: "8px 14px", whiteSpace: "nowrap" } }, "\u{1F4AC} Avisar todas (", avisosPendientes.length, ")")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } }, avisosPendientes.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, style: { display: "flex", alignItems: "center", gap: "8px", background: T.bgAlt, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "7px 10px" } }, /* @__PURE__ */ React.createElement("code", { style: { fontFamily: F.mono, fontSize: "14px", fontWeight: 700, color: e.tipo === "fianza" ? "#15803D" : "#9061F9", flex: 1 } }, mensajeAvisoOficina(e)), /* @__PURE__ */ React.createElement("button", { onClick: () => { lanzarWhatsappOficina(telOficina(avisoTarget), mensajeAvisoOficina(e)); onMarkAvisoOficina && onMarkAvisoOficina(e.id); }, style: { cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "white", background: "#1E7A34", border: "none", borderRadius: "10px", padding: "6px 12px", whiteSpace: "nowrap" } }, "\u{1F4AC} Avisar"), /* @__PURE__ */ React.createElement("button", { onClick: () => onMarkAvisoOficina && onMarkAvisoOficina(e.id), title: "Descartar sin avisar", style: { cursor: "pointer", fontSize: "13px", fontWeight: 600, color: T.inkSoft, background: "transparent", border: `1px solid ${T.border}`, borderRadius: "10px", padding: "6px 9px" } }, "✕")))), /* @__PURE__ */ React.createElement("div", { style: { fontSize: "11px", color: T.inkFaint, marginTop: "8px", fontStyle: "italic" } }, "“Avisar todas” manda un solo WhatsApp a ", avisoTarget, " con todas las l\xEDneas. Cada gesti\xF3n desaparece al avisar o descartar.")),  (Array.isArray(state.depositLog) && state.depositLog.some((e) => e.tipo === "presupuesto")) && (() => { const presu2 = state.depositLog.filter((e) => e.tipo === "presupuesto"); const sinCol = presu2.filter((e) => !e.nivelDisputa).length; return /* @__PURE__ */ React.createElement("div", { style: { marginBottom: "14px" } }, /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "8px", padding: "8px 14px", borderRadius: "999px", fontSize: "13px", fontWeight: 700, background: sinCol > 0 ? "#FEF3C7" : "#DCFCE7", color: sinCol > 0 ? "#B45309" : "#15803D", border: `1px solid ${sinCol > 0 ? "#FDE047" : "#86EFAC"}` } }, sinCol > 0 ? `⚠️ ${sinCol} de ${presu2.length} presupuestos sin clasificar (sin color)` : `✓ Los ${presu2.length} presupuestos est\xE1n clasificados`)); })(), noGestBloque, (onEditDepositDate || onDeleteDepositEvent) && (Array.isArray(state.depositLog) && state.depositLog.length > 0) && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: "20px" } }, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowRecent((v) => !v), style: {
       fontSize: "13px",
       fontWeight: 600,
       color: T.inkSoft,
@@ -13077,7 +13148,9 @@ No se puede deshacer.`,
         depositLog: (Array.isArray(s.depositLog) ? s.depositLog : []).map((e) => idSet.has(e.id) ? { ...e, avisadoOficina: true, avisadoOficinaAt: nowIso() } : e)
       }));
     };
-    const handleDepositEvent = async (vehicleId, tipo, fechaManual, hqReservaOverride) => {
+    // opts.cicloHq: la gestión es de una reserva ANTERIOR (lista "Fianzas que no se gestionaron"):
+    // fechas de esa reserva de HQ y sin tocar el ciclo actual del vehículo (avisos ni llegada).
+    const handleDepositEvent = async (vehicleId, tipo, fechaManual, hqReservaOverride, opts = {}) => {
       const nuevoId = Date.now() + Math.random();
       // Si la gestión viene de una tarjeta pendiente, usamos ESA reserva exacta.
       // Solo en registros manuales fuera de la lista buscamos la última reserva
@@ -13104,10 +13177,10 @@ No se puede deshacer.`,
         // se importan Excels. Fallback a returnedAt/lastReturnAt del vehículo si no hay evento.
         const arrLog = Array.isArray(s.arrivalLog) ? s.arrivalLog : [];
         const arrEvent = tit?.reservaId ? findArrivalEvent(arrLog, vehicleId, tit.reservaId) : null;
-        const ret = arrEvent?.at || v.returnedAt || v.lastReturnAt || null;
+        const ret = arrEvent?.at || (opts.cicloHq ? (tit && tit.devolucion) || null : v.returnedAt || v.lastReturnAt || null);
         const rl = Array.isArray(s.reviewLog) ? s.reviewLog : [];
         const cycleReview = rl.find((r) => r.vehicleId === vehicleId && r.returnedAt === ret);
-        const reviewAt = cycleReview && cycleReview.reviewStartedAt || v.lastInspectedAt || null;
+        const reviewAt = cycleReview && cycleReview.reviewStartedAt || (opts.cicloHq ? null : v.lastInspectedAt) || null;
         const hrs = (from) => from ? Math.round((new Date(now) - new Date(from)) / 36e5 * 100) / 100 : null;
         const entry = {
           id: nuevoId,
@@ -13123,8 +13196,9 @@ No se puede deshacer.`,
           reservaId: tit ? tit.reservaId || "" : "",
           alquilerSalida: tit ? tit.salida || "" : "",
           alquilerDevolucion: tit ? tit.devolucion || "" : "",
-          arrivalSource: arrEvent ? "arrivalLog" : "vehicle",
-          reservaSource: hqRes ? "hq" : "cockpit"
+          arrivalSource: arrEvent ? "arrivalLog" : opts.cicloHq ? "hq-devolucion" : "vehicle",
+          reservaSource: hqRes ? "hq" : "cockpit",
+          ...opts.cicloHq ? { origen: "no-gestionadas" } : {}
         };
         const ok = (h) => h === null || h >= 0 && h <= 24 * 90;
         if (!ok(entry.horasDesdeLlegada) || !ok(entry.horasDesdeRevision)) {
@@ -13132,10 +13206,18 @@ No se puede deshacer.`,
           entry.horasDesdeRevision = ok(entry.horasDesdeRevision) ? entry.horasDesdeRevision : null;
         }
         const depositLog = [...Array.isArray(s.depositLog) ? s.depositLog : [], entry];
-        const vehicles = tipo === "fianza" ? s.vehicles.map((x) => x.id === vehicleId ? { ...x, fianzaAvisoEnviado: true, fianzaAvisoEnviadoAt: now } : x) : s.vehicles;
+        const vehicles = tipo === "fianza" && !opts.cicloHq ? s.vehicles.map((x) => x.id === vehicleId ? { ...x, fianzaAvisoEnviado: true, fianzaAvisoEnviadoAt: now } : x) : s.vehicles;
         return { ...s, depositLog, vehicles };
       });
       return nuevoId;
+    };
+    // "Fianzas que no se gestionaron": quitar de la lista una reserva resuelta fuera del cockpit (o deshacerlo).
+    const handleNoGestDescartar = (item, deshacer) => {
+      setState((s) => {
+        const prev = Array.isArray(s.fianzasNoGestDescartadas) ? s.fianzasNoGestDescartadas : [];
+        const sin = prev.filter((d) => d.id !== item.id);
+        return { ...s, fianzasNoGestDescartadas: deshacer ? sin : [...sin, { id: item.id, vehicleId: item.vehicleId, reservaId: item.reservaId || "", cliente: item.cliente || "", devolucion: item.devolucion || "", at: nowIso() }] };
+      });
     };
     const handleEditDepositDate = (eventId, fechaIso) => {
       if (!fechaIso) return;
@@ -15697,6 +15779,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
         onMarkFianzaAvisada: handleMarkFianzaAvisada,
         onMarkAvisoOficina: handleMarkAvisoOficina,
         onDepositEvent: handleDepositEvent,
+        onNoGestDescartar: handleNoGestDescartar,
         onLeftUnreviewed: handleLeftUnreviewed,
         onImportDepositEvents: handleImportDepositEvents,
         onEditDepositDate: handleEditDepositDate,
