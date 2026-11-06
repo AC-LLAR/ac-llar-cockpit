@@ -6321,6 +6321,19 @@ const isHqReservaGestionada = (vehicleId, hqReserva, allDepositEvents) => {
       return !q || [v.id, v.plate, reserva.cliente, reserva.reservaId].join(" ").toLowerCase().includes(q);
     });
     const descartadasNoGest = (state.fianzasNoGestDescartadas || []).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    // 📅 junto a cada botón: registrar con la fecha real en que se gestionó (por defecto, la devolución de esa reserva).
+    const calNoGest = (it, tipo) => React.createElement("button", {
+      title: "Registrar con otra fecha (la real en que se gestion\xF3)",
+      onClick: (e) => {
+        e.stopPropagation();
+        const d0 = new Date(it.reserva.fechaDevolucion || Date.now());
+        const d = Number.isFinite(d0.getTime()) && d0.getTime() <= Date.now() ? d0 : new Date();
+        const pad = (n) => String(n).padStart(2, "0");
+        setFechaModal({ vehicleId: it.v.id, tipo, hqReserva: it.reserva, cicloHq: true,
+          fecha: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}` });
+      },
+      style: { fontSize: "13px", background: "transparent", border: `1px solid ${T.border}`, borderRadius: "8px", padding: "4px 7px", cursor: "pointer", lineHeight: 1 }
+    }, "\u{1F4C5}");
     const fCorta = (x) => { const d = new Date(x || ""); return Number.isFinite(d.getTime()) ? d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" }) : "\u2014"; };
     const noGestBloque = /* @__PURE__ */ React.createElement("div", { style: { marginBottom: "12px" } },
       React.createElement("button", { onClick: () => setShowNoGest((x) => !x), style: { fontSize: "13px", fontWeight: 600, color: noGestFiltradas.length ? "#B45309" : T.inkSoft, background: "transparent", border: `1px solid ${noGestFiltradas.length ? "#F2D27A" : T.border}`, borderRadius: "12px", padding: "7px 12px", cursor: "pointer" } },
@@ -6336,8 +6349,12 @@ const isHqReservaGestionada = (vehicleId, hqReserva, allDepositEvents) => {
               React.createElement("span", { style: { fontSize: "11px", color: T.inkSoft } }, "  ", it.reserva.reservaId)),
             React.createElement("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "2px" } }, "Alquiler ", fCorta(it.reserva.fechaEntrega), " \u2192 ", fCorta(it.reserva.fechaDevolucion), " \xB7 ", it.v.location || it.sede, " \xB7 ahora: ",
               React.createElement("b", null, ((WORKFLOW_STATES[it.estado] || {}).short || it.estado || "").toString()))),
-          React.createElement(Btn, { variant: "primary", sm: true, onClick: () => onDepositEvent(it.v.id, "fianza", undefined, it.reserva, { cicloHq: true }) }, "\u{1F4B0} Devolv\xED fianza"),
-          React.createElement(Btn, { variant: "secondary", sm: true, onClick: () => onDepositEvent(it.v.id, "presupuesto", undefined, it.reserva, { cicloHq: true }) }, "\u{1F4C4} Pas\xE9 presupuesto"),
+          React.createElement("div", { style: { display: "flex", gap: "2px", alignItems: "center" } },
+            React.createElement(Btn, { variant: "primary", sm: true, onClick: () => onDepositEvent(it.v.id, "fianza", undefined, it.reserva, { cicloHq: true }) }, "\u{1F4B0} Devolv\xED fianza"),
+            calNoGest(it, "fianza")),
+          React.createElement("div", { style: { display: "flex", gap: "2px", alignItems: "center" } },
+            React.createElement(Btn, { variant: "secondary", sm: true, onClick: () => onDepositEvent(it.v.id, "presupuesto", undefined, it.reserva, { cicloHq: true }) }, "\u{1F4C4} Pas\xE9 presupuesto"),
+            calNoGest(it, "presupuesto")),
           onNoGestDescartar && React.createElement("button", { title: "Ya se resolvi\xF3 fuera del cockpit: quitar de esta lista", onClick: () => onNoGestDescartar({ id: it.id, vehicleId: it.v.id, reservaId: it.reserva.reservaId, cliente: it.reserva.cliente, devolucion: it.reserva.fechaDevolucion }),
             style: { fontSize: "12px", color: T.inkSoft, background: "transparent", border: `1px solid ${T.border}`, borderRadius: "10px", padding: "5px 9px", cursor: "pointer" } }, "\u2713 Gestionada fuera"))),
         descartadasNoGest.length > 0 && onNoGestDescartar && React.createElement("details", { style: { padding: "8px 14px", fontSize: "12px", color: T.inkSoft } },
@@ -6709,7 +6726,7 @@ const fechas = llegadaReal
     style: { width: "100%", padding: "9px 11px", fontSize: "15px", border: `1px solid ${T.border}`, borderRadius: "12px", background: T.bg, color: T.ink, boxSizing: "border-box", marginBottom: "18px" }
   }
 ), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: "8px", justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement(Btn, { variant: "secondary", sm: true, onClick: () => setFechaModal(null) }, "Cancelar"), /* @__PURE__ */ React.createElement(Btn, { variant: "primary", sm: true, onClick: () => {
-      onDepositEvent(fechaModal.vehicleId, fechaModal.tipo, fechaModal.fecha, fechaModal.hqReserva);
+      onDepositEvent(fechaModal.vehicleId, fechaModal.tipo, fechaModal.fecha, fechaModal.hqReserva, fechaModal.cicloHq ? { cicloHq: true } : undefined);
       setFechaModal(null);
     } }, "Registrar")))), manualModal && renderManualModal());
   };
