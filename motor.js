@@ -2853,8 +2853,9 @@ const inicioOT =
     const infoA = (label, e) => {
       if (!e) return { label, color: T.inkFaint, txt: "todavía no ha llegado ninguno" };
       if (!e.ok) return { label, e, color: ROJO, txt: "no actualizado", aviso: `${label}: el último archivo no se ha cargado (${e.msg}).` };
-      const hoy = dia(e.recibido || e.at) === dia(Date.now());
-      return hoy ? { label, e, color: VERDE, icono: "✓", txt: e.msg } : { label, e, color: AMBAR, txt: e.msg, aviso: `${label}: hoy aún no ha llegado el archivo de HQ (el último es de ${cuando(e.recibido || e.at)}).` };
+      // HQ lo manda una vez al día (por la tarde): solo avisa si pasan más de 30 h sin archivo nuevo.
+      const reciente = Date.now() - new Date(e.recibido || e.at).getTime() < 30 * 3600e3;
+      return reciente ? { label, e, color: VERDE, icono: "✓", txt: e.msg } : { label, e, color: AMBAR, txt: e.msg, aviso: `${label}: hace más de 30 h que no llega el archivo de HQ (el último es de ${cuando(e.recibido || e.at)}).` };
     };
     const anuales = [infoA("Reservas 2026", anual.reservas), infoA("Ingresos 2026", anual.ingresos)];
     const conAnual = anuales.some((a) => a.e);
@@ -9184,8 +9185,11 @@ const fmtFechaHora = (valor) => {
         if (col >= 0 && !parseFechaEs(r[col])) { sinFecha++; if (noLeidas.length < 6) noLeidas.push(String(r[col])); }
       }
       const corta = (r) => (r || []).slice(0, 10).map((v) => (v == null ? null : String(v).slice(0, 40)));
+      // Completo (todas las columnas): para ver la estructura de los informes de HQ (p. ej. en qué columna va cada forma de pago).
+      const entera = (r) => (r || []).slice(0, 60).map((v) => (v == null ? null : String(v).slice(0, 30)));
       return { tipo, hojas: m.__hojas || null, filasTotales: m.length, cabeceraFila: hr, cabecera: hr >= 0 ? corta(m[hr]) : m.slice(0, 4).map(corta),
-        datos, sinFecha, noLeidas, muestra: m.slice(hr + 1, hr + 3).map(corta), ultima: corta(m[m.length - 1]) };
+        datos, sinFecha, noLeidas, muestra: m.slice(hr + 1, hr + 3).map(corta), ultima: corta(m[m.length - 1]),
+        arribaEntera: m.slice(0, Math.max(0, hr) + 1).map(entera), muestraEntera: m.slice(hr + 1, hr + 4).map(entera), ultimaEntera: entera(m[m.length - 1]) };
     } catch (e) { return { error: String((e && e.message) || e) }; }
   };
   const yoyDesdeMatriz = (matrix, fileName) => {
