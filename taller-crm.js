@@ -217,7 +217,7 @@
         h("button", { "data-crm-nueva": "1", onClick: () => setNueva({}), style: { ...btn(T, "p"), height: "46px", padding: "0 20px", fontSize: "15px" } }, "+ Nueva consulta")),
       h("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px", borderBottom: `2px solid ${T.border}` } },
         tabBtn("bandeja", "Bandeja", listas.bandeja.length, listas.bandeja.length ? "ambar" : "gris"),
-        tabBtn("metoca", me ? "Me toca" : "Pendientes", listas.metoca.length, "azul"),
+        tabBtn("metoca", me ? "Mis tareas" : "Pendientes", listas.metoca.length, "azul"),
         tabBtn("tablero", "Tablero", null),
         tabBtn("todos", "Todos", null),
         h("div", { style: { marginLeft: "auto", display: "flex", gap: "8px", alignItems: "center", paddingBottom: "8px", flexWrap: "wrap" } },
