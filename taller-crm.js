@@ -100,8 +100,8 @@
   const vehTxt = (v) => { const x = asVeh(v); return [x.modelo, x.matricula ? normMat(x.matricula) : null].filter(Boolean).join(" · "); };
   const vehDeBC = (p) => ({ modelo: p.descripcion || "(sin descripción)", matricula: p.serie || "", bastidor: p.alias && normMat(p.alias) !== normMat(p.descripcion) ? p.alias : "", bc_ps: p.no });
   const mismoVeh = (a, b) => { const x = asVeh(a), y = asVeh(b); if (x.bc_ps && y.bc_ps) return x.bc_ps === y.bc_ps; const mx = normMat(x.matricula), my = normMat(y.matricula); if (mx || my) return mx === my; return String(x.modelo || "").trim().toLowerCase() === String(y.modelo || "").trim().toLowerCase(); };
-  async function enviarABC(clienteId, forzar) {
-    const { data, error } = await sb().functions.invoke("crm-alta-bc", { body: { cliente_id: clienteId, forzar: !!forzar } });
+  async function enviarABC(clienteId, forzar, accion) {
+    const { data, error } = await sb().functions.invoke("crm-alta-bc", { body: { cliente_id: clienteId, forzar: !!forzar, accion } });
     let res = data;
     if (error) { try { res = error.context && (await error.context.json()); } catch (e) {} if (!res) res = { error: error.message }; }
     return res || { error: "Sin respuesta" };
@@ -207,6 +207,8 @@
       setCargando(false);
     };
     useEffect(() => { cargar(); const t = setInterval(cargar, 60000); return () => clearInterval(t); }, []);
+    const [sincronizando, setSincronizando] = useState(false);
+    const syncAhora = async () => { setSincronizando(true); try { await enviarABC(null, false, "sync"); } catch (e) {} await cargar(); setSincronizando(false); };
     const actualizarCaso = (c) => setCasos((xs) => { const i = xs.findIndex((x) => x.id === c.id); if (i < 0) return [c, ...xs]; const n = xs.slice(); n[i] = c; return n; });
 
     if (sinAcceso) return h("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "36px", textAlign: "center", color: T.inkSoft, fontSize: "14px" } },
@@ -225,6 +227,16 @@
     const ultSync = (sync || []).map((s) => s.ultimo_ok).filter(Boolean).sort().pop();
     const errSync = (sync || []).find((s) => s.ultimo_error);
     const casoAbierto = casoId && casos.find((c) => c.id === casoId);
+    // Documentos de BC ya vinculados a algún caso, y propuesta automática de oferta/pedido para cada caso.
+    const vinculados = new Set(casos.flatMap((c) => [c.oferta_bc && "oferta:" + norm(c.oferta_bc), c.pedido_bc && "pedido:" + norm(c.pedido_bc)].filter(Boolean)));
+    const sugerencia = (c) => {
+      const bcNo = c.cliente && c.cliente.bc_no; if (!bcNo || est(c.estado).fin) return null;
+      const desde = String(c.created_at || "").slice(0, 10);
+      const libres = (tipo) => bcServ.filter((x) => x.tipo === tipo && x.activo && x.cliente_no === bcNo && !vinculados.has(tipo + ":" + norm(x.no)) && (!x.fecha_pedido || x.fecha_pedido >= desde));
+      if (!c.oferta_bc && !c.pedido_bc && c.estado === "presupuesto_por_hacer") { const o = libres("oferta"); if (o.length) return { tipo: "oferta", doc: o[0] }; }
+      if (!c.pedido_bc && (c.oferta_bc || c.garantia_resultado === "parcial")) { const pe = libres("pedido"); if (pe.length) return { tipo: "pedido", doc: pe[0] }; }
+      return null;
+    };
 
     const tabBtn = (id, label, n, tone) => h("button", { key: id, onClick: () => cambiarVista(id), style: { cursor: "pointer", border: "none", background: "transparent", fontFamily: "inherit", color: vista === id ? T.ink : T.inkSoft, fontWeight: vista === id ? 800 : 700, fontSize: "14px", padding: "10px 14px", borderBottom: `3px solid ${vista === id ? T.rust : "transparent"}`, marginBottom: "-2px", display: "flex", alignItems: "center", gap: "6px" } },
       label, n != null ? h(Chip, { c: tone || "gris" }, n) : null);
@@ -241,14 +253,15 @@
         h("div", { style: { marginLeft: "auto", display: "flex", gap: "8px", alignItems: "center", paddingBottom: "8px", flexWrap: "wrap" } },
           nVencidos ? h(Chip, { c: "rojo" }, `${nVencidos} vencido${nVencidos > 1 ? "s" : ""}`) : null,
           nAvisos ? h(Chip, { c: "ambar" }, `${nAvisos} aviso${nAvisos > 1 ? "s" : ""}`) : null,
-          h("span", { title: errSync ? errSync.ultimo_error : "", style: { fontSize: "12px", color: errSync ? T.danger : T.inkFaint } }, errSync ? "⚠ Error al sincronizar con BC" : ultSync ? `BC sincronizado ${fFechaHora(ultSync)}` : ""))),
+          h("span", { title: errSync ? errSync.ultimo_error : "", style: { fontSize: "12px", color: errSync ? T.danger : T.inkFaint } }, errSync ? "⚠ Error al sincronizar con BC" : ultSync ? `BC sincronizado ${fFechaHora(ultSync)}` : ""),
+          h("button", { "data-crm-sync": "1", onClick: syncAhora, disabled: sincronizando, title: "Traer ya los cambios de BC sin esperar a los 10 minutos", style: btn(T, "s") }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC"))),
       error ? h("div", { style: { color: T.danger, fontSize: "13px" } }, error) : null,
       cargando ? h("div", { style: { color: T.inkFaint, fontSize: "13px" } }, "Cargando…")
         : vista === "tablero" ? h(Tablero, { T, casos: abiertos, onOpen: setCasoId })
         : h(React.Fragment, null,
           vista === "todos" ? h("div", null, h(Seg, { T, opts: [["abiertos", "Abiertos"], ["cerrados", "Cerrados"], ["todos", "Todos"]], value: filtroTodos, onChange: setFiltroTodos })) : null,
-          h(Lista, { T, F, casos: listas[vista] || [], bcServ, onOpen: setCasoId, vacio: vista === "bandeja" ? "No hay consultas sin responder." : "Nada pendiente. Todo al día." })),
-      casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
+          h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, vacio: vista === "bandeja" ? "No hay consultas sin responder." : "Nada pendiente. Todo al día." })),
+      casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, vinculados, sugerencia: sugerencia(casoAbierto), syncAhora, sincronizando, onRefresh: cargar, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
       clienteId ? h(ClientePanel, { T, F, id: clienteId, casos, bcServ, onClose: () => setClienteId(null), onCaso: (id) => { setClienteId(null); setCasoId(id); }, onNueva: (cliente) => { setClienteId(null); setNueva({ cliente }); }, onChanged: cargar }) : null,
       nueva ? h(NuevaConsulta, { T, F, inicial: nueva, onClose: () => setNueva(null), onCreated: (c) => { setNueva(null); actualizarCaso(c); setCasoId(c.id); } }) : null);
   }
@@ -307,7 +320,7 @@
   }
 
   // ---------- lista ----------
-  function Lista({ T, casos, bcServ, onOpen, vacio }) {
+  function Lista({ T, casos, bcServ, sugerencia, onOpen, vacio }) {
     if (!casos.length) return h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft, fontSize: "14px" } }, vacio);
     const th = { fontSize: "11px", letterSpacing: ".08em", textTransform: "uppercase", color: T.inkSoft, fontWeight: 700, padding: "10px 12px", textAlign: "left", borderBottom: `1.5px solid ${T.border}` };
     const td = { padding: "11px 12px", borderBottom: `1px solid ${T.border}`, verticalAlign: "top", fontSize: "13.5px" };
@@ -324,7 +337,8 @@
             h("td", { style: td }, h(Chip, { c: s.c }, s.l), av ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: av.c }, av.t)) : null),
             h("td", { style: td }, c.proxima_accion || h("span", { style: { color: T.inkFaint } }, "—"), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, c.responsable || "")),
             h("td", { style: td }, doc ? h(React.Fragment, null, h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" } }, doc.no), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, `${doc.tipo === "oferta" ? "Oferta" : "Pedido"} · ${eur(doc.importe_iva)}`))
-              : c.garantia_100 ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, "100 % garantía") : h("span", { style: { color: T.inkFaint } }, "—")));
+              : c.garantia_100 ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, "100 % garantía") : h("span", { style: { color: T.inkFaint } }, "—"),
+              sugerencia && sugerencia(c) ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: "azul" }, `${sugerencia(c).tipo === "oferta" ? "Oferta" : "Pedido"} en BC para vincular`)) : null));
         }))));
   }
   const docBC = (bcServ, c) => {
@@ -347,7 +361,8 @@
   }
 
   // ---------- ficha del caso ----------
-  function CasoPanel({ T, F, caso, bcServ, onClose, onSaved, onCliente }) {
+  function CasoPanel({ T, F, caso, bcServ, vinculados, sugerencia, syncAhora, sincronizando, onRefresh, onClose, onSaved, onCliente }) {
+    const [altaMsg, setAltaMsg] = useState(null); // null | "trabajando" | { txt, dup }
     const [ev, setEv] = useState([]);
     const [guardando, setGuardando] = useState(false);
     const [msg, setMsg] = useState("");
@@ -402,7 +417,22 @@
     const s = est(caso.estado), fi = RECORRIDO.indexOf(s.f);
     const oferta = caso.oferta_bc && bcServ.find((x) => x.tipo === "oferta" && norm(x.no) === norm(caso.oferta_bc));
     const pedido = caso.pedido_bc && bcServ.find((x) => x.tipo === "pedido" && norm(x.no) === norm(caso.pedido_bc));
-    const docsCli = caso.cliente && caso.cliente.bc_no ? bcServ.filter((x) => x.cliente_no === caso.cliente.bc_no && x.activo) : [];
+    const enBC = !!(caso.cliente && caso.cliente.bc_no);
+    const propios = new Set([caso.oferta_bc && "oferta:" + norm(caso.oferta_bc), caso.pedido_bc && "pedido:" + norm(caso.pedido_bc)].filter(Boolean));
+    const docsCli = enBC ? bcServ.filter((x) => x.cliente_no === caso.cliente.bc_no && x.activo && !propios.has(x.tipo + ":" + norm(x.no)) && !(vinculados && vinculados.has(x.tipo + ":" + norm(x.no)))) : [];
+    const docsOtros = docsCli.filter((x) => !(sugerencia && sugerencia.doc.no === x.no && sugerencia.tipo === x.tipo));
+    const vincular = (x) => {
+      const p = x.tipo === "oferta" ? { oferta_bc: x.no } : { pedido_bc: x.no };
+      if (x.tipo === "oferta" && caso.estado === "presupuesto_por_hacer") p.estado = "presupuesto_hecho";
+      guardar(p, `${x.tipo === "oferta" ? "Oferta" : "Pedido"} ${x.no} vinculado.` + (p.estado ? " Estado: Presupuesto hecho." : ""));
+    };
+    const altaDesdeCaso = async () => {
+      setAltaMsg("trabajando");
+      const res = await enviarABC(caso.cliente_id, false);
+      if (res.duplicados) { setAltaMsg({ txt: "En BC ya hay clientes que coinciden. Revísalo en la ficha antes de crear otro.", dup: true }); return; }
+      if (res.ok) { setAltaMsg({ txt: `Dado de alta en BC como ${res.bc_no}.` + (res.vehiculos && res.vehiculos.length ? " " + res.vehiculos.join(" · ") : "") }); onRefresh && onRefresh(); return; }
+      setAltaMsg({ txt: "No se pudo: " + (res.error || "error"), err: true });
+    };
     const verSenal = caso.rama === "A" || /senal|comprobante|contabilidad/.test(caso.estado) || caso.senal_importe != null || caso.senal_comprobante_at;
     const verGar = caso.tipo === "garantia" || caso.rama === "garantia" || /^garantia_|cobertura/.test(caso.estado) || caso.garantia_resultado;
     const set = (k) => (e) => setD((x) => ({ ...x, [k]: e.target.value }));
@@ -438,7 +468,7 @@
                 h(Field, { T, label: "Motivo del cierre", style: { flex: 1 } }, h("input", { value: motivo, onChange: (e) => setMotivo(e.target.value), placeholder: "p. ej. lo arregló en otro taller", style: I })),
                 h("button", { onClick: cerrar, disabled: guardando, style: btn(T) }, "Cerrar caso"), h("button", { onClick: () => setCerrando(false), style: btn(T) }, "Cancelar"))
                 : h("button", { onClick: () => setCerrando(true), style: { ...btn(T, "s"), alignSelf: "flex-start", color: T.inkSoft } }, "Cerrar caso…")),
-          msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: msg.startsWith("No se") ? T.danger : T.ok } }, msg) : null),
+          msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: /^No se|no lo aceptó/.test(msg) ? T.danger : T.ok } }, msg) : null),
 
         h(Box, { T, tone: "ambar" }, h(Lbl, { T }, "Próxima acción"),
           h("div", { style: { display: "grid", gridTemplateColumns: "1fr", gap: "8px" } },
@@ -447,11 +477,23 @@
               h("select", { value: d.responsable || "", onChange: set("responsable"), style: I, "aria-label": "Responsable" }, h("option", { value: "" }, "Sin responsable"), RESPONSABLES.map((r) => h("option", { key: r, value: r }, r))),
               h("input", { type: "datetime-local", value: d.fecha_limite || "", onChange: set("fecha_limite"), style: I, "aria-label": "Fecha límite" })))),
 
-        h(Box, { T }, h(Lbl, { T }, "Business Central"),
-          docBox("Oferta de servicio", "oferta_bc", oferta), docBox("Pedido de servicio", "pedido_bc", pedido),
-          verGar ? h("label", { style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "13px", marginTop: "6px" } }, h("input", { type: "checkbox", checked: !!caso.garantia_100, onChange: (e) => guardar({ garantia_100: e.target.checked }) }), "100 % garantía (sin pedido de servicio)") : null,
-          docsCli.length ? h("div", { style: { marginTop: "8px" } }, h("div", { style: { fontSize: "12px", color: T.inkSoft, marginBottom: "4px" } }, "Documentos de este cliente en BC · clic para vincular"),
-            h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, docsCli.map((x) => h("button", { key: x.tipo + x.no, onClick: () => setD((y) => ({ ...y, [x.tipo === "oferta" ? "oferta_bc" : "pedido_bc"]: x.no })), style: btn(T, "s") }, `${x.tipo === "oferta" ? "Oferta" : "Pedido"} ${x.no} · ${eur(x.importe_iva)}`)))) : null),
+        h(Box, { T }, h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h(Lbl, { T }, "Business Central"),
+            enBC ? h("button", { onClick: syncAhora, disabled: sincronizando, style: { ...btn(T, "s"), marginBottom: "8px" } }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC") : null),
+          !enBC ? h("div", { "data-crm-sin-bc": "1", style: { background: CH.ambar.bg, border: `1px solid ${CH.ambar.bd}`, borderRadius: "10px", padding: "10px 12px", fontSize: "13px" } },
+              h("div", { style: { marginBottom: "8px" } }, "Este cliente aún no está en BC. Dalo de alta para poder hacerle la oferta o el pedido de servicio (se crean también sus vehículos)."),
+              altaMsg === "trabajando" ? h("span", { style: { color: T.inkSoft } }, "Creando en BC…")
+                : h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } },
+                  altaMsg && altaMsg.dup ? h("button", { onClick: () => onCliente(caso.cliente_id), style: btn(T, "p") }, "Revisar en la ficha del cliente") : h("button", { "data-crm-alta-caso": "1", onClick: altaDesdeCaso, style: btn(T, "p") }, "Dar de alta en BC"),
+                  altaMsg && altaMsg.txt ? h("span", { style: { fontSize: "12.5px", color: altaMsg.err || altaMsg.dup ? T.danger : T.ok } }, altaMsg.txt) : null))
+            : h(React.Fragment, null,
+              sugerencia ? h("div", { "data-crm-sugerencia": "1", style: { background: CH.azul.bg, border: `1px solid ${CH.azul.bd}`, borderRadius: "10px", padding: "10px 12px", fontSize: "13px", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+                h("span", null, `Hay ${sugerencia.tipo === "oferta" ? "una oferta nueva" : "un pedido nuevo"} en BC de este cliente: `, h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, sugerencia.doc.no), ` · ${eur(sugerencia.doc.importe_iva)}. ¿Es de este caso?`),
+                h("button", { onClick: () => vincular(sugerencia.doc), disabled: guardando, style: btn(T, "p") }, "Sí, vincular")) : null,
+              docBox("Oferta de servicio", "oferta_bc", oferta), docBox("Pedido de servicio", "pedido_bc", pedido),
+              docsOtros.length ? h("div", { style: { marginTop: "8px" } }, h("div", { style: { fontSize: "12px", color: T.inkSoft, marginBottom: "4px" } }, "Otros documentos abiertos de este cliente en BC · clic para vincular"),
+                h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, docsOtros.map((x) => h("button", { key: x.tipo + x.no, "data-crm-vincular": x.no, disabled: guardando, onClick: () => vincular(x), style: btn(T, "s") }, `${x.tipo === "oferta" ? "Oferta" : "Pedido"} ${x.no} · ${eur(x.importe_iva)}`))))
+                : !caso.oferta_bc && !caso.pedido_bc && !sugerencia ? h("div", { style: { fontSize: "12.5px", color: T.inkFaint, marginTop: "6px" } }, "Aún no hay ofertas ni pedidos abiertos de este cliente en BC. Cuando la crees en BC aparecerá aquí (o pulsa “Actualizar desde BC”).") : null),
+          verGar ? h("label", { style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "13px", marginTop: "6px" } }, h("input", { type: "checkbox", checked: !!caso.garantia_100, onChange: (e) => guardar({ garantia_100: e.target.checked }) }), "100 % garantía (sin pedido de servicio)") : null),
 
         verSenal ? h(Box, { T }, h(Lbl, { T }, "Señal 50 %"),
           h(Row, { T, k: "Importe" }, h("input", { value: d.senal_importe ?? "", onChange: set("senal_importe"), placeholder: "€", inputMode: "decimal", style: { ...I, width: "120px", padding: "5px 8px", textAlign: "right" } })),
@@ -509,7 +551,12 @@
       if (!p.nombre && p.hasOwnProperty("nombre")) { setMsg("El nombre no puede quedar vacío."); return; }
       if (!Object.keys(p).length) { setMsg("No hay cambios."); return; }
       const { error } = await sb().from("crm_clientes").update(p).eq("id", c.id); if (error) { setMsg("No se pudo guardar: " + error.message); return; }
-      setMsg(c.bc_no ? "Guardado en el CRM. Ojo: en BC no se cambia; si hace falta, corrígelo allí." : "Guardado."); cargar(); onChanged && onChanged();
+      if (c.bc_no && Object.keys(p).some((k) => k !== "notas")) {
+        setMsg("Guardado en el CRM. Actualizando la ficha en BC…");
+        const res = await enviarABC(c.id, false, "actualizar_cliente");
+        setMsg(res.ok ? (res.sinCambios ? "Guardado. BC ya tenía esos datos." : `Guardado en el CRM y en BC (${(res.cambiados || []).join(", ")}).`) : "Guardado en el CRM, pero BC no lo aceptó: " + (res.error || "error"));
+      } else setMsg("Guardado.");
+      cargar(); onChanged && onChanged();
     };
     const vehiculos = (Array.isArray(c.vehiculos) ? c.vehiculos : []).map(asVeh);
     const setVehiculos = async (lista) => { const { error } = await sb().from("crm_clientes").update({ vehiculos: lista }).eq("id", c.id); if (error) setVMsg("No se pudo guardar: " + error.message); await cargar(); return !error; };
@@ -570,7 +617,7 @@
                 [["nombre", "Nombre"], ["apellidos", "Apellidos"], ["telefono", "Teléfono"], ["email", "Email"], ["direccion", "Dirección"], ["ciudad", "Población"], ["provincia", "Provincia"], ["cp", "Código postal"], ["nif", "NIF (opcional)"]].map(([k, l]) =>
                   h(Field, { key: k, T, label: l, style: k === "direccion" ? { gridColumn: "1 / -1" } : null }, h("input", { value: d[k] || "", onChange: set(k), style: I }))),
                 h(Field, { T, label: "Notas", style: { gridColumn: "1 / -1" } }, h("textarea", { rows: 2, value: d.notas || "", onChange: set("notas"), style: { ...I, resize: "vertical" } }))),
-              h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "10px", flexWrap: "wrap" } }, h("button", { onClick: guardar, style: btn(T, "p") }, "Guardar datos"), msg ? h("span", { style: { fontSize: "12.5px", color: msg.startsWith("No se") ? T.danger : T.ok } }, msg) : null)),
+              h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "10px", flexWrap: "wrap" } }, h("button", { "data-crm-guardar-cli": "1", onClick: guardar, style: btn(T, "p") }, c.bc_no ? "Guardar datos (también en BC)" : "Guardar datos"), msg ? h("span", { style: { fontSize: "12.5px", color: /^No se|no lo aceptó/.test(msg) ? T.danger : T.ok } }, msg) : null)),
             h(Box, { T }, h(Lbl, { T }, "Vehículos"),
               vehiculos.length ? vehiculos.map((v, i) => h("div", { key: i, "data-crm-veh": i, style: { padding: "7px 0", borderTop: i ? `1px solid ${T.border}` : "none", fontSize: "13.5px" } },
                 h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
