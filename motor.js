@@ -2746,6 +2746,24 @@ const inicioOT =
     React.createElement("main", { style: { maxWidth: "1280px", margin: "0 auto", padding: "24px 28px 60px" } },
       window.AcllarCRM ? React.createElement(window.AcllarCRM, { T, F })
         : React.createElement("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "40px 28px", textAlign: "center", color: T.inkSoft } }, "No se pudo cargar el CRM de taller. Recarga la página (F5).")));
+  // Cuentas de comercial: solo ven TALLER → Clientes, sin datos de alquiler.
+  const CRMShell = () => {
+    const [theme, setTheme] = useState(() => { try { return localStorage.getItem("acllar_theme") === "dark" ? "dark" : "light"; } catch (e) { return "light"; } });
+    applyTheme(theme);
+    const C = window.acllarCloud || {};
+    const salir = async () => { try { await C.sb.auth.signOut(); } catch (e) {} location.reload(); };
+    const cambiarTema = () => setTheme((p) => { const n = p === "dark" ? "light" : "dark"; try { localStorage.setItem("acllar_theme", n); } catch (e) {} return n; });
+    return React.createElement("div", { style: { minHeight: "100vh", background: T.bg, color: T.ink, fontFamily: F.body } },
+      React.createElement("header", { style: { background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "14px 28px" } },
+        React.createElement("div", { style: { maxWidth: "1280px", margin: "0 auto", display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" } },
+          React.createElement("img", { src: theme === "dark" ? "logo-acllar-dark.png" : "logo-acllar.png", alt: "AC\xB7LLAR", style: { height: "38px", width: "auto", display: "block" } }),
+          React.createElement("div", { style: { fontFamily: F.display, fontWeight: 800, fontSize: "18px" } }, "Taller \xB7 Clientes"),
+          React.createElement("div", { style: { flex: 1 } }),
+          React.createElement("span", { style: { fontSize: "12.5px", color: T.inkSoft } }, C.usuario ? C.usuario() : ""),
+          React.createElement("button", { onClick: cambiarTema, title: "Tema claro / oscuro", "aria-label": "Cambiar tema", style: { cursor: "pointer", border: `1px solid ${T.border}`, background: T.bg, color: T.ink, borderRadius: "10px", padding: "7px 10px", fontSize: "14px" } }, theme === "dark" ? "\u2600\uFE0F" : "\u{1F319}"),
+          React.createElement("button", { onClick: salir, style: { cursor: "pointer", border: `1px solid ${T.border}`, background: T.bg, color: T.danger, borderRadius: "10px", padding: "7px 12px", fontWeight: 700, fontSize: "13px", fontFamily: F.body } }, "Cerrar sesi\xF3n"))),
+      React.createElement(TallerView, null));
+  };
   const TabBar = ({ active, onChange }) => /* @__PURE__ */ React.createElement("nav", { style: {
     background: T.surface,
     borderTop: `1px solid ${T.border}`,
@@ -2979,7 +2997,7 @@ const inicioOT =
   }
   const ROLES_CUENTA = [
     { id: "taller", label: "Taller", desc: "cockpit y app de revisiones" },
-    { id: "comercial", label: "Comercial", desc: "solo expedientes de venta; sin cockpit ni revisiones" },
+    { id: "comercial", label: "Comercial", desc: "solo TALLER → Clientes (CRM); sin alquiler ni revisiones" },
   ];
   function CuentasModal({ onClose }) {
     const C = window.acllarCloud || {};
@@ -3055,9 +3073,9 @@ const inicioOT =
               const email = nueva.email.trim().toLowerCase(), rol = nueva.rol;
               // Primero el rol: si la cuenta se crea sin rol no puede entrar a nada (seguro por defecto).
               try { await C.cuentas.setRol(email, rol); } catch (e) { setErr(e.message || String(e)); return; }
-              const ok = rol === "comercial" ? `Cuenta ${email} creada como Comercial. No puede entrar al cockpit ni a la app de revisiones.` : `Cuenta ${email} creada como Taller. Ya puede entrar al cockpit y a la app de revisiones.`;
+              const ok = rol === "comercial" ? `Cuenta ${email} creada como Comercial. Al entrar al cockpit solo verá TALLER → Clientes; no tiene acceso a alquiler ni a la app de revisiones.` : `Cuenta ${email} creada como Taller. Ya puede entrar al cockpit y a la app de revisiones.`;
               if (await run({ accion: "crear", email, password: nueva.password }, ok)) setNueva({ email: "", password: "", rol: "taller" }); }, style: { ...btn("primary"), opacity: !nueva.email || nueva.password.length < 8 ? 0.5 : 1 } }, "Crear")),
-          React.createElement("div", { style: { fontSize: "11.5px", color: T.inkFaint, marginTop: "8px" } }, "Taller: cockpit y app de revisiones. Comercial: solo expedientes de venta (sin cockpit ni revisiones). Las contraseñas no se pueden ver: Supabase no las guarda; si alguien la olvida, ponle una nueva aquí. Solo tú eres administrador."))));
+          React.createElement("div", { style: { fontSize: "11.5px", color: T.inkFaint, marginTop: "8px" } }, "Taller: cockpit de alquiler y app de revisiones (no ve el CRM de clientes). Comercial: solo TALLER → Clientes. Las contraseñas no se pueden ver: Supabase no las guarda; si alguien la olvida, ponle una nueva aquí. Solo tú eres administrador."))));
   }
   function SessionGear() {
     const [open, setOpen] = React.useState(false);
@@ -15951,9 +15969,9 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
     (window.acllarCloud ? window.acllarCloud.ready : Promise.resolve()).then(function () {
       if (loadingEl) loadingEl.style.display = "none";
       if (window.ReactDOM && window.ReactDOM.createRoot) {
-        window.ReactDOM.createRoot(rootEl).render(React.createElement(App));
+        window.ReactDOM.createRoot(rootEl).render(React.createElement(window.acllarCloud && window.acllarCloud.soloCRM ? CRMShell : App));
       } else if (window.ReactDOM && window.ReactDOM.render) {
-        window.ReactDOM.render(React.createElement(App), rootEl);
+        window.ReactDOM.render(React.createElement(window.acllarCloud && window.acllarCloud.soloCRM ? CRMShell : App), rootEl);
       }
     }).catch(function (err) {
       acllarFail(err && err.message ? err.message : String(err));

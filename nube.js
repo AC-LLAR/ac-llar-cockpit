@@ -557,9 +557,20 @@
     let { data: { session } } = await sb.auth.getSession();
     if (!session) session = await showLogin();
     userEmail = (session.user && session.user.email) || "";
-    // Rol de la cuenta: el cockpit es solo para admin y taller (los comerciales usan su propia app).
+    // Rol de la cuenta: admin y taller usan el cockpit completo.
+    // Comercial: solo TALLER → Clientes (CRM). No se descarga ni se sincroniza nada de alquiler.
     const { data: rol, error: rolErr } = await sb.rpc("mi_rol");
-    if (!rolErr) { miRol = rol; if (rol !== "admin" && rol !== "taller") await sinAcceso(rol); }
+    if (!rolErr) {
+      miRol = rol;
+      if (rol === "comercial") {
+        window.acllarCloud.soloCRM = true;
+        setBadge("ok", "Conectado");
+        const pingC = () => { if (document.hidden || !userEmail) return; Promise.resolve(sb.rpc("presencia_ping", { p_device: EQUIPO, p_app: "cockpit-crm" })).catch(() => {}); };
+        pingC(); setInterval(pingC, 120000);
+        return;
+      }
+      if (rol !== "admin" && rol !== "taller") await sinAcceso(rol);
+    }
     setBadge("busy", "Cargando datos de la nube…");
     const seed = [];
     try {
