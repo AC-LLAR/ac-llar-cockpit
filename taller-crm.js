@@ -94,6 +94,18 @@
   const norm = (s) => String(s || "").trim().toUpperCase();
   const sinAcentos = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
   const qSafe = (s) => String(s || "").replace(/[,()%*]/g, " ").trim();
+  // Vehículos del cliente = productos de servicio en BC (Descripción = modelo, Nº serie = matrícula, Descripción alias = bastidor).
+  const normMat = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const asVeh = (v) => (typeof v === "string" ? { modelo: v } : { ...(v || {}) });
+  const vehTxt = (v) => { const x = asVeh(v); return [x.modelo, x.matricula ? normMat(x.matricula) : null].filter(Boolean).join(" · "); };
+  const vehDeBC = (p) => ({ modelo: p.descripcion || "(sin descripción)", matricula: p.serie || "", bastidor: p.alias && normMat(p.alias) !== normMat(p.descripcion) ? p.alias : "", bc_ps: p.no });
+  const mismoVeh = (a, b) => { const x = asVeh(a), y = asVeh(b); if (x.bc_ps && y.bc_ps) return x.bc_ps === y.bc_ps; const mx = normMat(x.matricula), my = normMat(y.matricula); if (mx || my) return mx === my; return String(x.modelo || "").trim().toLowerCase() === String(y.modelo || "").trim().toLowerCase(); };
+  async function enviarABC(clienteId, forzar) {
+    const { data, error } = await sb().functions.invoke("crm-alta-bc", { body: { cliente_id: clienteId, forzar: !!forzar } });
+    let res = data;
+    if (error) { try { res = error.context && (await error.context.json()); } catch (e) {} if (!res) res = { error: error.message }; }
+    return res || { error: "Sin respuesta" };
+  }
 
   // Avisos por tiempo (umbrales validados el 07/11/2026).
   function aviso(c) {
@@ -146,6 +158,12 @@
     const partes = Object.keys(d).map((k) => {
       const v = d[k] || {};
       if (k === "estado") return `Estado: ${est(v.de).l} → ${est(v.a).l}`;
+      if (k === "vehiculos") {
+        const de = (Array.isArray(v.de) ? v.de : []).map(asVeh), a = (Array.isArray(v.a) ? v.a : []).map(asVeh);
+        const add = a.filter((x) => !de.some((y) => mismoVeh(x, y))), del = de.filter((x) => !a.some((y) => mismoVeh(x, y)));
+        const bc = a.filter((x) => x.bc_ps && de.some((y) => mismoVeh(x, y) && !y.bc_ps));
+        return [add.length ? "Vehículo añadido: " + add.map(vehTxt).join(", ") : "", del.length ? "Vehículo quitado de la ficha: " + del.map(vehTxt).join(", ") : "", bc.length ? "Vehículo en BC: " + bc.map((x) => `${vehTxt(x)} (${x.bc_ps})`).join(", ") : ""].filter(Boolean).join(" · ") || "Vehículos actualizados";
+      }
       const f = (x) => (x == null || x === "" ? "—" : typeof x === "boolean" ? (x ? "sí" : "no") : /_at$|fecha_limite/.test(k) ? fFechaHora(x) : Array.isArray(x) ? x.join(", ") : String(x));
       return `${CAMPOS[k] || k}: ${f(v.de)} → ${f(v.a)}`;
     });
@@ -247,9 +265,22 @@
       sb().from("crm_clientes").select("*").or(orCrm.join(",")).limit(10),
       sb().from("bc_clientes").select("no,nombre,telefono,email,direccion,cp,ciudad,provincia,nif").or(orBc.join(",")).limit(12),
     ]);
-    const crm = (a.data || []).map((c) => ({ k: "crm:" + c.id, tipo: "crm", c }));
-    const ya = new Set((a.data || []).map((c) => c.bc_no).filter(Boolean));
-    const bc = (b.data || []).filter((x) => !ya.has(x.no)).map((x) => ({ k: "bc:" + x.no, tipo: "bc", bc: x }));
+    let crmRows = a.data || [], bcRows = b.data || [];
+    const vehDe = {};
+    const mat = normMat(s);
+    if (mat.length >= 4 && /\d/.test(mat) && /[A-Z]/.test(mat)) {
+      const ps = await sb().from("bc_productos_servicio").select("no,descripcion,serie,cliente_no").ilike("serie_norm", `%${mat}%`).eq("activo", true).limit(8);
+      const nos = [...new Set((ps.data || []).map((x) => x.cliente_no).filter(Boolean))];
+      (ps.data || []).forEach((x) => { if (x.cliente_no) vehDe[x.cliente_no] = `${x.descripcion || ""} · ${x.serie || ""}`; });
+      if (nos.length) {
+        const [c2, b2] = await Promise.all([sb().from("crm_clientes").select("*").in("bc_no", nos), sb().from("bc_clientes").select("no,nombre,telefono,email,direccion,cp,ciudad,provincia,nif").in("no", nos)]);
+        crmRows = [...crmRows, ...(c2.data || []).filter((x) => !crmRows.some((y) => y.id === x.id))];
+        bcRows = [...bcRows, ...(b2.data || []).filter((x) => !bcRows.some((y) => y.no === x.no))];
+      }
+    }
+    const crm = crmRows.map((c) => ({ k: "crm:" + c.id, tipo: "crm", c, veh: c.bc_no && vehDe[c.bc_no] }));
+    const ya = new Set(crmRows.map((c) => c.bc_no).filter(Boolean));
+    const bc = bcRows.filter((x) => !ya.has(x.no)).map((x) => ({ k: "bc:" + x.no, tipo: "bc", bc: x, veh: vehDe[x.no] }));
     return [...crm, ...bc];
   }
   const ResultadoCliente = ({ T, r, onPick, cta }) => {
@@ -259,7 +290,8 @@
     const no = r.tipo === "crm" ? r.c.bc_no : r.bc.no;
     return h("button", { type: "button", onClick: () => onPick(r), style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "9px 12px", border: "none", borderTop: `1px solid ${T.border}`, background: T.surface, cursor: "pointer", textAlign: "left", fontFamily: "inherit", color: T.ink } },
       h("span", null, h("b", null, nom || "(sin nombre)"), " ", no ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: T.inkSoft } }, no) : h(Chip, { c: "ambar" }, "sin alta en BC"),
-        h("div", { style: { fontSize: "12px", color: T.inkSoft } }, [tel, ciu].filter(Boolean).join(" · ") || "—")),
+        h("div", { style: { fontSize: "12px", color: T.inkSoft } }, [tel, ciu].filter(Boolean).join(" · ") || "—"),
+        r.veh ? h("div", { style: { fontSize: "12px", color: T.rust, fontWeight: 700 } }, "Vehículo: " + r.veh) : null),
       h("span", { style: { fontSize: "12px", fontWeight: 800, color: T.rust, whiteSpace: "nowrap" } }, cta));
   };
   function Buscador({ T, onCliente, onBC }) {
@@ -268,7 +300,7 @@
     useEffect(() => { clearTimeout(t.current); if (qSafe(q).length < 2) { setRes([]); return; } t.current = setTimeout(async () => { try { setRes(await buscarClientes(q)); setAbierto(true); } catch (e) {} }, 300); }, [q]);
     return h("div", { style: { position: "relative", flex: "1 1 420px" } },
       h("input", { type: "search", "data-crm-buscar": "1", "aria-label": "Buscar cliente", value: q, onChange: (e) => setQ(e.target.value), onFocus: () => setAbierto(true), onBlur: () => setTimeout(() => setAbierto(false), 200),
-        placeholder: "Buscar cliente por nombre, teléfono, email, NIF o nº de BC", style: { ...inp(T), height: "46px", borderRadius: "12px", paddingLeft: "14px" } }),
+        placeholder: "Buscar cliente por nombre, teléfono, email, NIF, matrícula o nº de BC", style: { ...inp(T), height: "46px", borderRadius: "12px", paddingLeft: "14px" } }),
       abierto && res.length ? h("div", { style: { position: "absolute", top: "50px", left: 0, right: 0, zIndex: 60, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", boxShadow: "0 12px 30px rgba(0,0,0,.14)", overflow: "hidden", maxHeight: "420px", overflowY: "auto" } },
         res.map((r) => h(ResultadoCliente, { key: r.k, T, r, cta: r.tipo === "crm" ? "Abrir ficha" : "Nueva consulta", onPick: (x) => { setAbierto(false); setQ(""); x.tipo === "crm" ? onCliente(x.c.id) : onBC(x.bc); } })))
         : abierto && qSafe(q).length >= 2 ? h("div", { style: { position: "absolute", top: "50px", left: 0, right: 0, zIndex: 60, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px", fontSize: "13px", color: T.inkSoft } }, "Sin coincidencias. Usa “+ Nueva consulta” para darlo de alta.") : null);
@@ -460,11 +492,14 @@
   function ClientePanel({ T, F, id, casos, bcServ, onClose, onCaso, onNueva, onChanged }) {
     const [c, setC] = useState(null); const [d, setD] = useState({}); const [msg, setMsg] = useState(""); const [ev, setEv] = useState([]);
     const [alta, setAlta] = useState(null); // null | "trabajando" | { duplicados } | { error }
-    const [veh, setVeh] = useState("");
+    const [nv, setNv] = useState({ modelo: "", matricula: "", bastidor: "" });
+    const [vMsg, setVMsg] = useState(""); const [vTrab, setVTrab] = useState(false);
+    const [psBC, setPsBC] = useState([]);
     const cargar = async () => {
       const { data } = await sb().from("crm_clientes").select("*").eq("id", id).maybeSingle(); setC(data);
       if (data) setD({ nombre: data.nombre || "", apellidos: data.apellidos || "", telefono: data.telefono || "", email: data.email || "", nif: data.nif || "", direccion: data.direccion || "", cp: data.cp || "", ciudad: data.ciudad || "", provincia: data.provincia || "", notas: data.notas || "" });
       const e = await sb().from("crm_eventos").select("*").eq("cliente_id", id).order("at", { ascending: false }).limit(30); setEv(e.data || []);
+      if (data && data.bc_no) { const ps = await sb().from("bc_productos_servicio").select("*").eq("cliente_no", data.bc_no).eq("activo", true); setPsBC(ps.data || []); } else setPsBC([]);
     };
     useEffect(() => { cargar(); }, [id]);
     if (!c) return h(Drawer, { T, onClose, width: 760, label: "Ficha del cliente" }, h("div", { style: { padding: "24px", color: T.inkSoft } }, "Cargando…"));
@@ -476,8 +511,25 @@
       const { error } = await sb().from("crm_clientes").update(p).eq("id", c.id); if (error) { setMsg("No se pudo guardar: " + error.message); return; }
       setMsg(c.bc_no ? "Guardado en el CRM. Ojo: en BC no se cambia; si hace falta, corrígelo allí." : "Guardado."); cargar(); onChanged && onChanged();
     };
-    const vehiculos = Array.isArray(c.vehiculos) ? c.vehiculos : [];
-    const setVehiculos = async (lista) => { await sb().from("crm_clientes").update({ vehiculos: lista }).eq("id", c.id); cargar(); };
+    const vehiculos = (Array.isArray(c.vehiculos) ? c.vehiculos : []).map(asVeh);
+    const setVehiculos = async (lista) => { const { error } = await sb().from("crm_clientes").update({ vehiculos: lista }).eq("id", c.id); if (error) setVMsg("No se pudo guardar: " + error.message); await cargar(); return !error; };
+    const sincVehiculos = async () => {
+      if (!c.bc_no) return;
+      setVTrab(true); setVMsg("Enviando a BC…");
+      const res = await enviarABC(c.id, false);
+      setVTrab(false); setVMsg(res.ok ? (res.vehiculos && res.vehiculos.length ? res.vehiculos.join(" · ") : "Nada pendiente de enviar.") : "No se pudo: " + (res.error || "error"));
+      cargar(); onChanged && onChanged();
+    };
+    const addVeh = async () => {
+      const v = { modelo: nv.modelo.trim(), matricula: normMat(nv.matricula), bastidor: normMat(nv.bastidor) };
+      if (!v.modelo) { setVMsg("Pon al menos el modelo."); return; }
+      if (vehiculos.some((x) => mismoVeh(x, v))) { setVMsg("Ese vehículo ya está en la ficha."); return; }
+      Object.keys(v).forEach((k) => { if (!v[k]) delete v[k]; });
+      if (await setVehiculos([...vehiculos, v])) { setNv({ modelo: "", matricula: "", bastidor: "" }); if (c.bc_no) await sincVehiculos(); else setVMsg("Guardado. Se creará en BC al dar de alta al cliente."); }
+    };
+    const forzarVeh = async (i) => { const l = vehiculos.slice(); l[i] = { ...l[i], forzar: true }; delete l[i].bc_error; if (await setVehiculos(l)) await sincVehiculos(); };
+    const importarVeh = async (p) => { if (await setVehiculos([...vehiculos, vehDeBC(p)])) setVMsg(`Añadido ${p.descripcion || p.no} a la ficha.`); };
+    const psSinFicha = psBC.filter((p) => !vehiculos.some((v) => v.bc_ps === p.no || (normMat(v.matricula) && normMat(v.matricula) === p.serie_norm)));
     const darAlta = async (forzar) => {
       setAlta("trabajando");
       try {
@@ -485,7 +537,7 @@
         let res = data;
         if (error) { try { res = error.context && (await error.context.json()); } catch (e) {} if (!res) res = { error: error.message }; }
         if (res && res.duplicados) { setAlta({ duplicados: res.duplicados }); return; }
-        if (res && res.ok) { setAlta(null); setMsg(`Dado de alta en BC como ${res.bc_no}.`); cargar(); onChanged && onChanged(); return; }
+        if (res && res.ok) { setAlta(null); setMsg(`Dado de alta en BC como ${res.bc_no}.` + (res.vehiculos && res.vehiculos.length ? " Vehículos: " + res.vehiculos.join(" · ") : "")); cargar(); onChanged && onChanged(); return; }
         setAlta({ error: (res && res.error) || "Error desconocido" });
       } catch (e) { setAlta({ error: String(e.message || e) }); }
     };
@@ -520,8 +572,28 @@
                 h(Field, { T, label: "Notas", style: { gridColumn: "1 / -1" } }, h("textarea", { rows: 2, value: d.notas || "", onChange: set("notas"), style: { ...I, resize: "vertical" } }))),
               h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "10px", flexWrap: "wrap" } }, h("button", { onClick: guardar, style: btn(T, "p") }, "Guardar datos"), msg ? h("span", { style: { fontSize: "12.5px", color: msg.startsWith("No se") ? T.danger : T.ok } }, msg) : null)),
             h(Box, { T }, h(Lbl, { T }, "Vehículos"),
-              vehiculos.length ? vehiculos.map((v, i) => h("div", { key: i, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontSize: "13.5px" } }, h("b", null, v), h("button", { onClick: () => setVehiculos(vehiculos.filter((_, j) => j !== i)), "aria-label": "Quitar vehículo", style: { ...btn(T, "s"), color: T.inkSoft } }, "Quitar"))) : h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Sin vehículos."),
-              h("div", { style: { display: "flex", gap: "8px", marginTop: "8px" } }, h("input", { value: veh, onChange: (e) => setVeh(e.target.value), placeholder: "Marca modelo · matrícula", style: I }), h("button", { onClick: () => { if (veh.trim()) { setVehiculos([...vehiculos, veh.trim()]); setVeh(""); } }, style: btn(T) }, "Añadir")))),
+              vehiculos.length ? vehiculos.map((v, i) => h("div", { key: i, "data-crm-veh": i, style: { padding: "7px 0", borderTop: i ? `1px solid ${T.border}` : "none", fontSize: "13.5px" } },
+                h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+                  h("span", null, h("b", null, v.modelo || "(sin modelo)"), v.matricula ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12.5px", marginLeft: "8px" } }, normMat(v.matricula)) : null),
+                  h("button", { onClick: () => setVehiculos(vehiculos.filter((_, j) => j !== i)), title: "Solo lo quita del CRM; en BC no se toca", style: { ...btn(T, "s"), color: T.inkSoft } }, "Quitar de la ficha")),
+                v.bastidor ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Bastidor: ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, v.bastidor)) : null,
+                h("div", { style: { marginTop: "3px", display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" } },
+                  v.bc_ps ? h(Chip, { c: "verde" }, "BC ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, v.bc_ps))
+                    : v.bc_error ? h(React.Fragment, null, h("span", { style: { fontSize: "12px", color: T.danger } }, v.bc_error), h("button", { onClick: () => forzarVeh(i), disabled: vTrab, style: btn(T, "s") }, "Crear igualmente"))
+                    : c.bc_no ? h(React.Fragment, null, h(Chip, { c: "ambar" }, "Pendiente de BC"), h("button", { onClick: sincVehiculos, disabled: vTrab, style: btn(T, "s") }, "Enviar a BC"))
+                    : h(Chip, { c: "ambar" }, "Se creará en BC al dar de alta al cliente"))))
+                : h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Sin vehículos."),
+              h("div", { style: { display: "grid", gridTemplateColumns: "1fr", gap: "6px", marginTop: "10px", background: T.bg, borderRadius: "10px", padding: "10px" } },
+                h("input", { value: nv.modelo, onChange: (e) => setNv((x) => ({ ...x, modelo: e.target.value })), placeholder: "Modelo (p. ej. TESSORO 444)", "aria-label": "Modelo", style: I }),
+                h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: "6px" } },
+                  h("input", { value: nv.matricula, onChange: (e) => setNv((x) => ({ ...x, matricula: e.target.value })), placeholder: "Matrícula", "aria-label": "Matrícula", style: I }),
+                  h("input", { value: nv.bastidor, onChange: (e) => setNv((x) => ({ ...x, bastidor: e.target.value })), placeholder: "Bastidor (opcional)", "aria-label": "Bastidor", style: I })),
+                h("button", { "data-crm-add-veh": "1", onClick: addVeh, disabled: vTrab, style: btn(T, "p") }, c.bc_no ? "Añadir vehículo (se crea también en BC)" : "Añadir vehículo")),
+              vMsg ? h("div", { style: { fontSize: "12.5px", marginTop: "6px", color: /No se|No se pudo|ya está/.test(vMsg) ? T.danger : T.ok } }, vMsg) : null,
+              psSinFicha.length ? h("div", { style: { marginTop: "10px" } }, h("div", { style: { fontSize: "12px", color: T.inkSoft, marginBottom: "4px" } }, "En BC tiene también estos vehículos:"),
+                psSinFicha.map((p) => h("div", { key: p.no, style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", fontSize: "13px", padding: "4px 0" } },
+                  h("span", null, h("b", null, p.descripcion || "—"), " ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: T.inkSoft } }, [p.serie, p.no].filter(Boolean).join(" · "))),
+                  h("button", { onClick: () => importarVeh(p), style: btn(T, "s") }, "Añadir a la ficha")))) : null)),
           h("div", { style: { flex: "999 1 360px", minWidth: 0, display: "flex", flexDirection: "column", gap: "14px" } },
             h(Box, { T }, h(Lbl, { T }, `Casos (${susCasos.length})`),
               susCasos.length ? susCasos.map((x) => h("button", { key: x.id, onClick: () => onCaso(x.id), style: { display: "flex", width: "100%", justifyContent: "space-between", gap: "8px", alignItems: "center", padding: "8px 0", border: "none", borderTop: `1px solid ${T.border}`, background: "transparent", cursor: "pointer", fontFamily: "inherit", color: T.ink, textAlign: "left" } },
@@ -545,11 +617,19 @@
     const [q, setQ] = useState(""); const [res, setRes] = useState([]);
     const [sel, setSel] = useState(inicial.cliente ? { tipo: "crm", c: inicial.cliente } : inicial.bc ? { tipo: "bc", bc: inicial.bc } : null);
     const [cli, setCli] = useState({ nombre: "", apellidos: "", telefono: "", email: "", direccion: "", ciudad: "", provincia: "", cp: "" });
-    const [k, setK] = useState({ vehiculo: "", canal: "telefono", tipo: "reparacion", consulta: "", proxima_accion: "Responder al cliente", responsable: me, fecha_limite: toLocalInput(manana.toISOString()) });
+    const [veh, setVeh] = useState({ modelo: "", matricula: "", bastidor: "" });
+    const [vehSel, setVehSel] = useState(null); // índice de un vehículo ya existente
+    const [vehBC, setVehBC] = useState([]);
+    const [k, setK] = useState({ canal: "telefono", tipo: "reparacion", consulta: "", proxima_accion: "Responder al cliente", responsable: me, fecha_limite: toLocalInput(manana.toISOString()) });
     const [err, setErr] = useState(""); const [guardando, setGuardando] = useState(false);
     const t = useRef(null);
     useEffect(() => { clearTimeout(t.current); if (sel || qSafe(q).length < 2) { setRes([]); return; } t.current = setTimeout(async () => { try { setRes(await buscarClientes(q)); } catch (e) {} }, 300); }, [q, sel]);
-    useEffect(() => { if (sel && sel.tipo === "crm" && Array.isArray(sel.c.vehiculos) && sel.c.vehiculos.length && !k.vehiculo) setK((x) => ({ ...x, vehiculo: sel.c.vehiculos[0] })); }, [sel]);
+    useEffect(() => {
+      setVehSel(null); setVehBC([]);
+      const no = sel ? (sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) : null;
+      if (no) sb().from("bc_productos_servicio").select("*").eq("cliente_no", no).eq("activo", true).then((r) => setVehBC(r.data || []));
+    }, [sel]);
+    const vehExistentes = (() => { const own = sel && sel.tipo === "crm" ? (sel.c.vehiculos || []).map(asVeh) : []; const extra = vehBC.filter((p) => !own.some((v) => v.bc_ps === p.no)).map(vehDeBC); return [...own, ...extra]; })();
     const setC = (f) => (e) => setCli((x) => ({ ...x, [f]: e.target.value }));
     const setKk = (f) => (e) => setK((x) => ({ ...x, [f]: e.target.value }));
     const I = inp(T);
@@ -570,9 +650,15 @@
           const row = {}; Object.keys(cli).forEach((f) => { row[f] = cli[f].trim() || null; });
           const ins = await sb().from("crm_clientes").insert(row).select("*").single(); if (ins.error) throw ins.error; cliente = ins.data;
         }
-        const veh = k.vehiculo.trim();
-        if (veh) { const vs = Array.isArray(cliente.vehiculos) ? cliente.vehiculos : []; if (!vs.includes(veh)) await sb().from("crm_clientes").update({ vehiculos: [...vs, veh] }).eq("id", cliente.id); }
-        const ins = await sb().from("crm_casos").insert({ cliente_id: cliente.id, vehiculo: veh || null, canal: k.canal, tipo: k.tipo, consulta: k.consulta.trim(), estado: "pendiente_respuesta", rama: k.tipo === "garantia" ? "garantia" : null,
+        let elegido = vehSel != null ? vehExistentes[vehSel] : null;
+        if (!elegido && veh.modelo.trim()) { elegido = { modelo: veh.modelo.trim(), matricula: normMat(veh.matricula), bastidor: normMat(veh.bastidor) }; Object.keys(elegido).forEach((f) => { if (!elegido[f]) delete elegido[f]; }); }
+        let nuevoVeh = false;
+        if (elegido) {
+          const vs = (Array.isArray(cliente.vehiculos) ? cliente.vehiculos : []).map(asVeh);
+          if (!vs.some((x) => mismoVeh(x, elegido))) { const up = await sb().from("crm_clientes").update({ vehiculos: [...vs, elegido] }).eq("id", cliente.id); if (up.error) throw up.error; nuevoVeh = !elegido.bc_ps; }
+        }
+        if (nuevoVeh && cliente.bc_no) enviarABC(cliente.id, false).catch(() => {}); // crea el producto de servicio en BC en segundo plano
+        const ins = await sb().from("crm_casos").insert({ cliente_id: cliente.id, vehiculo: elegido ? vehTxt(elegido) : null, canal: k.canal, tipo: k.tipo, consulta: k.consulta.trim(), estado: "pendiente_respuesta", rama: k.tipo === "garantia" ? "garantia" : null,
           proxima_accion: k.proxima_accion.trim() || null, responsable: k.responsable || null, fecha_limite: fromLocalInput(k.fecha_limite) }).select("*, cliente:crm_clientes(*)").single();
         if (ins.error) throw ins.error;
         onCreated(ins.data);
@@ -598,8 +684,14 @@
               h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" } },
                 h(Field, { T, label: "Provincia" }, h("input", { value: cli.provincia, onChange: setC("provincia"), style: I })),
                 h(Field, { T, label: "C.P." }, h("input", { value: cli.cp, onChange: setC("cp"), style: I }))))),
-        h(Field, { T, label: "Vehículo" }, h("input", { value: k.vehiculo, onChange: setKk("vehiculo"), placeholder: "Marca modelo · matrícula", list: "crm-veh", style: I }),
-          sel && sel.tipo === "crm" && Array.isArray(sel.c.vehiculos) ? h("datalist", { id: "crm-veh" }, sel.c.vehiculos.map((v) => h("option", { key: v, value: v }))) : null),
+        h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Vehículo"),
+          vehExistentes.length ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" } },
+            vehExistentes.map((v, i) => h("button", { key: i, type: "button", onClick: () => setVehSel(vehSel === i ? null : i), style: { ...btn(T, "s"), background: vehSel === i ? T.ink : T.surface, color: vehSel === i ? T.bg : T.ink } }, vehTxt(v) || v.modelo)),
+            h("button", { type: "button", onClick: () => setVehSel(null), style: { ...btn(T, "s"), borderStyle: "dashed", background: vehSel == null ? T.bgAlt : T.surface } }, "Otro vehículo")) : null,
+          vehSel == null ? h("div", { style: { display: "grid", gridTemplateColumns: "1.3fr 1fr 1.3fr", gap: "8px" } },
+            h("input", { value: veh.modelo, onChange: (e) => setVeh((x) => ({ ...x, modelo: e.target.value })), placeholder: "Modelo", "aria-label": "Modelo", style: I }),
+            h("input", { value: veh.matricula, onChange: (e) => setVeh((x) => ({ ...x, matricula: e.target.value })), placeholder: "Matrícula", "aria-label": "Matrícula", style: I }),
+            h("input", { value: veh.bastidor, onChange: (e) => setVeh((x) => ({ ...x, bastidor: e.target.value })), placeholder: "Bastidor (opcional)", "aria-label": "Bastidor", style: I })) : null),
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Canal"), h(Seg, { T, opts: CANALES, value: k.canal, onChange: (v) => setK((x) => ({ ...x, canal: v })) })),
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(Seg, { T, opts: TIPOS, value: k.tipo, onChange: (v) => setK((x) => ({ ...x, tipo: v })) })),
         h(Field, { T, label: "Consulta" }, h("textarea", { rows: 3, value: k.consulta, onChange: setKk("consulta"), placeholder: "¿Qué necesita?", style: { ...I, resize: "vertical" } })),
