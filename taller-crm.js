@@ -164,7 +164,7 @@
         const bc = a.filter((x) => x.bc_ps && de.some((y) => mismoVeh(x, y) && !y.bc_ps));
         return [add.length ? "Vehículo añadido: " + add.map(vehTxt).join(", ") : "", del.length ? "Vehículo quitado de la ficha: " + del.map(vehTxt).join(", ") : "", bc.length ? "Vehículo en BC: " + bc.map((x) => `${vehTxt(x)} (${x.bc_ps})`).join(", ") : ""].filter(Boolean).join(" · ") || "Vehículos actualizados";
       }
-      const f = (x) => (x == null || x === "" ? "—" : typeof x === "boolean" ? (x ? "sí" : "no") : /_at$|fecha_limite/.test(k) ? fFechaHora(x) : Array.isArray(x) ? x.join(", ") : String(x));
+      const f = (x) => (x == null || x === "" ? "—" : k === "tipo" ? lbl(TIPOS, x) : k === "canal" ? lbl(CANALES, x) : typeof x === "boolean" ? (x ? "sí" : "no") : /_at$|fecha_limite/.test(k) ? fFechaHora(x) : Array.isArray(x) ? x.join(", ") : String(x));
       return `${CAMPOS[k] || k}: ${f(v.de)} → ${f(v.a)}`;
     });
     return partes.join(" · ") || ev.tipo;
@@ -372,7 +372,7 @@
     const [cerrando, setCerrando] = useState(false); const [motivo, setMotivo] = useState("");
     const [d, setD] = useState({});
     useEffect(() => { setD({ proxima_accion: caso.proxima_accion || "", responsable: caso.responsable || "", fecha_limite: toLocalInput(caso.fecha_limite), oferta_bc: caso.oferta_bc || "", pedido_bc: caso.pedido_bc || "", senal_importe: caso.senal_importe ?? "",
-      garantia_fabricante: caso.garantia_fabricante || "", garantia_reclamacion: caso.garantia_reclamacion || "", garantia_cubre: caso.garantia_cubre || "", garantia_no_cubre: caso.garantia_no_cubre || "", piezas_previstas: caso.piezas_previstas || "", cita_at: toLocalInput(caso.cita_at), vehiculo: caso.vehiculo || "" }); }, [caso.id, caso.updated_at]);
+      garantia_fabricante: caso.garantia_fabricante || "", garantia_reclamacion: caso.garantia_reclamacion || "", garantia_cubre: caso.garantia_cubre || "", garantia_no_cubre: caso.garantia_no_cubre || "", piezas_previstas: caso.piezas_previstas || "", cita_at: toLocalInput(caso.cita_at), vehiculo: caso.vehiculo || "", tipo: caso.tipo || "", canal: caso.canal || "", consulta: caso.consulta || "" }); }, [caso.id, caso.updated_at]);
     const cargarEv = async () => { const { data } = await sb().from("crm_eventos").select("*").eq("caso_id", caso.id).order("at", { ascending: false }).limit(300); setEv(data || []); };
     useEffect(() => { cargarEv(); }, [caso.id, caso.updated_at]);
 
@@ -394,7 +394,7 @@
     const guardarDatos = () => {
       const p = {};
       const map = { proxima_accion: (v) => v || null, responsable: (v) => v || null, fecha_limite: fromLocalInput, oferta_bc: (v) => norm(v) || null, pedido_bc: (v) => norm(v) || null, senal_importe: (v) => (v === "" ? null : Number(String(v).replace(",", "."))),
-        garantia_fabricante: (v) => v || null, garantia_reclamacion: (v) => v || null, garantia_cubre: (v) => v || null, garantia_no_cubre: (v) => v || null, piezas_previstas: (v) => v || null, cita_at: fromLocalInput, vehiculo: (v) => v || null };
+        garantia_fabricante: (v) => v || null, garantia_reclamacion: (v) => v || null, garantia_cubre: (v) => v || null, garantia_no_cubre: (v) => v || null, piezas_previstas: (v) => v || null, cita_at: fromLocalInput, vehiculo: (v) => v || null, tipo: (v) => v || null, canal: (v) => v || null, consulta: (v) => (String(v || "").trim() || null) };
       Object.keys(map).forEach((k) => { const v = map[k](d[k]); const old = caso[k] == null ? null : caso[k]; const same = /_at$|fecha_limite/.test(k) ? (v ? Math.floor(new Date(v).getTime() / 6e4) : null) === (old ? Math.floor(new Date(old).getTime() / 6e4) : null) : String(v ?? "") === String(old ?? ""); if (!same) p[k] = v; });
       if (!Object.keys(p).length) { setMsg("No hay cambios."); return; }
       guardar(p, "Guardado.");
@@ -511,9 +511,15 @@
             h(Field, { T, label: "Qué cubre el fabricante" }, h("textarea", { rows: 2, value: d.garantia_cubre, onChange: set("garantia_cubre"), style: { ...I, resize: "vertical" } })),
             h(Field, { T, label: "Qué NO cubre (se cobra)" }, h("textarea", { rows: 2, value: d.garantia_no_cubre, onChange: set("garantia_no_cubre"), style: { ...I, resize: "vertical" } }))) : null) : null,
 
-        h(Box, { T }, h(Lbl, { T }, "Vehículo, piezas y cita"),
-          h("div", { style: { display: "grid", gridTemplateColumns: "1fr", gap: "8px" } },
+        h(Box, { T }, h(Lbl, { T }, "Datos del caso"),
+          h("div", { "data-crm-datos-caso": "1", style: { display: "grid", gap: "10px" } },
+            h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(Seg, { T, opts: TIPOS, value: d.tipo, onChange: (v) => setD((x) => ({ ...x, tipo: v })) })),
+            h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Canal de entrada"), h(Seg, { T, opts: CANALES, value: d.canal, onChange: (v) => setD((x) => ({ ...x, canal: v })) })),
+            h(Field, { T, label: "Consulta" }, h("textarea", { rows: 3, value: d.consulta || "", onChange: set("consulta"), style: { ...I, resize: "vertical" } })),
             h(Field, { T, label: "Vehículo" }, h("input", { value: d.vehiculo, onChange: set("vehiculo"), style: I })),
+            (d.tipo || caso.tipo) !== caso.tipo ? h("div", { style: { fontSize: "12px", color: T.warn } }, "Pulsa “Guardar cambios” para aplicar el cambio de tipo. Queda registrado en el historial.") : null)),
+        h(Box, { T }, h(Lbl, { T }, "Piezas y cita"),
+          h("div", { style: { display: "grid", gridTemplateColumns: "1fr", gap: "8px" } },
             h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
               h(Field, { T, label: "Llegada prevista de piezas" }, h("input", { type: "date", value: d.piezas_previstas || "", onChange: set("piezas_previstas"), style: I })),
               h(Field, { T, label: "Cita" }, h("input", { type: "datetime-local", value: d.cita_at || "", onChange: set("cita_at"), style: I }))))),
