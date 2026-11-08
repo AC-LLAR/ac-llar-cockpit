@@ -2737,16 +2737,15 @@ const inicioOT =
     React.createElement("div", { role: "tablist", "aria-label": "Área", style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "6px", padding: "12px 0 10px" } },
       GRUPOS.map((g) => { const on = grupo === g.id; return React.createElement("button", { key: g.id, role: "tab", "aria-selected": on, onClick: () => onChange(g.id),
         style: { cursor: "pointer", padding: "8px 18px", borderRadius: "10px", border: `1px solid ${on ? T.ink : T.border}`, background: on ? T.ink : T.surface, color: on ? T.bg : T.inkSoft, fontFamily: F.body, fontSize: "12.5px", fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", transition: "all 120ms" } }, g.label); })));
-  // Pestañas del grupo TALLER: se irán añadiendo aquí.
-  const TALLER_TABS = [];
+  // Pestañas del grupo TALLER. "Clientes" = CRM de taller (vive en taller-crm.js → window.AcllarCRM).
+  const TALLER_TABS = [{ id: "clientes", label: "Clientes" }];
   const TallerView = () => React.createElement(React.Fragment, null,
     React.createElement("nav", { style: { background: T.surface, borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, padding: "0 28px", position: "sticky", top: 0, zIndex: 40 } },
       React.createElement("div", { style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "2px", minHeight: "44px", alignItems: "center" } },
-        TALLER_TABS.length ? null : React.createElement("span", { style: { fontSize: "13px", color: T.inkFaint, fontStyle: "italic", padding: "12px 14px" } }, "Todavía no hay pestañas de taller"))),
-    React.createElement("main", { style: { maxWidth: "1280px", margin: "0 auto", padding: "28px 28px 60px" } },
-      React.createElement("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "40px 28px", textAlign: "center" } },
-        React.createElement("div", { style: { fontFamily: F.display, fontSize: "20px", fontWeight: 700, color: T.ink } }, "Taller"),
-        React.createElement("div", { style: { fontSize: "14px", color: T.inkSoft, marginTop: "8px", lineHeight: 1.6 } }, "Aquí irán apareciendo las pestañas del taller: calendario, entregas de vehículos, hojas de trabajo…"))));
+        TALLER_TABS.map((t) => React.createElement("button", { key: t.id, style: { display: "flex", alignItems: "center", padding: "12px 14px", border: "none", background: "transparent", color: T.rust, fontSize: "14px", fontWeight: 700, fontFamily: F.body, borderBottom: `2.5px solid ${T.rust}`, marginBottom: "-1px", cursor: "default" } }, t.label)))),
+    React.createElement("main", { style: { maxWidth: "1280px", margin: "0 auto", padding: "24px 28px 60px" } },
+      window.AcllarCRM ? React.createElement(window.AcllarCRM, { T, F })
+        : React.createElement("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "40px 28px", textAlign: "center", color: T.inkSoft } }, "No se pudo cargar el CRM de taller. Recarga la página (F5).")));
   const TabBar = ({ active, onChange }) => /* @__PURE__ */ React.createElement("nav", { style: {
     background: T.surface,
     borderTop: `1px solid ${T.border}`,
