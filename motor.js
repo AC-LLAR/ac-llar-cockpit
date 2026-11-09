@@ -2737,9 +2737,9 @@ const inicioOT =
     React.createElement("div", { role: "tablist", "aria-label": "Área", style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "6px", padding: "12px 0 10px" } },
       GRUPOS.map((g) => { const on = grupo === g.id; return React.createElement("button", { key: g.id, role: "tab", "aria-selected": on, onClick: () => onChange(g.id),
         style: { cursor: "pointer", padding: "8px 18px", borderRadius: "10px", border: `1px solid ${on ? T.ink : T.border}`, background: on ? T.ink : T.surface, color: on ? T.bg : T.inkSoft, fontFamily: F.body, fontSize: "12.5px", fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", transition: "all 120ms" } }, g.label); })));
-  // Pestañas del grupo TALLER. "Clientes" = CRM de taller (taller-crm.js → window.AcllarCRM);
+  // Pestañas del grupo TALLER. "Casos" (id clientes) = CRM de taller (taller-crm.js → window.AcllarCRM);
   // "Garantías" = expedientes de garantía/chasis (taller-garantias.js → window.AcllarGarantias).
-  const TALLER_TABS = [{ id: "clientes", label: "Clientes" }, { id: "garantias", label: "Garant\xEDas" }];
+  const TALLER_TABS = [{ id: "clientes", label: "Casos" }, { id: "garantias", label: "Garant\xEDas" }];
   const TallerView = ({ flota }) => {
     const [tab, setTab] = useState(() => { try { const x = localStorage.getItem("acllar_taller_tab"); return TALLER_TABS.some((t) => t.id === x) ? x : "clientes"; } catch (e) { return "clientes"; } });
     const ir = (id) => { setTab(id); try { localStorage.setItem("acllar_taller_tab", id); } catch (e) {} };

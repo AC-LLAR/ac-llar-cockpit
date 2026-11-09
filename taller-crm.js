@@ -1,4 +1,4 @@
-// taller-crm.js  ---  CRM de clientes de taller (grupo TALLER → Clientes)
+// taller-crm.js  ---  CRM de taller (grupo TALLER → Casos). Toda consulta entra aquí; las de garantía pasan a la pestaña Garantías.
 // Se carga antes que motor.js y expone window.AcllarCRM (un componente React).
 // motor.js lo monta dentro de TallerView pasándole la paleta T y las fuentes F.
 // Datos: tablas crm_clientes / crm_casos / crm_eventos (historial automático por trigger)
@@ -14,6 +14,10 @@
   const RESPONSABLES = ["Sebastián", "Gonzalo", "Pablo"];
   const CANALES = [["telefono", "Teléfono"], ["email", "Email"], ["whatsapp", "WhatsApp"], ["presencial", "En persona"], ["otro", "Otro"]];
   const TIPOS = [["reparacion", "Reparación"], ["piezas", "Solo piezas"], ["gas", "Revisión de gas"], ["estanqueidad", "Estanqueidad"], ["garantia", "Garantía"], ["otro", "Otro"]];
+  const TIPOS_CLI = [["propio", "Cliente propio"], ["externo", "Cliente externo"]];
+  // Bitácora: lo que se va haciendo con el cliente o el fabricante. Fecha, hora y autor los pone el servidor.
+  const CLASES = [["respondi", "Le respondí"], ["pedi", "Le pedí"], ["respondio", "Me respondió"], ["fabricante", "Fabricante"], ["llamada", "Llamada"], ["nota", "Nota"]];
+  const BITACORA = ["bitacora", "nota", "llamada", "mensaje"];
   const lbl = (arr, k) => (arr.find((x) => x[0] === k) || [k, k || "—"])[1];
 
   const CH = {
@@ -24,10 +28,10 @@
   const NOW = "__now__";
   // Máquina de estados: cada estado sabe su fase, su color y qué pasos siguientes ofrece.
   const E = {
-    pendiente_respuesta: { l: "Pendiente de respuesta", f: "consulta", c: "ambar", sig: [{ to: "respondida", l: "Respondida" }] },
+    pendiente_respuesta: { l: "Pendiente de respuesta", f: "consulta", c: "ambar", sig: [{ to: "respondida", l: "Respondida" }, { to: "en_garantias", l: "Es garantía: pasar a Garantías" }] },
     respondida: { l: "Respondida", f: "consulta", c: "azul", sig: [
       { to: "presupuesto_por_hacer", l: "Hay que hacer presupuesto" },
-      { to: "garantia_analisis", l: "Es garantía: analizar", set: { rama: "garantia" } },
+      { to: "en_garantias", l: "Es garantía: pasar a Garantías" },
       { to: "cita_asignada", l: "Sin presupuesto: dar cita", set: { rama: "C" } }] },
     presupuesto_por_hacer: { l: "Presupuesto por hacer", f: "presupuesto", c: "ambar", sig: [{ to: "presupuesto_hecho", l: "Presupuesto hecho en BC" }] },
     presupuesto_hecho: { l: "Presupuesto hecho", f: "presupuesto", c: "azul", sig: [{ to: "presupuesto_enviado", l: "Enviado al cliente" }] },
@@ -65,6 +69,7 @@
     rechazado: { l: "Rechazado", f: "cerrado", c: "gris", fin: true },
     sin_respuesta: { l: "Sin respuesta", f: "cerrado", c: "gris", fin: true },
     cerrado: { l: "Cerrado", f: "cerrado", c: "gris", fin: true },
+    en_garantias: { l: "En Garantías", f: "cerrado", c: "violeta", fin: true, gar: true },
   };
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
   const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas · Garantía"], ["cita", "Cita"], ["taller", "En taller"], ["retirar", "Para retirar"]];
@@ -74,7 +79,7 @@
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
     piezas_previstas: "Llegada de piezas", cita_at: "Cita", cerrado_at: "Cerrado", motivo_cierre: "Motivo de cierre", archivado: "Archivado", rama: "Rama", vehiculo: "Vehículo",
     consulta: "Consulta", tipo: "Tipo", canal: "Canal", nombre: "Nombre", apellidos: "Apellidos", telefono: "Teléfono", email: "Email", nif: "NIF", direccion: "Dirección", cp: "CP",
-    ciudad: "Población", provincia: "Provincia", vehiculos: "Vehículos", notas: "Notas", bc_no: "Nº cliente BC" };
+    ciudad: "Población", provincia: "Provincia", vehiculos: "Vehículos", notas: "Notas", bc_no: "Nº cliente BC", tipo_cliente: "Tipo de cliente" };
 
   // ---------- utilidades ----------
   const sb = () => window.acllarCloud && window.acllarCloud.sb;
@@ -86,6 +91,7 @@
   const fFecha = (iso) => { if (!iso) return "—"; const d = new Date(iso); return isNaN(d) ? "—" : `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; };
   const fFechaHora = (iso) => { if (!iso) return "—"; const d = new Date(iso); return isNaN(d) ? "—" : `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const toLocalInput = (iso) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? "" : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const fLarga = (iso) => { if (!iso) return "—"; const d = new Date(iso); return isNaN(d) ? "—" : `${["dom", "lun", "mar", "mié", "jue", "vie", "sáb"][d.getDay()]} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const fromLocalInput = (v) => (v ? new Date(v).toISOString() : null);
   const eur = (n) => (n == null || n === "" ? "—" : Number(n).toLocaleString("es-ES", { style: "currency", currency: "EUR" }));
   const nombreCli = (c) => (c ? [c.nombre, c.apellidos].filter(Boolean).join(" ") : "—");
@@ -152,6 +158,7 @@
     const d = ev.detalle || {};
     if (/^g_/.test(ev.tipo) && window.AcllarGarantias) return "Expediente de garantía · " + window.AcllarGarantias._test.textoEventoG(ev);
     if (ev.tipo === "creado") return ev.caso_id ? `Caso creado · ${lbl(CANALES, d.canal)} · ${lbl(TIPOS, d.tipo)}` : "Cliente creado en el CRM";
+    if (ev.tipo === "bitacora") return `${lbl(CLASES, (ev.detalle || {}).clase)}: “${ev.texto}”`;
     if (ev.tipo === "nota") return `Nota: “${ev.texto}”`;
     if (ev.tipo === "llamada") return `Llamada: “${ev.texto}”`;
     if (ev.tipo === "mensaje") return `Mensaje: “${ev.texto}”`;
@@ -159,6 +166,7 @@
     const partes = Object.keys(d).map((k) => {
       const v = d[k] || {};
       if (k === "estado") return `Estado: ${est(v.de).l} → ${est(v.a).l}`;
+      if (k === "tipo_cliente") return `Tipo de cliente: ${v.de ? lbl(TIPOS_CLI, v.de) : "—"} → ${v.a ? lbl(TIPOS_CLI, v.a) : "—"}`;
       if (k === "vehiculos") {
         const de = (Array.isArray(v.de) ? v.de : []).map(asVeh), a = (Array.isArray(v.a) ? v.a : []).map(asVeh);
         const add = a.filter((x) => !de.some((y) => mismoVeh(x, y))), del = de.filter((x) => !a.some((y) => mismoVeh(x, y)));
@@ -176,6 +184,67 @@
       h("span", { style: { color: T.inkSoft } }, fFechaHora(ev.at)), h("span", null, h("b", null, quien(ev.autor)), " · ", textoEvento(ev))))
       : h("li", { style: { color: T.inkFaint } }, "Sin movimientos todavía."));
 
+  // ---------- bitácora (Casos y Garantías) ----------
+  // Se guarda en crm_eventos (tipo "bitacora"), que no se puede editar ni borrar.
+  // Un expediente de garantía ligado a un caso comparte la bitácora con él.
+  function Bitacora({ T, caso_id, garantia_id, cliente_id, titulo, recargar }) {
+    const [lista, setLista] = useState(null); const [txt, setTxt] = useState(""); const [clase, setClase] = useState("respondi");
+    const [msg, setMsg] = useState(""); const [guardando, setGuardando] = useState(false);
+    const cargar = async () => {
+      const f = [caso_id && `caso_id.eq.${caso_id}`, garantia_id && `garantia_id.eq.${garantia_id}`].filter(Boolean).join(",");
+      if (!f) { setLista([]); return; }
+      const { data } = await sb().from("crm_eventos").select("*").or(f).in("tipo", BITACORA).order("at", { ascending: true }).limit(1000);
+      setLista(data || []);
+    };
+    useEffect(() => { cargar(); }, [caso_id, garantia_id, recargar]);
+    const add = async () => {
+      if (!txt.trim()) return;
+      setGuardando(true); setMsg("");
+      const { error } = await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase }, texto: txt.trim(), caso_id: caso_id || null, garantia_id: garantia_id || null, cliente_id: cliente_id || null });
+      setGuardando(false);
+      if (error) { setMsg("No se pudo guardar: " + error.message); return; }
+      setTxt(""); cargar();
+    };
+    const I = inp(T);
+    return h(Box, { T, tone: "azul" }, h(Lbl, { T }, titulo || "Bitácora del caso"),
+      h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-4px", marginBottom: "10px" } }, "Lo que vas haciendo con el cliente o el fabricante. Se guarda con fecha, hora y autor y no se puede modificar."),
+      lista == null ? h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Cargando…")
+        : lista.length ? h("ol", { "data-bitacora": "1", style: { listStyle: "none", margin: "0 0 12px", padding: 0, display: "flex", flexDirection: "column", gap: "8px" } },
+          lista.map((e) => { const cl = e.tipo === "bitacora" ? (e.detalle || {}).clase : e.tipo === "mensaje" ? "respondi" : e.tipo;
+            return h("li", { key: e.id, style: { borderLeft: `3px solid ${CH.azul.bd}`, paddingLeft: "10px" } },
+              h("div", { style: { fontSize: "11.5px", color: T.inkSoft } }, fLarga(e.at), " · ", h("b", null, quien(e.autor)), e.garantia_id && caso_id && !garantia_id ? " · desde Garantías" : ""),
+              h("div", { style: { fontSize: "13.5px", whiteSpace: "pre-wrap" } }, h(Chip, { c: cl === "respondio" ? "verde" : cl === "fabricante" ? "violeta" : cl === "pedi" ? "ambar" : "azul", style: { marginRight: "6px" } }, lbl(CLASES, cl) || "Nota"), e.texto)); }))
+        : h("div", { style: { fontSize: "13px", color: T.inkFaint, marginBottom: "10px" } }, "Todavía no hay anotaciones."),
+      h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "6px" } }, CLASES.map(([k, l]) => h("button", { key: k, type: "button", "data-bit-clase": k, onClick: () => setClase(k), style: { ...btn(T, "s"), background: clase === k ? T.ink : T.surface, color: clase === k ? T.bg : T.ink } }, l))),
+      h("textarea", { rows: 2, "data-bit-texto": "1", value: txt, onChange: (e) => setTxt(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) add(); }, placeholder: clase === "respondi" ? "Qué le respondiste…" : clase === "pedi" ? "Qué le pediste…" : clase === "respondio" ? "Qué te respondió…" : clase === "fabricante" ? "Qué hablaste o te respondió el fabricante…" : "Escribe aquí…", style: { ...I, resize: "vertical" } }),
+      h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "6px" } }, h("button", { "data-bit-add": "1", onClick: add, disabled: guardando || !txt.trim(), style: btn(T, "p") }, guardando ? "Guardando…" : "Anotar"), h("span", { style: { fontSize: "11.5px", color: T.inkFaint } }, "Ctrl + Intro también anota"),
+        msg ? h("span", { style: { fontSize: "12.5px", color: T.danger } }, msg) : null));
+  }
+  // Teléfono para wa.me (añade 34 a los móviles españoles de 9 cifras)
+  const telWa = (t) => { const d = String(t || "").replace(/\D/g, ""); if (!d) return ""; return d.length === 9 && /^[6789]/.test(d) ? "34" + d : d.replace(/^00/, ""); };
+  // Saltar entre pestañas de TALLER
+  const irA = (tab, claves) => { try { Object.keys(claves || {}).forEach((k) => localStorage.setItem(k, claves[k])); } catch (e) {} window.dispatchEvent(new CustomEvent("acllar-taller-tab", { detail: tab })); };
+  const abrirExpediente = (id) => irA("garantias", { acllar_garantia_abrir: id });
+  // Fabricante probable a partir del modelo (se puede cambiar en el expediente)
+  const fabDeModelo = (m) => { const x = String(m || "").toLowerCase(); if (/benimar|tessoro|mileo|amphitryon|benivan|sport \d/.test(x)) return "Benimar"; if (/roller|kronos|zefiro|pegaso|livingstone|granduca/.test(x)) return "Roller Team"; return null; };
+  // Un caso de garantía pasa a la pestaña Garantías: se crea su expediente y el caso queda "En Garantías".
+  async function pasarAGarantias(caso) {
+    if (!window.AcllarGarantiasCrear) throw new Error("La pestaña Garantías no está cargada. Recarga la página.");
+    const ya = await sb().from("garantias").select("id").eq("caso_id", caso.id).limit(1);
+    let gid = ya.data && ya.data[0] && ya.data[0].id;
+    if (!gid) {
+      const vs = ((caso.cliente && caso.cliente.vehiculos) || []).map(asVeh);
+      const v = vs.find((x) => vehTxt(x) === caso.vehiculo) || { modelo: caso.vehiculo || "" };
+      const g = await window.AcllarGarantiasCrear({ tipo: "garantia", origen: "cliente", cliente: caso.cliente, vehiculo: { modelo: v.modelo || "", matricula: v.matricula || "", bastidor: v.bastidor || "", bc_ps: v.bc_ps || null },
+        fabricante: fabDeModelo(v.modelo), descripcion: caso.consulta || "", caso_id: caso.id });
+      gid = g.id;
+    }
+    const up = await sb().from("crm_casos").update({ estado: "en_garantias", tipo: "garantia", rama: "garantia" }).eq("id", caso.id).select("*, cliente:crm_clientes(*)").single();
+    if (up.error) throw up.error;
+    return { gid, caso: up.data };
+  }
+  const ChipCli = ({ c }) => (c && c.tipo_cliente ? h(Chip, { c: c.tipo_cliente === "propio" ? "verde" : "gris", style: { marginLeft: "6px" } }, c.tipo_cliente === "propio" ? "Propio" : "Externo") : null);
+
   // =====================================================================
   // Vista principal
   // =====================================================================
@@ -187,7 +256,7 @@
     const [cargando, setCargando] = useState(true);
     const [error, setError] = useState("");
     const [casoId, setCasoId] = useState(() => { try { const x = localStorage.getItem("acllar_crm_abrir_caso"); if (x) localStorage.removeItem("acllar_crm_abrir_caso"); return x || null; } catch (e) { return null; } });
-    const [clienteId, setClienteId] = useState(null);
+    const [clienteId, setClienteId] = useState(() => { try { const x = localStorage.getItem("acllar_crm_abrir_cliente"); if (x) localStorage.removeItem("acllar_crm_abrir_cliente"); return x || null; } catch (e) { return null; } });
     const [nueva, setNueva] = useState(null); // null | {} | { bc } | { cliente }
     const [filtroTodos, setFiltroTodos] = useState("abiertos");
     const rol = window.acllarCloud && window.acllarCloud.rol ? window.acllarCloud.rol() : null;
@@ -213,7 +282,7 @@
     const actualizarCaso = (c) => setCasos((xs) => { const i = xs.findIndex((x) => x.id === c.id); if (i < 0) return [c, ...xs]; const n = xs.slice(); n[i] = c; return n; });
 
     if (sinAcceso) return h("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "36px", textAlign: "center", color: T.inkSoft, fontSize: "14px" } },
-      h("div", { style: { fontWeight: 800, fontSize: "18px", color: T.ink, marginBottom: "6px" } }, "Clientes de taller"), "Tu cuenta no tiene acceso al CRM de taller. Pídeselo a Sebastián.");
+      h("div", { style: { fontWeight: 800, fontSize: "18px", color: T.ink, marginBottom: "6px" } }, "Casos de taller"), "Tu cuenta no tiene acceso a los casos de taller. Pídeselo a Sebastián.");
 
     const abiertos = casos.filter((c) => !est(c.estado).fin);
     const me = yo();
@@ -221,7 +290,7 @@
     const listas = {
       bandeja: casos.filter((c) => c.estado === "pendiente_respuesta").sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
       metoca: abiertos.filter((c) => !me || c.responsable === me || !c.responsable).sort(ordVence),
-      todos: (filtroTodos === "abiertos" ? abiertos : filtroTodos === "cerrados" ? casos.filter((c) => est(c.estado).fin) : casos).slice().sort(ordVence),
+      todos: (filtroTodos === "abiertos" ? abiertos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => est(c.estado).fin && !est(c.estado).gar) : casos).slice().sort(ordVence),
     };
     const nVencidos = abiertos.filter((c) => { const v = vence(c); return v && v.c === "rojo"; }).length;
     const nAvisos = abiertos.filter((c) => aviso(c)).length;
@@ -260,11 +329,11 @@
       cargando ? h("div", { style: { color: T.inkFaint, fontSize: "13px" } }, "Cargando…")
         : vista === "tablero" ? h(Tablero, { T, casos: abiertos, onOpen: setCasoId })
         : h(React.Fragment, null,
-          vista === "todos" ? h("div", null, h(Seg, { T, opts: [["abiertos", "Abiertos"], ["cerrados", "Cerrados"], ["todos", "Todos"]], value: filtroTodos, onChange: setFiltroTodos })) : null,
+          vista === "todos" ? h("div", null, h(Seg, { T, opts: [["abiertos", "Abiertos"], ["garantias", "En Garantías"], ["cerrados", "Cerrados"], ["todos", "Todos"]], value: filtroTodos, onChange: setFiltroTodos })) : null,
           h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, vacio: vista === "bandeja" ? "No hay consultas sin responder." : "Nada pendiente. Todo al día." })),
       casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, vinculados, sugerencia: sugerencia(casoAbierto), syncAhora, sincronizando, onRefresh: cargar, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
       clienteId ? h(ClientePanel, { T, F, id: clienteId, casos, bcServ, onClose: () => setClienteId(null), onCaso: (id) => { setClienteId(null); setCasoId(id); }, onNueva: (cliente) => { setClienteId(null); setNueva({ cliente }); }, onChanged: cargar }) : null,
-      nueva ? h(NuevaConsulta, { T, F, inicial: nueva, onClose: () => setNueva(null), onCreated: (c) => { setNueva(null); actualizarCaso(c); setCasoId(c.id); } }) : null);
+      nueva ? h(NuevaConsulta, { T, F, inicial: nueva, onClose: () => setNueva(null), onCreated: (c, gid) => { setNueva(null); actualizarCaso(c); if (gid) abrirExpediente(gid); else setCasoId(c.id); } }) : null);
   }
 
   // ---------- buscador único (CRM + BC) ----------
@@ -333,7 +402,7 @@
           const doc = docBC(bcServ, c);
           return h("tr", { key: c.id, "data-crm-caso": c.id, onClick: () => onOpen(c.id), style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
             h("td", { style: td }, v ? h(Chip, { c: v.c }, v.t) : h("span", { style: { color: T.inkFaint } }, "—")),
-            h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
+            h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: td }, lbl(TIPOS, c.tipo)),
             h("td", { style: td }, h(Chip, { c: s.c }, s.l), av ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: av.c }, av.t)) : null),
             h("td", { style: td }, c.proxima_accion || h("span", { style: { color: T.inkFaint } }, "—"), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, c.responsable || "")),
@@ -363,28 +432,18 @@
 
   // ---------- ficha del caso ----------
   // Expediente(s) de la pestaña Garantías ligados a este caso
-  function ExpedientesCaso({ T, caso }) {
-    const [lista, setLista] = useState(null); const [err, setErr] = useState(""); const [creando, setCreando] = useState(false);
-    useEffect(() => { let vivo = true; sb().from("garantias").select("id,numero,estado,fabricante").eq("caso_id", caso.id).order("created_at").then((r) => { if (vivo) setLista(r.data || []); }); return () => { vivo = false; }; }, [caso.id]);
-    const ir = (id) => { try { localStorage.setItem("acllar_garantia_abrir", id); } catch (e) {} window.dispatchEvent(new CustomEvent("acllar-taller-tab", { detail: "garantias" })); };
-    const crear = async () => {
-      if (!window.AcllarGarantiasCrear) { setErr("La pestaña Garantías no está cargada. Recarga la página."); return; }
-      setCreando(true); setErr("");
-      const vs = ((caso.cliente && caso.cliente.vehiculos) || []).map(asVeh);
-      const v = vs.find((x) => vehTxt(x) === caso.vehiculo) || (vs.length === 1 && !caso.vehiculo ? vs[0] : null) || { modelo: caso.vehiculo || "" };
-      const fx = String(caso.garantia_fabricante || "").toLowerCase();
-      const fab = /benimar/.test(fx) ? "Benimar" : /roller/.test(fx) ? "Roller Team" : fx ? "Otro" : "Benimar";
-      try {
-        const g = await window.AcllarGarantiasCrear({ tipo: "garantia", origen: "cliente", cliente: caso.cliente, vehiculo: { modelo: v.modelo || "", matricula: v.matricula || "", bastidor: v.bastidor || "", bc_ps: v.bc_ps || null }, fabricante: fab, descripcion: caso.consulta || "", caso_id: caso.id });
-        ir(g.id);
-      } catch (e) { setErr("No se pudo crear el expediente: " + (e.message || e)); setCreando(false); }
-    };
+  function ExpedientesCaso({ T, caso, onPasar, pasando }) {
+    const [lista, setLista] = useState(null);
+    useEffect(() => { let vivo = true; sb().from("garantias").select("id,numero,estado,fabricante,reclamacion_no").eq("caso_id", caso.id).order("created_at").then((r) => { if (vivo) setLista(r.data || []); }); return () => { vivo = false; }; }, [caso.id, caso.updated_at]);
     if (lista == null) return null;
-    return h("div", { "data-crm-expedientes": "1", style: { marginTop: "12px", borderTop: `1px solid ${T.border}`, paddingTop: "10px" } },
-      h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "6px" } }, "Expediente (horas, piezas y fotos)"),
-      lista.map((g) => h("button", { key: g.id, onClick: () => ir(g.id), style: { ...btn(T, "s"), marginRight: "6px", marginBottom: "6px" } }, `${g.numero} · ${g.fabricante || ""} → abrir`)),
-      !lista.length ? h("button", { "data-crm-crear-exp": "1", onClick: crear, disabled: creando, style: { ...btn(T, "p"), width: "100%" } }, creando ? "Creando…" : "Abrir expediente de garantía") : null,
-      err ? h("div", { style: { color: T.danger, fontSize: "12.5px", marginTop: "6px" } }, err) : null);
+    if (!lista.length && caso.tipo !== "garantia" && caso.estado !== "en_garantias") return null;
+    return h(Box, { T, tone: "violeta" }, h(Lbl, { T }, "Garantía"),
+      h("div", { "data-crm-expedientes": "1" },
+        lista.length ? h(React.Fragment, null,
+          h("div", { style: { fontSize: "13px", marginBottom: "8px" } }, "Este caso se gestiona en la pestaña Garantías: análisis, tramitación con el fabricante, piezas, cita y reparación."),
+          lista.map((g) => h("button", { key: g.id, onClick: () => abrirExpediente(g.id), style: { ...btn(T, "p"), marginRight: "6px", marginBottom: "6px" } }, `Abrir expediente ${g.numero}${g.fabricante ? " · " + g.fabricante : ""}${g.reclamacion_no ? " · " + g.reclamacion_no : ""} →`)))
+          : h(React.Fragment, null, h("div", { style: { fontSize: "13px", marginBottom: "8px" } }, "Es un caso de garantía. Pásalo a Garantías para llevar allí su expediente."),
+            h("button", { "data-crm-crear-exp": "1", onClick: onPasar, disabled: pasando, style: { ...btn(T, "p"), width: "100%" } }, pasando ? "Pasando…" : "Pasar a Garantías →"))));
   }
   function CasoPanel({ T, F, caso, bcServ, vinculados, sugerencia, syncAhora, sincronizando, onRefresh, onClose, onSaved, onCliente }) {
     const [altaMsg, setAltaMsg] = useState(null); // null | "trabajando" | { txt, dup }
@@ -393,12 +452,12 @@
     const [msg, setMsg] = useState("");
     const [pend, setPend] = useState(null); // paso que necesita un dato (cita)
     const [citaTmp, setCitaTmp] = useState("");
-    const [nota, setNota] = useState(""); const [notaTipo, setNotaTipo] = useState("nota");
+    const [pasando, setPasando] = useState(false);
     const [cerrando, setCerrando] = useState(false); const [motivo, setMotivo] = useState("");
     const [d, setD] = useState({});
     useEffect(() => { setD({ proxima_accion: caso.proxima_accion || "", responsable: caso.responsable || "", fecha_limite: toLocalInput(caso.fecha_limite), oferta_bc: caso.oferta_bc || "", pedido_bc: caso.pedido_bc || "", senal_importe: caso.senal_importe ?? "",
       garantia_fabricante: caso.garantia_fabricante || "", garantia_reclamacion: caso.garantia_reclamacion || "", garantia_cubre: caso.garantia_cubre || "", garantia_no_cubre: caso.garantia_no_cubre || "", piezas_previstas: caso.piezas_previstas || "", cita_at: toLocalInput(caso.cita_at), vehiculo: caso.vehiculo || "", tipo: caso.tipo || "", canal: caso.canal || "", consulta: caso.consulta || "" }); }, [caso.id, caso.updated_at]);
-    const cargarEv = async () => { const { data } = await sb().from("crm_eventos").select("*").eq("caso_id", caso.id).order("at", { ascending: false }).limit(300); setEv(data || []); };
+    const cargarEv = async () => { const { data } = await sb().from("crm_eventos").select("*").eq("caso_id", caso.id).order("at", { ascending: false }).limit(300); setEv((data || []).filter((e) => !BITACORA.includes(e.tipo))); };
     useEffect(() => { cargarEv(); }, [caso.id, caso.updated_at]);
 
     const guardar = async (patch, texto) => {
@@ -409,7 +468,14 @@
       if (error) { setMsg("No se pudo guardar: " + error.message); return false; }
       onSaved(data); if (texto) setMsg(texto); return true;
     };
+    const pasar = async () => {
+      setPasando(true); setMsg("");
+      try { const r = await pasarAGarantias(caso); onSaved(r.caso); abrirExpediente(r.gid); }
+      catch (e) { setMsg("No se pudo pasar a Garantías: " + (e.message || e)); }
+      setPasando(false);
+    };
     const paso = async (s) => {
+      if (s.to === "en_garantias") return pasar();
       if (s.to === "cita_asignada" && !pend) { setPend(s); setCitaTmp(d.cita_at || ""); return; }
       const patch = { estado: s.to, ...(s.set || {}) };
       if (est(s.to).fin) patch.cerrado_at = NOW;
@@ -422,19 +488,14 @@
         garantia_fabricante: (v) => v || null, garantia_reclamacion: (v) => v || null, garantia_cubre: (v) => v || null, garantia_no_cubre: (v) => v || null, piezas_previstas: (v) => v || null, cita_at: fromLocalInput, vehiculo: (v) => v || null, tipo: (v) => v || null, canal: (v) => v || null, consulta: (v) => (String(v || "").trim() || null) };
       Object.keys(map).forEach((k) => { const v = map[k](d[k]); const old = caso[k] == null ? null : caso[k]; const same = /_at$|fecha_limite/.test(k) ? (v ? Math.floor(new Date(v).getTime() / 6e4) : null) === (old ? Math.floor(new Date(old).getTime() / 6e4) : null) : String(v ?? "") === String(old ?? ""); if (!same) p[k] = v; });
       if (!Object.keys(p).length) { setMsg("No hay cambios."); return; }
-      guardar(p, "Guardado.");
+      const aGar = p.tipo === "garantia" && !est(caso.estado).fin;
+      guardar(p, aGar ? "Guardado. Pasa el caso a Garantías con el botón de la caja Garantía." : "Guardado.");
     };
     const avisarAna = async () => {
       const cli = nombreCli(caso.cliente), docNo = caso.pedido_bc || caso.oferta_bc || "sin nº BC";
       const txt = `Hola Ana, ha llegado el comprobante de la señal de ${cli} (${docNo})` + (caso.senal_importe ? `: ${eur(caso.senal_importe)}` : "") + (caso.senal_comprobante_at ? `, recibido el ${fFecha(caso.senal_comprobante_at)}` : "") + ".";
       window.open(`https://wa.me/${ANA_TEL}?text=${encodeURIComponent(txt)}`, "_blank", "noopener");
       await guardar({ senal_aviso_at: NOW, ...(caso.estado === "comprobante_recibido" ? { estado: "contabilidad_avisada" } : {}) }, "WhatsApp a Ana abierto y aviso registrado.");
-    };
-    const addNota = async () => {
-      if (!nota.trim()) return;
-      const { error } = await sb().from("crm_eventos").insert({ caso_id: caso.id, cliente_id: caso.cliente_id, tipo: notaTipo, texto: nota.trim() });
-      if (error) { setMsg("No se pudo añadir: " + error.message); return; }
-      setNota(""); cargarEv();
     };
     const cerrar = async () => { if (await guardar({ estado: "cerrado", cerrado_at: NOW, motivo_cierre: motivo.trim() || null })) { setCerrando(false); setMotivo(""); } };
     const reabrir = () => guardar({ estado: "respondida", cerrado_at: null }, "Caso reabierto.");
@@ -459,7 +520,7 @@
       setAltaMsg({ txt: "No se pudo: " + (res.error || "error"), err: true });
     };
     const verSenal = caso.rama === "A" || /senal|comprobante|contabilidad/.test(caso.estado) || caso.senal_importe != null || caso.senal_comprobante_at;
-    const verGar = caso.tipo === "garantia" || caso.rama === "garantia" || /^garantia_|cobertura/.test(caso.estado) || caso.garantia_resultado;
+    const verGar = /^garantia_|cobertura/.test(caso.estado) || !!caso.garantia_resultado; // casos antiguos con el flujo de garantía dentro de Casos
     const set = (k) => (e) => setD((x) => ({ ...x, [k]: e.target.value }));
     const I = inp(T);
     const docBox = (titulo, campo, doc) => h("div", { style: { padding: "6px 0", borderTop: `1px solid ${T.border}` } },
@@ -471,17 +532,17 @@
     return h(Drawer, { T, onClose, label: "Ficha del caso" },
       h("div", { style: { background: T.surface, padding: "18px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: "6px" } },
         h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-          h("span", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" } }, `Caso · ${lbl(TIPOS, caso.tipo)}${caso.rama ? " · rama " + caso.rama : ""}`),
+          h("span", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" } }, `Caso · ${lbl(TIPOS, caso.tipo)}${caso.rama && caso.rama !== "garantia" ? " · rama " + caso.rama : ""}`),
           h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft, lineHeight: 1 } }, "×")),
-        h("button", { onClick: () => onCliente(caso.cliente_id), style: { border: "none", background: "transparent", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: F.display, fontSize: "24px", fontWeight: 800, color: T.ink } }, nombreCli(caso.cliente), " ", h("span", { style: { fontSize: "13px", color: T.rust, fontWeight: 700 } }, "ficha →")),
+        h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px" } }, h("button", { onClick: () => onCliente(caso.cliente_id), style: { border: "none", background: "transparent", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: F.display, fontSize: "24px", fontWeight: 800, color: T.ink } }, nombreCli(caso.cliente), " ", h("span", { style: { fontSize: "13px", color: T.rust, fontWeight: 700 } }, "ficha →")), h(ChipCli, { c: caso.cliente })),
         h("div", { style: { fontSize: "13.5px", color: T.inkSoft } }, `${caso.vehiculo || "Sin vehículo"} · entró por ${lbl(CANALES, caso.canal).toLowerCase()} el ${fFecha(caso.created_at)}`),
         caso.consulta ? h("div", { style: { fontSize: "13.5px", background: T.bg, borderRadius: "8px", padding: "8px 10px", marginTop: "4px", whiteSpace: "pre-wrap" } }, caso.consulta) : null),
       h("div", { style: { padding: "16px 20px 40px", display: "flex", flexDirection: "column", gap: "14px" } },
         h(Box, { T }, h(Lbl, { T }, "Recorrido"),
-          h("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center" } },
+          s.gar ? null : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center" } },
             RECORRIDO.map((f, i) => { const done = s.f === "cerrado" || i < fi, cur = i === fi; return h("div", { key: f, style: { borderRadius: "6px", padding: "6px 2px", background: cur ? T.rust : done ? CH.verde.bg : T.bgAlt, color: cur ? "#fff" : done ? CH.verde.fg : T.inkSoft } }, ["Consulta", "Presup.", "Piezas", "Cita", "Taller", "Retirar"][i]); })),
           h("div", { style: { marginTop: "12px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Estado actual"), h(Chip, { c: s.c, style: { fontSize: "13px" } }, s.l), aviso(caso) ? h(Chip, { c: aviso(caso).c }, aviso(caso).t) : null),
-          s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Motivo: " + caso.motivo_cierre) : null, h("button", { onClick: reabrir, disabled: guardando, style: btn(T) }, "Reabrir caso"))
+          s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Motivo: " + caso.motivo_cierre) : null, h("button", { onClick: reabrir, disabled: guardando, style: btn(T) }, "Reabrir caso"))
             : h("div", { style: { marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" } },
               h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, "Siguiente paso"),
               caso.estado === "comprobante_recibido" ? h("button", { onClick: avisarAna, disabled: guardando, style: btn(T, "wa") }, "💬 Avisar a Ana por WhatsApp") : null,
@@ -495,7 +556,10 @@
                 : h("button", { onClick: () => setCerrando(true), style: { ...btn(T, "s"), alignSelf: "flex-start", color: T.inkSoft } }, "Cerrar caso…")),
           msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: /^No se|no lo aceptó/.test(msg) ? T.danger : T.ok } }, msg) : null),
 
-        h(Box, { T, tone: "ambar" }, h(Lbl, { T }, "Próxima acción"),
+        h(ExpedientesCaso, { T, caso, onPasar: pasar, pasando }),
+        h(Bitacora, { T, caso_id: caso.id, cliente_id: caso.cliente_id, recargar: caso.updated_at }),
+
+        s.gar ? null : h(Box, { T, tone: "ambar" }, h(Lbl, { T }, "Próxima acción"),
           h("div", { style: { display: "grid", gridTemplateColumns: "1fr", gap: "8px" } },
             h("input", { value: d.proxima_accion || "", onChange: set("proxima_accion"), placeholder: "¿Qué hay que hacer ahora?", style: I }),
             h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
@@ -534,8 +598,7 @@
           h(Row, { T, k: "Resultado" }, caso.garantia_resultado || "—"),
           (caso.garantia_resultado === "parcial" || d.garantia_cubre || d.garantia_no_cubre) ? h("div", { style: { display: "grid", gap: "8px", marginTop: "6px" } },
             h(Field, { T, label: "Qué cubre el fabricante" }, h("textarea", { rows: 2, value: d.garantia_cubre, onChange: set("garantia_cubre"), style: { ...I, resize: "vertical" } })),
-            h(Field, { T, label: "Qué NO cubre (se cobra)" }, h("textarea", { rows: 2, value: d.garantia_no_cubre, onChange: set("garantia_no_cubre"), style: { ...I, resize: "vertical" } }))) : null,
-          h(ExpedientesCaso, { T, caso })) : null,
+            h(Field, { T, label: "Qué NO cubre (se cobra)" }, h("textarea", { rows: 2, value: d.garantia_no_cubre, onChange: set("garantia_no_cubre"), style: { ...I, resize: "vertical" } }))) : null) : null,
 
         h(Box, { T }, h(Lbl, { T }, "Datos del caso"),
           h("div", { "data-crm-datos-caso": "1", style: { display: "grid", gap: "10px" } },
@@ -544,7 +607,7 @@
             h(Field, { T, label: "Consulta" }, h("textarea", { rows: 3, value: d.consulta || "", onChange: set("consulta"), style: { ...I, resize: "vertical" } })),
             h(Field, { T, label: "Vehículo" }, h("input", { value: d.vehiculo, onChange: set("vehiculo"), style: I })),
             (d.tipo || caso.tipo) !== caso.tipo ? h("div", { style: { fontSize: "12px", color: T.warn } }, "Pulsa “Guardar cambios” para aplicar el cambio de tipo. Queda registrado en el historial.") : null)),
-        h(Box, { T }, h(Lbl, { T }, "Piezas y cita"),
+        s.gar ? null : h(Box, { T }, h(Lbl, { T }, "Piezas y cita"),
           h("div", { style: { display: "grid", gridTemplateColumns: "1fr", gap: "8px" } },
             h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
               h(Field, { T, label: "Llegada prevista de piezas" }, h("input", { type: "date", value: d.piezas_previstas || "", onChange: set("piezas_previstas"), style: I })),
@@ -554,11 +617,7 @@
           h("button", { "data-crm-guardar": "1", onClick: guardarDatos, disabled: guardando, style: btn(T, "p") }, guardando ? "Guardando…" : "Guardar cambios"),
           h("span", { style: { fontSize: "12px", color: T.inkFaint } }, "Los pasos de estado se guardan solos al pulsarlos.")),
 
-        h(Box, { T }, h(Lbl, { T }, "Historial · automático, no se puede editar"),
-          h("div", { style: { display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" } },
-            h("select", { value: notaTipo, onChange: (e) => setNotaTipo(e.target.value), style: { ...I, width: "auto" }, "aria-label": "Tipo de nota" }, h("option", { value: "nota" }, "Nota"), h("option", { value: "llamada" }, "Llamada"), h("option", { value: "mensaje" }, "Mensaje")),
-            h("input", { value: nota, onChange: (e) => setNota(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") addNota(); }, placeholder: "Añadir nota, llamada o mensaje…", style: { ...I, flex: "1 1 200px" } }),
-            h("button", { onClick: addNota, style: btn(T) }, "Añadir")),
+        h(Box, { T }, h(Lbl, { T }, "Cambios automáticos · estados y datos"),
           h(Historial, { T, eventos: ev }))));
   }
 
@@ -568,9 +627,10 @@
     const [alta, setAlta] = useState(null); // null | "trabajando" | { duplicados } | { error }
     const [nv, setNv] = useState({ modelo: "", matricula: "", bastidor: "" });
     const [vMsg, setVMsg] = useState(""); const [vTrab, setVTrab] = useState(false);
-    const [psBC, setPsBC] = useState([]);
+    const [psBC, setPsBC] = useState([]); const [gars, setGars] = useState([]);
     const cargar = async () => {
       const { data } = await sb().from("crm_clientes").select("*").eq("id", id).maybeSingle(); setC(data);
+      sb().from("garantias").select("id,numero,estado,fabricante,reclamacion_no,vehiculo,created_at").eq("cliente_id", id).order("created_at", { ascending: false }).then((r) => setGars(r.data || []));
       if (data) setD({ nombre: data.nombre || "", apellidos: data.apellidos || "", telefono: data.telefono || "", email: data.email || "", nif: data.nif || "", direccion: data.direccion || "", cp: data.cp || "", ciudad: data.ciudad || "", provincia: data.provincia || "", notas: data.notas || "" });
       const e = await sb().from("crm_eventos").select("*").eq("cliente_id", id).order("at", { ascending: false }).limit(30); setEv(e.data || []);
       if (data && data.bc_no) { const ps = await sb().from("bc_productos_servicio").select("*").eq("cliente_no", data.bc_no).eq("activo", true); setPsBC(ps.data || []); } else setPsBC([]);
@@ -590,6 +650,7 @@
       } else setMsg("Guardado.");
       cargar(); onChanged && onChanged();
     };
+    const setTipoCli = async (v) => { const { error } = await sb().from("crm_clientes").update({ tipo_cliente: v }).eq("id", c.id); setMsg(error ? "No se pudo guardar: " + error.message : `Marcado como ${lbl(TIPOS_CLI, v).toLowerCase()}.`); cargar(); onChanged && onChanged(); };
     const vehiculos = (Array.isArray(c.vehiculos) ? c.vehiculos : []).map(asVeh);
     const setVehiculos = async (lista) => { const { error } = await sb().from("crm_clientes").update({ vehiculos: lista }).eq("id", c.id); if (error) setVMsg("No se pudo guardar: " + error.message); await cargar(); return !error; };
     const sincVehiculos = async () => {
@@ -645,6 +706,8 @@
         h("div", { style: { display: "flex", flexWrap: "wrap", gap: "14px", alignItems: "flex-start" } },
           h("div", { style: { flex: "1 1 300px", display: "flex", flexDirection: "column", gap: "14px" } },
             h(Box, { T }, h(Lbl, { T }, "Datos"),
+              h("div", { "data-crm-tipo-cli": "1", style: { marginBottom: "10px" } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo de cliente"),
+                h(Seg, { T, opts: TIPOS_CLI, value: c.tipo_cliente || "", onChange: setTipoCli }), !c.tipo_cliente ? h("div", { style: { fontSize: "12px", color: T.warn, marginTop: "4px" } }, "Sin marcar: ¿nos compró el vehículo?") : null),
               h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
                 [["nombre", "Nombre"], ["apellidos", "Apellidos"], ["telefono", "Teléfono"], ["email", "Email"], ["direccion", "Dirección"], ["ciudad", "Población"], ["provincia", "Provincia"], ["cp", "Código postal"], ["nif", "NIF (opcional)"]].map(([k, l]) =>
                   h(Field, { key: k, T, label: l, style: k === "direccion" ? { gridColumn: "1 / -1" } : null }, h("input", { value: d[k] || "", onChange: set(k), style: I }))),
@@ -678,6 +741,10 @@
               susCasos.length ? susCasos.map((x) => h("button", { key: x.id, onClick: () => onCaso(x.id), style: { display: "flex", width: "100%", justifyContent: "space-between", gap: "8px", alignItems: "center", padding: "8px 0", border: "none", borderTop: `1px solid ${T.border}`, background: "transparent", cursor: "pointer", fontFamily: "inherit", color: T.ink, textAlign: "left" } },
                 h("span", null, h("b", null, lbl(TIPOS, x.tipo)), h("div", { style: { fontSize: "12px", color: T.inkSoft } }, `${fFecha(x.created_at)} · ${x.vehiculo || "—"}`)), h(Chip, { c: est(x.estado).c }, est(x.estado).l)))
                 : h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Sin casos abiertos.")),
+            gars.length ? h(Box, { T, tone: "violeta" }, h(Lbl, { T }, `Garantías (${gars.length})`),
+              gars.map((g) => h("button", { key: g.id, onClick: () => abrirExpediente(g.id), style: { display: "flex", width: "100%", justifyContent: "space-between", gap: "8px", alignItems: "center", padding: "8px 0", border: "none", borderTop: `1px solid ${T.border}`, background: "transparent", cursor: "pointer", fontFamily: "inherit", color: T.ink, textAlign: "left" } },
+                h("span", null, h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.numero), " ", g.fabricante || "", h("div", { style: { fontSize: "12px", color: T.inkSoft } }, `${fFecha(g.created_at)} · ${vehTxt(g.vehiculo) || "—"}${g.reclamacion_no ? " · código " + g.reclamacion_no : ""}`)),
+                h("span", { style: { fontSize: "12px", fontWeight: 800, color: T.rust } }, "abrir →")))) : null,
             h(Box, { T }, h(Lbl, { T }, "En Business Central"),
               !c.bc_no ? h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Aún no está en BC.")
                 : docs.length ? h("div", { style: { overflowX: "auto" } }, h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "460px" } },
@@ -695,12 +762,14 @@
     const manana = new Date(Date.now() + 864e5); manana.setHours(13, 0, 0, 0);
     const [q, setQ] = useState(""); const [res, setRes] = useState([]);
     const [sel, setSel] = useState(inicial.cliente ? { tipo: "crm", c: inicial.cliente } : inicial.bc ? { tipo: "bc", bc: inicial.bc } : null);
-    const [cli, setCli] = useState({ nombre: "", apellidos: "", telefono: "", email: "", direccion: "", ciudad: "", provincia: "", cp: "" });
+    const [cli, setCli] = useState({ nombre: "", apellidos: "", telefono: "", email: "", nif: "", direccion: "", ciudad: "", provincia: "", cp: "" });
     const [veh, setVeh] = useState({ modelo: "", matricula: "", bastidor: "" });
     const [vehSel, setVehSel] = useState(null); // índice de un vehículo ya existente
     const [vehBC, setVehBC] = useState([]);
     const [k, setK] = useState({ canal: "telefono", tipo: "reparacion", consulta: "", proxima_accion: "Responder al cliente", responsable: me, fecha_limite: toLocalInput(manana.toISOString()) });
     const [err, setErr] = useState(""); const [guardando, setGuardando] = useState(false);
+    const [tipoCli, setTipoCli] = useState(inicial.cliente && inicial.cliente.tipo_cliente ? inicial.cliente.tipo_cliente : "");
+    useEffect(() => { if (sel && sel.tipo === "crm" && sel.c.tipo_cliente) setTipoCli(sel.c.tipo_cliente); }, [sel]);
     const t = useRef(null);
     useEffect(() => { clearTimeout(t.current); if (sel || qSafe(q).length < 2) { setRes([]); return; } t.current = setTimeout(async () => { try { setRes(await buscarClientes(q)); } catch (e) {} }, 300); }, [q, sel]);
     useEffect(() => {
@@ -717,6 +786,7 @@
       if (!sel && !cli.nombre.trim()) { setErr("Falta el nombre del cliente."); return; }
       if (!sel && !cli.telefono.trim() && !cli.email.trim()) { setErr("Pon al menos teléfono o email."); return; }
       if (!k.consulta.trim()) { setErr("Escribe la consulta."); return; }
+      if (!tipoCli) { setErr("Indica si es cliente propio (nos compró el vehículo) o externo."); return; }
       setGuardando(true);
       try {
         let cliente;
@@ -729,6 +799,7 @@
           const row = {}; Object.keys(cli).forEach((f) => { row[f] = cli[f].trim() || null; });
           const ins = await sb().from("crm_clientes").insert(row).select("*").single(); if (ins.error) throw ins.error; cliente = ins.data;
         }
+        if (cliente.tipo_cliente !== tipoCli) { const up = await sb().from("crm_clientes").update({ tipo_cliente: tipoCli }).eq("id", cliente.id).select("*").single(); if (!up.error) cliente = up.data; }
         let elegido = vehSel != null ? vehExistentes[vehSel] : null;
         if (!elegido && veh.modelo.trim()) { elegido = { modelo: veh.modelo.trim(), matricula: normMat(veh.matricula), bastidor: normMat(veh.bastidor) }; Object.keys(elegido).forEach((f) => { if (!elegido[f]) delete elegido[f]; }); }
         let nuevoVeh = false;
@@ -740,6 +811,7 @@
         const ins = await sb().from("crm_casos").insert({ cliente_id: cliente.id, vehiculo: elegido ? vehTxt(elegido) : null, canal: k.canal, tipo: k.tipo, consulta: k.consulta.trim(), estado: "pendiente_respuesta", rama: k.tipo === "garantia" ? "garantia" : null,
           proxima_accion: k.proxima_accion.trim() || null, responsable: k.responsable || null, fecha_limite: fromLocalInput(k.fecha_limite) }).select("*, cliente:crm_clientes(*)").single();
         if (ins.error) throw ins.error;
+        if (k.tipo === "garantia") { const r = await pasarAGarantias(ins.data); onCreated(r.caso, r.gid); return; }
         onCreated(ins.data);
       } catch (e) { setErr("No se pudo guardar: " + (e.message || e)); setGuardando(false); }
     };
@@ -758,11 +830,13 @@
             h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-6px" } }, "¿No aparece? Rellena sus datos y se crea como cliente nuevo. El alta en BC se hace después desde su ficha, con un botón."),
             h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" } },
               [["nombre", "Nombre"], ["apellidos", "Apellidos"], ["telefono", "Teléfono"], ["email", "Email"]].map(([f, l]) => h(Field, { key: f, T, label: l }, h("input", { value: cli[f], onChange: setC(f), style: I }))),
-              h(Field, { T, label: "Dirección", style: { gridColumn: "1 / -1" } }, h("input", { value: cli.direccion, onChange: setC("direccion"), style: I })),
+              h(Field, { T, label: "Dirección" }, h("input", { value: cli.direccion, onChange: setC("direccion"), style: I })),
+              h(Field, { T, label: "NIF (opcional)" }, h("input", { value: cli.nif, onChange: setC("nif"), style: I })),
               h(Field, { T, label: "Población" }, h("input", { value: cli.ciudad, onChange: setC("ciudad"), style: I })),
               h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" } },
                 h(Field, { T, label: "Provincia" }, h("input", { value: cli.provincia, onChange: setC("provincia"), style: I })),
                 h(Field, { T, label: "C.P." }, h("input", { value: cli.cp, onChange: setC("cp"), style: I }))))),
+        h("div", { "data-crm-nueva-tipocli": "1" }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo de cliente"), h(Seg, { T, opts: TIPOS_CLI, value: tipoCli, onChange: setTipoCli })),
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Vehículo"),
           vehExistentes.length ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" } },
             vehExistentes.map((v, i) => h("button", { key: i, type: "button", onClick: () => setVehSel(vehSel === i ? null : i), style: { ...btn(T, "s"), background: vehSel === i ? T.ink : T.surface, color: vehSel === i ? T.bg : T.ink } }, vehTxt(v) || v.modelo)),
@@ -774,16 +848,17 @@
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Canal"), h(Seg, { T, opts: CANALES, value: k.canal, onChange: (v) => setK((x) => ({ ...x, canal: v })) })),
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(Seg, { T, opts: TIPOS, value: k.tipo, onChange: (v) => setK((x) => ({ ...x, tipo: v })) })),
         h(Field, { T, label: "Consulta" }, h("textarea", { rows: 3, value: k.consulta, onChange: setKk("consulta"), placeholder: "¿Qué necesita?", style: { ...I, resize: "vertical" } })),
-        h("div", { style: { background: T.bg, borderRadius: "12px", padding: "12px", display: "grid", gridTemplateColumns: "2fr 1fr 1.3fr", gap: "10px" } },
+        k.tipo === "garantia" ? h("div", { style: { background: CH.violeta.bg, border: `1px solid ${CH.violeta.bd}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px" } }, "Al guardar se abre su expediente en la pestaña Garantías, donde se pide la información al cliente, se analiza, se tramita y se da cita.")
+        : h("div", { style: { background: T.bg, borderRadius: "12px", padding: "12px", display: "grid", gridTemplateColumns: "2fr 1fr 1.3fr", gap: "10px" } },
           h(Field, { T, label: "Próxima acción" }, h("input", { value: k.proxima_accion, onChange: setKk("proxima_accion"), style: I })),
           h(Field, { T, label: "Responsable" }, h("select", { value: k.responsable, onChange: setKk("responsable"), style: I }, h("option", { value: "" }, "—"), RESPONSABLES.map((r) => h("option", { key: r, value: r }, r)))),
           h(Field, { T, label: "Para" }, h("input", { type: "datetime-local", value: k.fecha_limite, onChange: setKk("fecha_limite"), style: I }))),
         err ? h("div", { style: { color: T.danger, fontSize: "13px" } }, err) : null,
-        h("div", { style: { display: "flex", justifyContent: "flex-end", gap: "10px" } }, h("button", { onClick: onClose, style: btn(T) }, "Cancelar"), h("button", { "data-crm-guardar-consulta": "1", onClick: guardar, disabled: guardando, style: btn(T, "p") }, guardando ? "Guardando…" : "Guardar consulta"))));
+        h("div", { style: { display: "flex", justifyContent: "flex-end", gap: "10px" } }, h("button", { onClick: onClose, style: btn(T) }, "Cancelar"), h("button", { "data-crm-guardar-consulta": "1", onClick: guardar, disabled: guardando, style: btn(T, "p") }, guardando ? "Guardando…" : k.tipo === "garantia" ? "Guardar y pasar a Garantías" : "Guardar consulta"))));
   }
 
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, aviso, vence, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
