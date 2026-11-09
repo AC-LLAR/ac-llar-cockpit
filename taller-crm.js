@@ -13,7 +13,7 @@
   const ANA_TEL = "34654775591";
   const RESPONSABLES = ["Sebastián", "Gonzalo", "Pablo"];
   const CANALES = [["telefono", "Teléfono"], ["email", "Email"], ["whatsapp", "WhatsApp"], ["presencial", "En persona"], ["otro", "Otro"]];
-  const TIPOS = [["reparacion", "Reparación"], ["piezas", "Solo piezas"], ["gas", "Revisión de gas"], ["estanqueidad", "Estanqueidad"], ["garantia", "Garantía"], ["otro", "Otro"]];
+  const TIPOS = [["reparacion", "Reparación"], ["piezas", "Solo piezas"], ["gas", "Revisión de gas"], ["estanqueidad", "Estanqueidad"], ["aire", "Aire acondicionado"], ["peritaje", "Peritaje"], ["garantia", "Garantía"], ["otro", "Otro"]];
   const TIPOS_CLI = [["propio", "Cliente propio"], ["externo", "Cliente externo"]];
   // Bitácora: lo que se va haciendo con el cliente o el fabricante. Fecha, hora y autor los pone el servidor.
   const CLASES = [["respondi", "Le respondí"], ["pedi", "Le pedí"], ["respondio", "Me respondió"], ["fabricante", "Fabricante"], ["llamada", "Llamada"], ["nota", "Nota"]];
