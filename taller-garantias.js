@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -132,7 +132,7 @@
     const [cargando, setCargando] = useState(true); const [error, setError] = useState("");
     const [filtro, setFiltro] = useState("abiertas"); const [txt, setTxt] = useState("");
     const [abierta, setAbierta] = useState(() => { try { const x = localStorage.getItem("acllar_garantia_abrir"); if (x) localStorage.removeItem("acllar_garantia_abrir"); return x || null; } catch (e) { return null; } });
-    const [nuevo, setNuevo] = useState(false);
+    const [nuevo, setNuevo] = useState(false); const [nueva, setNueva] = useState(false);
     const rol = window.acllarCloud && window.acllarCloud.rol ? window.acllarCloud.rol() : null;
     const sinAcceso = rol && rol !== "admin" && rol !== "comercial";
     const cargar = async () => {
@@ -164,8 +164,10 @@
     return h("div", { "data-garantias": "1", style: { fontFamily: F.body, color: T.ink, display: "flex", flexDirection: "column", gap: "16px" } },
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center" } },
         h("input", { type: "search", value: txt, onChange: (e) => setTxt(e.target.value), "aria-label": "Buscar garantía", placeholder: "Buscar por nº, código de garantía, matrícula, bastidor, cliente o fabricante", style: { ...inp(T), flex: "1 1 420px", height: "46px", borderRadius: "12px" } }),
-        h("button", { "data-g-nuevo": "1", onClick: () => setNuevo(true), title: "Las garantías de clientes entran por Casos → Nueva consulta (tipo Garantía)", style: { ...btn(T), height: "46px", padding: "0 18px" } }, "+ Expediente de la flota")),
-      h("div", { style: { fontSize: "12.5px", color: T.inkSoft, marginTop: "-6px" } }, "Las garantías de clientes entran por la pestaña Casos: al marcar una consulta como Garantía aparece aquí."),
+        h("button", { "data-g-nueva": "1", onClick: () => setNueva(true), style: { ...btn(T, "p"), height: "46px", padding: "0 20px", fontSize: "15px" } }, "+ Nueva garantía")),
+      h("div", { style: { display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", alignItems: "center", marginTop: "-6px" } },
+        h("span", { style: { fontSize: "12.5px", color: T.inkSoft } }, "Garantías de vehículos de clientes, propios o externos. Cada una queda también registrada como caso en Casos."),
+        h("button", { "data-g-nuevo": "1", onClick: () => setNuevo(true), style: { border: "none", background: "transparent", color: T.inkSoft, fontSize: "12px", textDecoration: "underline", cursor: "pointer", fontFamily: "inherit" } }, "¿Es un vehículo de nuestra flota de alquiler?")),
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: "10px" } }, kpis.map(([n, l, c]) => h("div", { key: l, style: { background: T.surface, border: `1px solid ${n ? CH[c].bd : T.border}`, borderRadius: "12px", padding: "10px 14px", minWidth: "150px" } },
         h("div", { style: { fontSize: "22px", fontWeight: 800, color: n ? CH[c].fg : T.inkFaint } }, n), h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, l)))),
       h(Seg, { T, opts: [["abiertas", "Abiertas"], ["cerradas", "Cerradas"], ["todas", "Todas"]], value: filtro, onChange: setFiltro }),
@@ -177,15 +179,16 @@
             h("thead", null, h("tr", null, ["Nº", "Vehículo", "Cliente", "Fabricante · código", "Estado", "Horas sol. / apr.", "Piezas", "Entrada"].map((x) => h("th", { key: x, style: th }, x)))),
             h("tbody", null, visibles.map((g) => { const t = tot[g.id], s = est(g.estado), av = aviso(g, t);
               return h("tr", { key: g.id, "data-g-fila": g.numero, onClick: () => setAbierta(g.id), style: { cursor: "pointer" } },
-                h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 } }, g.numero, g.tipo === "chasis" ? h("div", null, h(Chip, { c: "gris" }, "Chasis")) : null),
+                h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, whiteSpace: "nowrap" } }, g.numero, g.tipo === "chasis" ? h("div", null, h(Chip, { c: "gris" }, "Chasis")) : null),
                 h("td", { style: td }, h("b", null, vehLinea(g.vehiculo)), g.vehiculo && g.vehiculo.bastidor ? h("div", { style: { fontSize: "12px", color: T.inkSoft, fontFamily: "'JetBrains Mono', monospace" } }, g.vehiculo.bastidor) : null),
-                h("td", { style: td }, esCli(g) ? h(React.Fragment, null, nombreCli(g.cliente), h(ChipCli, { c: g.cliente })) : h(Chip, { c: "azul" }, "Flota")),
+                h("td", { style: td }, esCli(g) ? h(React.Fragment, null, nombreCli(g.cliente), h(ChipCli, { c: g.cliente })) : h(Chip, { c: "gris" }, "Flota alquiler")),
                 h("td", { style: td }, g.fabricante || "—", g.reclamacion_no ? h("div", { style: { fontSize: "12px", fontFamily: "'JetBrains Mono', monospace", color: T.inkSoft } }, g.reclamacion_no) : null),
                 h("td", { style: td }, h(Chip, { c: s.c }, s.l), av ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: av.c }, av.t)) : null),
                 h("td", { style: { ...td, fontWeight: 700, whiteSpace: "nowrap" } }, fmtH(t.horas), t.conAprob ? h("span", { style: { color: t.aprobadas < t.horas ? CH.rojo.fg : CH.verde.fg } }, " / " + fmtH(t.aprobadas)) : null),
                 h("td", { style: td }, t.lineasPieza ? `${t.piezas} (${t.lineasPieza - t.pendFab - t.pendStock}/${t.lineasPieza} recibidas)` : "—"),
                 h("td", { style: td }, fFecha(g.fecha_entrada || g.created_at)));
             })))),
+      nueva ? h(NuevaConsulta, { T, F, inicial: { tipo: "garantia" }, onClose: () => setNueva(false), onCreated: (c, gid) => { setNueva(false); cargar(); if (gid) setAbierta(gid); } }) : null,
       nuevo ? h(NuevoExpediente, { T, F, flota, onClose: () => setNuevo(false), onCreated: (g) => { setNuevo(false); cargar(); setAbierta(g.id); } }) : null,
       abierta ? h(Expediente, { T, F, id: abierta, onClose: () => { setAbierta(null); cargar(); }, onChanged: cargar }) : null);
   }
@@ -222,8 +225,8 @@
     return h("div", { role: "dialog", "aria-label": "Nuevo expediente", style: { position: "fixed", inset: 0, zIndex: 1250, display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "30px 12px" } },
       h("div", { onClick: onClose, style: { position: "fixed", inset: 0, background: "rgba(15,27,46,.35)" } }),
       h("div", { style: { position: "relative", width: "min(640px, 100%)", background: T.surface, borderRadius: "16px", border: `1px solid ${T.border}`, padding: "22px", display: "flex", flexDirection: "column", gap: "14px", fontFamily: F.body, color: T.ink } },
-        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h("div", { style: { fontFamily: F.display, fontSize: "22px", fontWeight: 800 } }, "Expediente de la flota"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×")),
-        h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, "Para vehículos de alquiler. Las garantías de clientes se crean desde Casos."),
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h("div", { style: { fontFamily: F.display, fontSize: "22px", fontWeight: 800 } }, "Garantía de un vehículo de alquiler"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×")),
+        h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, "Solo para vehículos de nuestra flota. Para un cliente usa “+ Nueva garantía”."),
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(Seg, { T, opts: [["garantia", "Garantía"], ["chasis", "Gestión de chasis"]], value: tipo, onChange: setTipo })),
         ac ? h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", background: T.bg, borderRadius: "10px", padding: "10px 12px" } }, h("b", null, `${ac.id} · ${[ac.brand, ac.model].filter(Boolean).join(" ")} · ${ac.plate || "sin matrícula"}`), h("button", { onClick: () => setAc(null), style: btn(T, "s") }, "Cambiar"))
           : h("div", null, h(Field, { T, label: "Vehículo de la flota" }, h("input", { value: qf, onChange: (e) => setQf(e.target.value), placeholder: (flota || []).length ? "AC-xxx, modelo o matrícula" : "La flota no está disponible en esta cuenta", style: I })),
@@ -353,7 +356,7 @@
     return h(Drawer, { T, onClose, width: 900, label: "Expediente de garantía" },
       h("div", { style: { background: T.surface, padding: "18px 22px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: "6px" } },
         h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" } },
-          h("span", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" } }, `${chasis ? "Gestión de chasis" : "Garantía"} · ${g.fabricante || "sin fabricante"} · ${esCli(g) ? "Cliente" : "Flota"}`),
+          h("span", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" } }, `${chasis ? "Gestión de chasis" : "Garantía"} · ${g.fabricante || "sin fabricante"} · ${esCli(g) ? (cli && cli.tipo_cliente === "propio" ? "Cliente propio" : cli && cli.tipo_cliente === "externo" ? "Cliente externo" : "Cliente") : "Vehículo de alquiler"}`),
           h("div", { style: { display: "flex", gap: "8px", alignItems: "center" } }, h("button", { "data-g-resumen": "1", onClick: resumen, style: btn(T) }, "Resumen para el fabricante"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×"))),
         h("div", { style: { fontFamily: F.display, fontSize: "24px", fontWeight: 800 } }, h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.numero), " · ", vehLinea(g.vehiculo)),
         h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", fontSize: "13.5px", color: T.inkSoft } },

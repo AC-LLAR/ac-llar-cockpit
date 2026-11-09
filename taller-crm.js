@@ -766,7 +766,7 @@
     const [veh, setVeh] = useState({ modelo: "", matricula: "", bastidor: "" });
     const [vehSel, setVehSel] = useState(null); // índice de un vehículo ya existente
     const [vehBC, setVehBC] = useState([]);
-    const [k, setK] = useState({ canal: "telefono", tipo: "reparacion", consulta: "", proxima_accion: "Responder al cliente", responsable: me, fecha_limite: toLocalInput(manana.toISOString()) });
+    const [k, setK] = useState({ canal: "telefono", tipo: inicial.tipo || "reparacion", consulta: "", proxima_accion: "Responder al cliente", responsable: me, fecha_limite: toLocalInput(manana.toISOString()) });
     const [err, setErr] = useState(""); const [guardando, setGuardando] = useState(false);
     const [tipoCli, setTipoCli] = useState(inicial.cliente && inicial.cliente.tipo_cliente ? inicial.cliente.tipo_cliente : "");
     useEffect(() => { if (sel && sel.tipo === "crm" && sel.c.tipo_cliente) setTipoCli(sel.c.tipo_cliente); }, [sel]);
@@ -818,7 +818,7 @@
     return h("div", { role: "dialog", "aria-label": "Nueva consulta", style: { position: "fixed", inset: 0, zIndex: 1250, display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "30px 12px" } },
       h("div", { onClick: onClose, style: { position: "fixed", inset: 0, background: "rgba(15,27,46,.35)" } }),
       h("div", { style: { position: "relative", width: "min(680px, 100%)", background: T.surface, borderRadius: "16px", border: `1px solid ${T.border}`, boxShadow: "0 20px 50px rgba(15,27,46,.2)", padding: "22px", display: "flex", flexDirection: "column", gap: "14px", fontFamily: F.body, color: T.ink } },
-        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h("div", { style: { fontFamily: F.display, fontSize: "22px", fontWeight: 800 } }, "Nueva consulta"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×")),
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h("div", { style: { fontFamily: F.display, fontSize: "22px", fontWeight: 800 } }, k.tipo === "garantia" ? "Nueva garantía" : "Nueva consulta"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×")),
         sel ? h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", background: T.bg, borderRadius: "10px", padding: "10px 12px" } },
           h("span", null, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Cliente: "), h("b", null, sel.tipo === "crm" ? nombreCli(sel.c) : sel.bc.nombre), " ", (sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: T.inkSoft } }, sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) : h(Chip, { c: "ambar" }, "sin alta en BC")),
           h("button", { onClick: () => setSel(null), style: btn(T, "s") }, "Cambiar"))
@@ -847,8 +847,8 @@
             h("input", { value: veh.bastidor, onChange: (e) => setVeh((x) => ({ ...x, bastidor: e.target.value })), placeholder: "Bastidor (opcional)", "aria-label": "Bastidor", style: I })) : null),
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Canal"), h(Seg, { T, opts: CANALES, value: k.canal, onChange: (v) => setK((x) => ({ ...x, canal: v })) })),
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(Seg, { T, opts: TIPOS, value: k.tipo, onChange: (v) => setK((x) => ({ ...x, tipo: v })) })),
-        h(Field, { T, label: "Consulta" }, h("textarea", { rows: 3, value: k.consulta, onChange: setKk("consulta"), placeholder: "¿Qué necesita?", style: { ...I, resize: "vertical" } })),
-        k.tipo === "garantia" ? h("div", { style: { background: CH.violeta.bg, border: `1px solid ${CH.violeta.bd}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px" } }, "Al guardar se abre su expediente en la pestaña Garantías, donde se pide la información al cliente, se analiza, se tramita y se da cita.")
+        h(Field, { T, label: k.tipo === "garantia" ? "Qué problema tiene (lo que cuenta el cliente)" : "Consulta" }, h("textarea", { rows: 3, value: k.consulta, onChange: setKk("consulta"), placeholder: k.tipo === "garantia" ? "p. ej. gotea la claraboya trasera cuando llueve" : "¿Qué necesita?", style: { ...I, resize: "vertical" } })),
+        k.tipo === "garantia" ? h("div", { style: { background: CH.violeta.bg, border: `1px solid ${CH.violeta.bd}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px" } }, "Al guardar se abre su expediente de garantía, donde se piden las fotos al cliente, se analiza, se tramita con el fabricante y se da cita. Queda también registrado como caso.")
         : h("div", { style: { background: T.bg, borderRadius: "12px", padding: "12px", display: "grid", gridTemplateColumns: "2fr 1fr 1.3fr", gap: "10px" } },
           h(Field, { T, label: "Próxima acción" }, h("input", { value: k.proxima_accion, onChange: setKk("proxima_accion"), style: I })),
           h(Field, { T, label: "Responsable" }, h("select", { value: k.responsable, onChange: setKk("responsable"), style: I }, h("option", { value: "" }, "—"), RESPONSABLES.map((r) => h("option", { key: r, value: r }, r)))),
@@ -860,5 +860,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, aviso, vence, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
