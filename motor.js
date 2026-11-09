@@ -2737,15 +2737,22 @@ const inicioOT =
     React.createElement("div", { role: "tablist", "aria-label": "Área", style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "6px", padding: "12px 0 10px" } },
       GRUPOS.map((g) => { const on = grupo === g.id; return React.createElement("button", { key: g.id, role: "tab", "aria-selected": on, onClick: () => onChange(g.id),
         style: { cursor: "pointer", padding: "8px 18px", borderRadius: "10px", border: `1px solid ${on ? T.ink : T.border}`, background: on ? T.ink : T.surface, color: on ? T.bg : T.inkSoft, fontFamily: F.body, fontSize: "12.5px", fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", transition: "all 120ms" } }, g.label); })));
-  // Pestañas del grupo TALLER. "Clientes" = CRM de taller (vive en taller-crm.js → window.AcllarCRM).
-  const TALLER_TABS = [{ id: "clientes", label: "Clientes" }];
-  const TallerView = () => React.createElement(React.Fragment, null,
-    React.createElement("nav", { style: { background: T.surface, borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, padding: "0 28px", position: "sticky", top: 0, zIndex: 40 } },
-      React.createElement("div", { style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "2px", minHeight: "44px", alignItems: "center" } },
-        TALLER_TABS.map((t) => React.createElement("button", { key: t.id, style: { display: "flex", alignItems: "center", padding: "12px 14px", border: "none", background: "transparent", color: T.rust, fontSize: "14px", fontWeight: 700, fontFamily: F.body, borderBottom: `2.5px solid ${T.rust}`, marginBottom: "-1px", cursor: "default" } }, t.label)))),
-    React.createElement("main", { style: { maxWidth: "1280px", margin: "0 auto", padding: "24px 28px 60px" } },
-      window.AcllarCRM ? React.createElement(window.AcllarCRM, { T, F })
-        : React.createElement("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "40px 28px", textAlign: "center", color: T.inkSoft } }, "No se pudo cargar el CRM de taller. Recarga la página (F5).")));
+  // Pestañas del grupo TALLER. "Clientes" = CRM de taller (taller-crm.js → window.AcllarCRM);
+  // "Garantías" = expedientes de garantía/chasis (taller-garantias.js → window.AcllarGarantias).
+  const TALLER_TABS = [{ id: "clientes", label: "Clientes" }, { id: "garantias", label: "Garant\xEDas" }];
+  const TallerView = ({ flota }) => {
+    const [tab, setTab] = useState(() => { try { const x = localStorage.getItem("acllar_taller_tab"); return TALLER_TABS.some((t) => t.id === x) ? x : "clientes"; } catch (e) { return "clientes"; } });
+    const ir = (id) => { setTab(id); try { localStorage.setItem("acllar_taller_tab", id); } catch (e) {} };
+    useEffect(() => { const f = (e) => { if (e && e.detail) ir(e.detail); }; window.addEventListener("acllar-taller-tab", f); return () => window.removeEventListener("acllar-taller-tab", f); }, []);
+    const Comp = tab === "garantias" ? window.AcllarGarantias : window.AcllarCRM;
+    return React.createElement(React.Fragment, null,
+      React.createElement("nav", { style: { background: T.surface, borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, padding: "0 28px", position: "sticky", top: 0, zIndex: 40 } },
+        React.createElement("div", { role: "tablist", style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "2px", minHeight: "44px", alignItems: "center" } },
+          TALLER_TABS.map((t) => { const on = t.id === tab; return React.createElement("button", { key: t.id, role: "tab", "aria-selected": on, "data-taller-tab": t.id, onClick: () => ir(t.id), style: { display: "flex", alignItems: "center", padding: "12px 14px", border: "none", background: "transparent", color: on ? T.rust : T.inkSoft, fontSize: "14px", fontWeight: 700, fontFamily: F.body, borderBottom: `2.5px solid ${on ? T.rust : "transparent"}`, marginBottom: "-1px", cursor: "pointer" } }, t.label); }))),
+      React.createElement("main", { style: { maxWidth: "1280px", margin: "0 auto", padding: "24px 28px 60px" } },
+        Comp ? React.createElement(Comp, { key: tab, T, F, flota: flota || [] })
+          : React.createElement("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "40px 28px", textAlign: "center", color: T.inkSoft } }, "No se pudo cargar esta pesta\xF1a. Recarga la p\xE1gina (F5).")));
+  };
   // Cuentas de comercial: solo ven TALLER → Clientes, sin datos de alquiler.
   const CRMShell = () => {
     const [theme, setTheme] = useState(() => { try { return localStorage.getItem("acllar_theme") === "dark" ? "dark" : "light"; } catch (e) { return "light"; } });
@@ -2757,7 +2764,7 @@ const inicioOT =
       React.createElement("header", { style: { background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "14px 28px" } },
         React.createElement("div", { style: { maxWidth: "1280px", margin: "0 auto", display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" } },
           React.createElement("img", { src: theme === "dark" ? "logo-acllar-dark.png" : "logo-acllar.png", alt: "AC\xB7LLAR", style: { height: "38px", width: "auto", display: "block" } }),
-          React.createElement("div", { style: { fontFamily: F.display, fontWeight: 800, fontSize: "18px" } }, "Taller \xB7 Clientes"),
+          React.createElement("div", { style: { fontFamily: F.display, fontWeight: 800, fontSize: "18px" } }, "Taller"),
           React.createElement("div", { style: { flex: 1 } }),
           React.createElement("span", { style: { fontSize: "12.5px", color: T.inkSoft } }, C.usuario ? C.usuario() : ""),
           React.createElement("button", { onClick: cambiarTema, title: "Tema claro / oscuro", "aria-label": "Cambiar tema", style: { cursor: "pointer", border: `1px solid ${T.border}`, background: T.bg, color: T.ink, borderRadius: "10px", padding: "7px 10px", fontSize: "14px" } }, theme === "dark" ? "\u2600\uFE0F" : "\u{1F319}"),
@@ -15634,7 +15641,7 @@ Backup: ${(parsed.vehicles || []).length} veh\xEDculos, ${(parsed.damages || [])
           openRevision(row); return "ok";
         }, onMarkReturned: handleMarkReturned, onSetEstado: handleSetWorkflowStatus, onLeftUnreviewed: handleLeftUnreviewed, onDepositEvent: handleDepositEvent, onMarkAviso: handleMarkAvisoOficina, fichaId: grupo === "alquiler" && activeTab === "fleet" && view === "detail" ? selectedVehicleId : null, oculto: activeTab === "voz",
         onAbrirDanos: (id) => { setGrupo("alquiler"); setActiveTab("fleet"); setDetailOrigin("fleet"); setSelectedVehicleId(id); setView("detail"); setTimeout(() => { try { window.dispatchEvent(new CustomEvent("acllar-voz-ver", { detail: { danos: true } })); } catch (e) {} }, 350); },
-        onReparar: handleVozReparar, onCargo: handleChangeDamageCargo, onRestaurar: handleVozRestaurar }), React.createElement(GroupBar, { grupo, onChange: setGrupo }), grupo === "alquiler" && /* @__PURE__ */ React.createElement(TabBar, { active: activeTab, onChange: setActiveTab }), grupo === "taller" && React.createElement(TallerView, null), grupo === "alquiler" && watchStatus === "active" && /* @__PURE__ */ React.createElement("div", { style: {
+        onReparar: handleVozReparar, onCargo: handleChangeDamageCargo, onRestaurar: handleVozRestaurar }), React.createElement(GroupBar, { grupo, onChange: setGrupo }), grupo === "alquiler" && /* @__PURE__ */ React.createElement(TabBar, { active: activeTab, onChange: setActiveTab }), grupo === "taller" && React.createElement(TallerView, { flota: state.vehicles }), grupo === "alquiler" && watchStatus === "active" && /* @__PURE__ */ React.createElement("div", { style: {
       display: "flex",
       alignItems: "center",
       gap: "10px",

@@ -150,6 +150,7 @@
   // ---------- historial ----------
   function textoEvento(ev) {
     const d = ev.detalle || {};
+    if (/^g_/.test(ev.tipo) && window.AcllarGarantias) return "Expediente de garantía · " + window.AcllarGarantias._test.textoEventoG(ev);
     if (ev.tipo === "creado") return ev.caso_id ? `Caso creado · ${lbl(CANALES, d.canal)} · ${lbl(TIPOS, d.tipo)}` : "Cliente creado en el CRM";
     if (ev.tipo === "nota") return `Nota: “${ev.texto}”`;
     if (ev.tipo === "llamada") return `Llamada: “${ev.texto}”`;
@@ -185,7 +186,7 @@
     const [sync, setSync] = useState(null);
     const [cargando, setCargando] = useState(true);
     const [error, setError] = useState("");
-    const [casoId, setCasoId] = useState(null);
+    const [casoId, setCasoId] = useState(() => { try { const x = localStorage.getItem("acllar_crm_abrir_caso"); if (x) localStorage.removeItem("acllar_crm_abrir_caso"); return x || null; } catch (e) { return null; } });
     const [clienteId, setClienteId] = useState(null);
     const [nueva, setNueva] = useState(null); // null | {} | { bc } | { cliente }
     const [filtroTodos, setFiltroTodos] = useState("abiertos");
@@ -361,6 +362,30 @@
   }
 
   // ---------- ficha del caso ----------
+  // Expediente(s) de la pestaña Garantías ligados a este caso
+  function ExpedientesCaso({ T, caso }) {
+    const [lista, setLista] = useState(null); const [err, setErr] = useState(""); const [creando, setCreando] = useState(false);
+    useEffect(() => { let vivo = true; sb().from("garantias").select("id,numero,estado,fabricante").eq("caso_id", caso.id).order("created_at").then((r) => { if (vivo) setLista(r.data || []); }); return () => { vivo = false; }; }, [caso.id]);
+    const ir = (id) => { try { localStorage.setItem("acllar_garantia_abrir", id); } catch (e) {} window.dispatchEvent(new CustomEvent("acllar-taller-tab", { detail: "garantias" })); };
+    const crear = async () => {
+      if (!window.AcllarGarantiasCrear) { setErr("La pestaña Garantías no está cargada. Recarga la página."); return; }
+      setCreando(true); setErr("");
+      const vs = ((caso.cliente && caso.cliente.vehiculos) || []).map(asVeh);
+      const v = vs.find((x) => vehTxt(x) === caso.vehiculo) || (vs.length === 1 && !caso.vehiculo ? vs[0] : null) || { modelo: caso.vehiculo || "" };
+      const fx = String(caso.garantia_fabricante || "").toLowerCase();
+      const fab = /benimar/.test(fx) ? "Benimar" : /roller/.test(fx) ? "Roller Team" : fx ? "Otro" : "Benimar";
+      try {
+        const g = await window.AcllarGarantiasCrear({ tipo: "garantia", origen: "cliente", cliente: caso.cliente, vehiculo: { modelo: v.modelo || "", matricula: v.matricula || "", bastidor: v.bastidor || "", bc_ps: v.bc_ps || null }, fabricante: fab, descripcion: caso.consulta || "", caso_id: caso.id });
+        ir(g.id);
+      } catch (e) { setErr("No se pudo crear el expediente: " + (e.message || e)); setCreando(false); }
+    };
+    if (lista == null) return null;
+    return h("div", { "data-crm-expedientes": "1", style: { marginTop: "12px", borderTop: `1px solid ${T.border}`, paddingTop: "10px" } },
+      h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "6px" } }, "Expediente (horas, piezas y fotos)"),
+      lista.map((g) => h("button", { key: g.id, onClick: () => ir(g.id), style: { ...btn(T, "s"), marginRight: "6px", marginBottom: "6px" } }, `${g.numero} · ${g.fabricante || ""} → abrir`)),
+      !lista.length ? h("button", { "data-crm-crear-exp": "1", onClick: crear, disabled: creando, style: { ...btn(T, "p"), width: "100%" } }, creando ? "Creando…" : "Abrir expediente de garantía") : null,
+      err ? h("div", { style: { color: T.danger, fontSize: "12.5px", marginTop: "6px" } }, err) : null);
+  }
   function CasoPanel({ T, F, caso, bcServ, vinculados, sugerencia, syncAhora, sincronizando, onRefresh, onClose, onSaved, onCliente }) {
     const [altaMsg, setAltaMsg] = useState(null); // null | "trabajando" | { txt, dup }
     const [ev, setEv] = useState([]);
@@ -509,7 +534,8 @@
           h(Row, { T, k: "Resultado" }, caso.garantia_resultado || "—"),
           (caso.garantia_resultado === "parcial" || d.garantia_cubre || d.garantia_no_cubre) ? h("div", { style: { display: "grid", gap: "8px", marginTop: "6px" } },
             h(Field, { T, label: "Qué cubre el fabricante" }, h("textarea", { rows: 2, value: d.garantia_cubre, onChange: set("garantia_cubre"), style: { ...I, resize: "vertical" } })),
-            h(Field, { T, label: "Qué NO cubre (se cobra)" }, h("textarea", { rows: 2, value: d.garantia_no_cubre, onChange: set("garantia_no_cubre"), style: { ...I, resize: "vertical" } }))) : null) : null,
+            h(Field, { T, label: "Qué NO cubre (se cobra)" }, h("textarea", { rows: 2, value: d.garantia_no_cubre, onChange: set("garantia_no_cubre"), style: { ...I, resize: "vertical" } }))) : null,
+          h(ExpedientesCaso, { T, caso })) : null,
 
         h(Box, { T }, h(Lbl, { T }, "Datos del caso"),
           h("div", { "data-crm-datos-caso": "1", style: { display: "grid", gap: "10px" } },
@@ -758,4 +784,6 @@
 
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, aviso, vence, textoEvento };
+  // Piezas compartidas con taller-garantias.js
+  window.AcllarCRM._ui = { h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
