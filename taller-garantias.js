@@ -25,32 +25,25 @@
   const EST = {
     consulta: { l: "Consulta recibida", c: "ambar", f: 0, sig: [{ to: "esperando_info", l: "Información pedida al cliente (sin enviar mensaje)", set: { info_pedida_at: NOW }, cli: true }, { to: "analisis", l: "Ya tengo fotos y explicación: analizar" }] },
     esperando_info: { l: "Esperando información del cliente", c: "ambar", f: 0, sig: [{ to: "analisis", l: "Información recibida: analizar" }] },
-    analisis: { l: "En análisis", c: "violeta", f: 1, sig: [
-      { to: "cliente_informado", l: "Cliente informado (sin enviar mensaje)", set: { cliente_informado_at: NOW }, cli: true },
-      { to: "tramitada", l: "Tramitada en la web del fabricante", set: { tramitada_at: NOW }, codigo: true, flota: true },
+    analisis: { l: "Análisis y respuesta al cliente", c: "violeta", f: 1, sig: [
+      { to: "tramitada", l: "Tramitada con el fabricante", set: { tramitada_at: NOW }, codigo: true },
       { to: "cerrada", l: "No es garantía: cerrar" }] },
-    cliente_informado: { l: "Cliente informado · por tramitar", c: "ambar", f: 1, sig: [{ to: "tramitada", l: "Tramitada en la web del fabricante", set: { tramitada_at: NOW }, codigo: true }, { to: "cerrada", l: "No se tramita: cerrar" }] },
-    tramitada: { l: "Tramitada · esperando al fabricante", c: "azul", f: 2, sig: [
+    tramitada: { l: "Tramitada · esperando respuesta", c: "azul", f: 2, sig: [
       { to: "aprobada", l: "Aprobada", set: { resultado: "aprobada", resolucion_at: NOW } },
       { to: "parcial", l: "Aprobada parcial", set: { resultado: "parcial", resolucion_at: NOW } },
       { to: "rechazada", l: "Rechazada", set: { resultado: "rechazada", resolucion_at: NOW } }] },
-    aprobada: { l: "Aprobada", c: "verde", f: 3, sig: [{ to: "piezas_recibidas", l: "Piezas recibidas" }, { to: "cita_asignada", l: "No hay piezas que esperar: dar cita", cita: true }] },
-    parcial: { l: "Aprobada parcial", c: "violeta", f: 3, sig: [{ to: "piezas_recibidas", l: "Piezas recibidas" }, { to: "cita_asignada", l: "No hay piezas que esperar: dar cita", cita: true }] },
+    aprobada: { l: "Aprobada · dar cita", c: "verde", f: 3, sig: [{ to: "cita_asignada", l: "Dar cita (cuando estén las piezas)", cita: true }] },
+    parcial: { l: "Aprobada parcial · dar cita", c: "violeta", f: 3, sig: [{ to: "cita_asignada", l: "Dar cita (cuando estén las piezas)", cita: true }, { to: "cerrada", l: "No se repara: cerrar" }] },
     rechazada: { l: "Rechazada por el fabricante", c: "rojo", f: 2, sig: [{ to: "cerrada", l: "Cerrar expediente" }] },
-    piezas_recibidas: { l: "Piezas recibidas · dar cita", c: "verde", f: 3, sig: [{ to: "cita_asignada", l: "Dar cita", cita: true }] },
-    cita_asignada: { l: "Cita asignada", c: "verde", f: 3, sig: [{ to: "en_reparacion", l: "Vehículo recibido: en reparación" }] },
-    en_reparacion: { l: "En reparación", c: "violeta", f: 4, sig: [{ to: "reparado", l: "Reparación terminada" }] },
-    reparado: { l: "Reparado", c: "ambar", f: 4, sig: [{ to: "avisado", l: "Cliente avisado para recoger (sin enviar mensaje)", cli: true }, { to: "entregado", l: "Devuelto a la flota", flota: true }] },
-    avisado: { l: "Avisado para recoger", c: "azul", f: 5, sig: [{ to: "entregado", l: "Entregado al cliente" }] },
-    entregado: { l: "Entregado", c: "verde", f: 5, sig: [{ to: "cerrada", l: "Cerrar expediente" }] },
+    cita_asignada: { l: "Cita asignada", c: "verde", f: 3, sig: [{ to: "cerrada", l: "Reparación terminada: cerrar expediente" }, { to: "cita_asignada", l: "Cambiar la cita", cita: true }] },
     abierta: { l: "Abierta", c: "ambar", chasis: true, sig: [{ to: "cita_pedida", l: "Cita pedida en el concesionario" }, { to: "cerrada", l: "Cerrar" }] },
     cita_pedida: { l: "Cita pedida", c: "azul", chasis: true, sig: [{ to: "en_concesionario", l: "Vehículo en el concesionario" }, { to: "cerrada", l: "Cerrar" }] },
     en_concesionario: { l: "En el concesionario", c: "violeta", chasis: true, sig: [{ to: "cerrada", l: "Vuelto · cerrar" }] },
-    cerrada: { l: "Cerrada", c: "gris", fin: true, f: 6, sig: [] },
+    cerrada: { l: "Cerrada", c: "gris", fin: true, f: 4, sig: [] },
   };
   const est = (k) => EST[k] || { l: k || "—", c: "gris", sig: [] };
-  const FASES = ["Consulta", "Análisis", "Fabricante", "Piezas · cita", "Taller", "Entrega"];
-  const CAMPOS = { estado: "Estado", fabricante: "Fabricante", descripcion: "Descripción", reclamacion_no: "Código de garantía", resultado: "Resultado", concesionario: "Concesionario", cita_at: "Cita",
+  const FASES = ["Consulta", "Análisis y respuesta", "Fabricante", "Cita", "Cerrado"];
+  const CAMPOS = { estado: "Estado", fabricante: "Fabricante", descripcion: "Descripción", reclamacion_no: "Nº de gestión del fabricante", resultado: "Resultado", concesionario: "Concesionario", cita_at: "Cita",
     notas: "Notas", vehiculo: "Vehículo", tramitada_at: "Tramitada", resolucion_at: "Resolución", horas: "Horas solicitadas", horas_aprobadas: "Horas aprobadas", mecanico: "Mecánico", fecha: "Fecha",
     referencia: "Referencia", cantidad: "Cantidad", origen_pieza: "Origen", repuesto_recibido_at: "Recibida / repuesta", anulada: "Anulada", fecha_entrada: "Entrada", archivado: "Archivado",
     cobertura: "Cobertura", info_pedida_at: "Información pedida", cliente_informado_at: "Cliente informado", presupuesto_caso_id: "Presupuesto en Casos", tipo: "Tipo", caso_id: "Caso" };
@@ -75,13 +68,15 @@
     const hEst = horas(g.estado_at || g.created_at), d = Math.floor(hEst / 24), e = g.estado;
     if (e === "consulta" && esCli(g) && hEst > 24) return { t: `Sin pedir información ${Math.max(1, d)} d`, c: "rojo" };
     if (e === "esperando_info" && hEst > 120) return { t: `Cliente sin enviar info ${d} d`, c: "rojo" };
-    if (e === "analisis" && hEst > 72) return { t: esCli(g) ? `Sin responder al cliente ${d} d` : `Sin tramitar ${d} d`, c: "rojo" };
-    if (e === "cliente_informado" && hEst > 72) return { t: `Sin tramitar ${d} d`, c: "ambar" };
-    if (e === "tramitada" && hEst > 168) return { t: `Fabricante ${d} d sin respuesta`, c: "rojo" };
-    if ((e === "aprobada" || e === "parcial") && t && t.pendFab && hEst > 720) return { t: `Piezas sin llegar ${d} d`, c: "ambar" };
-    if (e === "piezas_recibidas" && hEst > 72) return { t: `Piezas aquí, sin cita ${d} d`, c: "rojo" };
-    if (e === "reparado" && esCli(g)) return mismoDia(new Date(g.estado_at || g.created_at), new Date()) ? { t: "Avisar hoy al cliente", c: "ambar" } : { t: "Reparado · sin avisar", c: "rojo" };
-    if ((e === "entregado" || e === "avisado") && t && t.pendStock) return { t: `${t.pendStock} pieza${t.pendStock > 1 ? "s" : ""} por reponer`, c: "ambar" };
+    if (e === "analisis" && hEst > 72) return { t: esCli(g) && !g.cliente_informado_at ? `Sin responder al cliente ${d} d` : `Sin tramitar ${d} d`, c: "rojo" };
+    if (e === "tramitada" && hEst > 168) return { t: `Fabricante ${d} d sin respuesta`, c: "ambar" };
+    if ((e === "aprobada" || e === "parcial") && hEst > 72) return { t: `Sin cita ${d} d`, c: "rojo" };
+    if (e === "cita_asignada" && g.cita_at) {
+      const hc = (new Date(g.cita_at) - Date.now()) / 36e5;
+      if (t && t.pendFab && hc < 72) return { t: `Faltan ${t.pendFab} pieza${t.pendFab > 1 ? "s" : ""} para la cita`, c: "rojo" };
+      if (hc < -24) return { t: "Cita pasada: ¿cerrar?", c: "ambar" };
+    }
+    if (e === "cerrada" && t && t.pendStock) return { t: `${t.pendStock} pieza${t.pendStock > 1 ? "s" : ""} por reponer`, c: "ambar" };
     if (e === "cita_pedida" && g.cita_at && new Date(g.cita_at) < new Date()) return { t: "Cita pasada", c: "ambar" };
     return null;
   }
@@ -153,17 +148,17 @@
       .filter((g) => !q || [g.numero, g.fabricante, g.descripcion, g.reclamacion_no, vehLinea(g.vehiculo), g.vehiculo && g.vehiculo.bastidor, g.cliente && nombreCli(g.cliente)].join(" ").toLowerCase().includes(q));
     const cuenta = (xs) => lista.filter((g) => xs.includes(g.estado)).length;
     const kpis = [
-      [cuenta(["consulta", "esperando_info", "analisis"]), "Por responder al cliente", "ambar"],
-      [cuenta(["cliente_informado"]), "Por tramitar", "ambar"],
+      [cuenta(["consulta", "esperando_info", "analisis"]), "Consulta y análisis", "ambar"],
       [cuenta(["tramitada"]), "Esperando al fabricante", "azul"],
-      [cuenta(["aprobada", "parcial", "piezas_recibidas", "cita_asignada", "en_reparacion", "reparado", "avisado"]), "Piezas · cita · taller", "violeta"],
-      [lista.filter((g) => !est(g.estado).fin && ["avisado", "entregado"].includes(g.estado) && tot[g.id].pendStock).length, "Piezas por reponer", "violeta"],
+      [cuenta(["aprobada", "parcial"]), "Por dar cita", "ambar"],
+      [cuenta(["cita_asignada"]), "Con cita", "verde"],
+      [lista.filter((g) => g.estado === "cerrada" && tot[g.id].pendStock).length, "Piezas por reponer", "violeta"],
     ];
     const th = { fontSize: "11px", letterSpacing: ".08em", textTransform: "uppercase", color: T.inkSoft, fontWeight: 700, padding: "10px 12px", textAlign: "left", borderBottom: `1.5px solid ${T.border}` };
     const td = { padding: "11px 12px", borderBottom: `1px solid ${T.border}`, verticalAlign: "top", fontSize: "13.5px" };
     return h("div", { "data-garantias": "1", style: { fontFamily: F.body, color: T.ink, display: "flex", flexDirection: "column", gap: "16px" } },
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center" } },
-        h("input", { type: "search", value: txt, onChange: (e) => setTxt(e.target.value), "aria-label": "Buscar garantía", placeholder: "Buscar por nº, código de garantía, matrícula, bastidor, cliente o fabricante", style: { ...inp(T), flex: "1 1 420px", height: "46px", borderRadius: "12px" } }),
+        h("input", { type: "search", value: txt, onChange: (e) => setTxt(e.target.value), "aria-label": "Buscar garantía", placeholder: "Buscar por nº, nº de gestión del fabricante, matrícula, bastidor, cliente o fabricante", style: { ...inp(T), flex: "1 1 420px", height: "46px", borderRadius: "12px" } }),
         h("button", { "data-g-nueva": "1", onClick: () => setNueva(true), style: { ...btn(T, "p"), height: "46px", padding: "0 20px", fontSize: "15px" } }, "+ Nueva garantía")),
       h("div", { style: { display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", alignItems: "center", marginTop: "-6px" } },
         h("span", { style: { fontSize: "12.5px", color: T.inkSoft } }, "Garantías de vehículos de clientes, propios o externos. Cada una queda también registrada como caso en Casos."),
@@ -176,7 +171,7 @@
         : !visibles.length ? h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft } }, lista.length ? "Ningún expediente con ese filtro." : "Todavía no hay expedientes.")
         : h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", overflowX: "auto" } },
           h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "1040px" } },
-            h("thead", null, h("tr", null, ["Nº", "Vehículo", "Cliente", "Fabricante · código", "Estado", "Horas sol. / apr.", "Piezas", "Entrada"].map((x) => h("th", { key: x, style: th }, x)))),
+            h("thead", null, h("tr", null, ["Nº", "Vehículo", "Cliente", "Fabricante · nº gestión", "Estado", "Horas sol. / apr.", "Piezas", "Entrada"].map((x) => h("th", { key: x, style: th }, x)))),
             h("tbody", null, visibles.map((g) => { const t = tot[g.id], s = est(g.estado), av = aviso(g, t);
               return h("tr", { key: g.id, "data-g-fila": g.numero, onClick: () => setAbierta(g.id), style: { cursor: "pointer" } },
                 h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, whiteSpace: "nowrap" } }, g.numero, g.tipo === "chasis" ? h("div", null, h(Chip, { c: "gris" }, "Chasis")) : null),
@@ -306,8 +301,9 @@
     const botonesMsg = (tipo) => {
       const pares = [["wa", "💬 WhatsApp"], ["email", "✉ Email"]];
       if (tipo === "pedir") return pares.map(([c, l]) => h("button", { key: c, "data-g-msg": "pedir-" + c, disabled: trab, onClick: () => enviar(c, MSG.pedir(g), `Garantía ${g.numero} · fotos y explicación`, "pedi", "Le pedí fotos y explicación", g.estado === "consulta" ? { estado: "esperando_info", info_pedida_at: NOW } : { info_pedida_at: NOW }), style: btn(T, c === "wa" ? "wa" : undefined) }, `${l}: pedir fotos y explicación`));
-      if (tipo === "cobertura") return pares.map(([c, l]) => h("button", { key: c, "data-g-msg": "cob-" + c, disabled: trab || !problemas.length || sinCob > 0, onClick: () => enviar(c, MSG.cobertura(g, ls), `Garantía ${g.numero} · qué cubre`, "respondi", "Le informé de qué cubre la garantía", { estado: "cliente_informado", cliente_informado_at: NOW }), style: btn(T, c === "wa" ? "wa" : undefined) }, `${l}: informar qué cubre y qué no`));
+      if (tipo === "cobertura") return pares.map(([c, l]) => h("button", { key: c, "data-g-msg": "cob-" + c, disabled: trab || !problemas.length || sinCob > 0, onClick: () => enviar(c, MSG.cobertura(g, ls), `Garantía ${g.numero} · qué cubre`, "respondi", "Le informé de qué cubre la garantía", { cliente_informado_at: NOW }), style: btn(T, c === "wa" ? "wa" : undefined) }, `${l}: informar qué cubre y qué no`));
       if (tipo === "cita") return g.cita_at ? pares.map(([c, l]) => h("button", { key: c, disabled: trab, onClick: () => enviar(c, MSG.cita(g), `Cita en el taller · ${g.numero}`, "respondi", "Le confirmé la cita"), style: btn(T, c === "wa" ? "wa" : undefined) }, `${l}: enviar la cita`)) : null;
+      if (tipo === "telefono") return h("button", { key: "tel", disabled: trab, onClick: async () => { await anotar("respondi", "Le informé por teléfono de qué cubre la garantía y qué no."); await upd({ cliente_informado_at: NOW }, "Anotado en la bitácora."); }, style: btn(T, "s") }, "Se lo dije por teléfono");
       if (tipo === "recoger") return pares.map(([c, l]) => h("button", { key: c, disabled: trab, onClick: () => enviar(c, MSG.recoger(g), `Tu vehículo está listo · ${g.numero}`, "respondi", "Le avisé para recoger", { estado: "avisado" }), style: btn(T, c === "wa" ? "wa" : undefined) }, `${l}: avisar para recoger`));
       return null;
     };
@@ -360,14 +356,14 @@
           h("div", { style: { display: "flex", gap: "8px", alignItems: "center" } }, h("button", { "data-g-resumen": "1", onClick: resumen, style: btn(T) }, "Resumen para el fabricante"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×"))),
         h("div", { style: { fontFamily: F.display, fontSize: "24px", fontWeight: 800 } }, h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.numero), " · ", vehLinea(g.vehiculo)),
         h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", fontSize: "13.5px", color: T.inkSoft } },
-          g.reclamacion_no ? h(Chip, { c: "violeta" }, "Código de garantía ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.reclamacion_no)) : !chasis && s.f >= 2 ? h(Chip, { c: "rojo" }, "Sin código de garantía") : null,
+          g.reclamacion_no ? h(Chip, { c: "violeta" }, "Nº de gestión ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.reclamacion_no)) : !chasis && s.f >= 2 && !s.fin ? h(Chip, { c: "rojo" }, "Falta el nº de gestión del fabricante") : null,
           g.vehiculo && g.vehiculo.bastidor ? h("span", null, "Bastidor ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.vehiculo.bastidor)) : null,
           h("span", null, `Entrada ${fFecha(g.fecha_entrada || g.created_at)}`), g.cita_at ? h("span", null, `· Cita ${fLarga(g.cita_at)}`) : null),
         g.caso_id ? h("button", { onClick: () => irA("clientes", { acllar_crm_abrir_caso: g.caso_id }), style: { ...btn(T, "s"), alignSelf: "flex-start" } }, "Ver el caso de entrada en Casos →") : null),
       h("div", { style: { padding: "16px 22px 40px", display: "flex", flexDirection: "column", gap: "14px" } },
         // ---- estado y siguiente paso
         h(Box, { T }, h(Lbl, { T }, "Recorrido"),
-          !chasis ? h("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center", marginBottom: "12px" } }, FASES.map((_, i) => lblFase(i))) : null,
+          !chasis ? h("div", { style: { display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center", marginBottom: "12px" } }, FASES.map((_, i) => lblFase(i))) : null,
           h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Estado actual"), h(Chip, { c: s.c, style: { fontSize: "13px" } }, s.l), av ? h(Chip, { c: av.c }, av.t) : null),
           !s.fin ? h("div", { style: { display: "flex", flexDirection: "column", gap: "6px", marginTop: "10px" } },
             h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, "Siguiente paso"),
@@ -375,15 +371,17 @@
             esCli(g) && g.estado === "analisis" ? h(React.Fragment, null,
               !problemas.length ? h("div", { style: { fontSize: "12.5px", color: T.warn } }, "Añade abajo los problemas y marca en cada uno si cubre la garantía.")
                 : sinCob ? h("div", { style: { fontSize: "12.5px", color: T.warn } }, `Falta marcar la cobertura de ${sinCob} problema${sinCob > 1 ? "s" : ""}.`) : null,
-              h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } }, botonesMsg("cobertura"))) : null,
+              g.cliente_informado_at ? h("div", { style: { fontSize: "12.5px", color: T.ok } }, `✓ Cliente informado el ${fLarga(g.cliente_informado_at)}`) : null,
+              h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" } }, botonesMsg("cobertura"), botonesMsg("telefono"))) : null,
             esCli(g) && g.estado === "cita_asignada" ? h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } }, botonesMsg("cita")) : null,
-            esCli(g) && g.estado === "reparado" ? h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } }, botonesMsg("recoger")) : null,
-            sig.map((x, i) => h("button", { key: i, "data-g-paso": x.to, disabled: trab, onClick: () => paso(x), style: { ...btn(T, i === 0 && !(esCli(g) && ["consulta", "esperando_info", "analisis", "reparado"].includes(g.estado)) ? "p" : undefined), textAlign: "left" } }, "→ " + x.l)),
+            g.estado === "cita_asignada" && t.pendFab ? h("div", { style: { fontSize: "12.5px", color: T.warn } }, `Antes de la cita marca como recibidas las piezas del fabricante (faltan ${t.pendFab}).`) : null,
+            sig.map((x, i) => h("button", { key: i, "data-g-paso": x.to, disabled: trab, onClick: () => paso(x), style: { ...btn(T, i === 0 && !(esCli(g) && ["consulta", "esperando_info"].includes(g.estado)) ? "p" : undefined), textAlign: "left" } }, "→ " + x.l)),
             pend ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px", flexWrap: "wrap" } },
-              pend.codigo ? h(Field, { T, label: "Código de garantía que da el fabricante", style: { flex: 1 } }, h("input", { "data-g-codigo": "1", value: codTmp, onChange: (e) => setCodTmp(e.target.value), placeholder: "p. ej. RT-2026-0554", style: { ...I, fontFamily: "'JetBrains Mono', monospace" } })) : null,
+              pend.codigo ? h(Field, { T, label: "Nº de gestión que da el fabricante", style: { flex: 1 } }, h("input", { "data-g-codigo": "1", value: codTmp, onChange: (e) => setCodTmp(e.target.value), placeholder: "p. ej. RT-2026-0554", style: { ...I, fontFamily: "'JetBrains Mono', monospace" } })) : null,
               pend.cita ? h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", "data-g-cita": "1", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })) : null,
-              h("button", { "data-g-confirmar": "1", disabled: trab || (pend.cita && !citaTmp), onClick: () => paso(pend), style: btn(T, "p") }, pend.codigo && !codTmp.trim() ? "Confirmar sin código" : "Confirmar"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
-            pend && pend.codigo ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Antes de confirmar, revisa que en cada trabajo estén las horas que solicitas.") : null)
+              h("button", { "data-g-confirmar": "1", disabled: trab || (pend.cita && !citaTmp), onClick: () => paso(pend), style: btn(T, "p") }, pend.codigo && !codTmp.trim() ? "Confirmar sin nº (lo pongo luego)" : "Confirmar"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
+            pend && pend.codigo ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "El seguimiento de la tramitación se lleva en la web del fabricante. Aquí solo queda la fecha y su nº de gestión.") : null,
+            pend && pend.cita ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Pon una fecha en la que sepas que las piezas ya habrán llegado.") : null)
             : h("button", { onClick: () => upd({ estado: chasis ? "abierta" : "analisis" }, "Expediente reabierto."), style: { ...btn(T), marginTop: "10px" } }, "Reabrir"),
           msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: /^No se|no tiene/.test(msg) ? T.danger : T.ok } }, msg) : null),
 
@@ -436,7 +434,7 @@
           h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
             h("div", { style: { gridColumn: "1 / -1" } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(Seg, { T, opts: [["garantia", "Garantía (vivienda)"], ["chasis", "Gestión de chasis"]], value: d.tipo, onChange: (v) => setD((x) => ({ ...x, tipo: v, fabricante: v === "chasis" ? "Ford" : "Benimar" })) })),
             h(Field, { T, label: "Fabricante" }, h("select", { value: d.fabricante, onChange: (e) => setD((x) => ({ ...x, fabricante: e.target.value })), style: I }, h("option", { value: "" }, "—"), (d.tipo === "chasis" ? FAB_CHASIS : FAB_GARANTIA).map(([k, l]) => h("option", { key: k, value: k }, l)))),
-            h(Field, { T, label: chasis ? "Nº de expediente / referencia" : "Código de garantía (lo da el fabricante)" }, h("input", { "data-g-cod-datos": "1", value: d.reclamacion_no, onChange: (e) => setD((x) => ({ ...x, reclamacion_no: e.target.value })), style: { ...I, fontFamily: "'JetBrains Mono', monospace" } })),
+            h(Field, { T, label: chasis ? "Nº de expediente / referencia" : "Nº de gestión del fabricante" }, h("input", { "data-g-cod-datos": "1", value: d.reclamacion_no, onChange: (e) => setD((x) => ({ ...x, reclamacion_no: e.target.value })), style: { ...I, fontFamily: "'JetBrains Mono', monospace" } })),
             chasis ? h(Field, { T, label: "Concesionario / taller oficial" }, h("input", { value: d.concesionario, onChange: (e) => setD((x) => ({ ...x, concesionario: e.target.value })), style: I })) : null,
             h(Field, { T, label: "Cita" }, h("input", { type: "datetime-local", value: d.cita_at || "", onChange: (e) => setD((x) => ({ ...x, cita_at: e.target.value })), style: I })),
             h(Field, { T, label: "Modelo" }, h("input", { value: d.modelo, onChange: (e) => setD((x) => ({ ...x, modelo: e.target.value })), style: I })),
@@ -549,7 +547,7 @@
       section{break-inside:avoid}.bar{margin-bottom:12px}@media print{.bar{display:none}}</style></head><body>
       <div class="bar"><button onclick="print()">Imprimir / guardar PDF</button></div>
       <h1>${esc(g.numero)} · ${g.tipo === "chasis" ? "Gestión de chasis" : "Reclamación de garantía"} · ${esc(g.fabricante || "")}</h1>
-      <div class="meta"><div><b>Código de garantía</b> <span class="m">${esc(g.reclamacion_no || "—")}</span></div><div><b>Entrada</b> ${esc(fFecha(g.fecha_entrada || g.created_at))}</div>
+      <div class="meta"><div><b>Nº de gestión</b> <span class="m">${esc(g.reclamacion_no || "—")}</span></div><div><b>Entrada</b> ${esc(fFecha(g.fecha_entrada || g.created_at))}</div>
       <div><b>Vehículo</b> ${esc(v.modelo || "")}</div><div><b>Matrícula</b> <span class="m">${esc(v.matricula || "")}</span></div>
       <div><b>Bastidor</b> <span class="m">${esc(v.bastidor || "")}</span></div><div><b>${g.origen === "flota" ? "Flota" : "Cliente"}</b> ${esc(g.origen === "flota" ? v.ac || "" : nombreCli(g.cliente))}</div></div>
       ${g.descripcion ? `<p>${esc(g.descripcion)}</p>` : ""}
