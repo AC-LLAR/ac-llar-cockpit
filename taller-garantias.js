@@ -16,7 +16,6 @@
   const POSVENTA = "post-venta@ac-llar.com";
   const FAB_GARANTIA = [["Benimar", "Benimar"], ["Roller Team", "Roller Team"], ["Otro", "Otro"]];
   const FAB_CHASIS = [["Ford", "Ford"], ["Fiat", "Fiat"], ["Peugeot", "Peugeot"], ["Otro", "Otro"]];
-  const MECANICOS = ["Ali", "Carlos", "Hugo", "Agente externo", "Sebastián"];
   const ETIQUETAS = [["cliente", "Enviada por el cliente"], ["antes", "Antes"], ["despues", "Después"], ["pieza", "Pieza cambiada"], ["otra", "Otra"]];
   const COBERTURA = [["cubre", "Cubre garantía"], ["no_cubre", "No cubre"], ["a_valorar", "A valorar"]];
   const COB_C = { cubre: "verde", no_cubre: "rojo", a_valorar: "ambar" };
@@ -44,7 +43,7 @@
   const est = (k) => EST[k] || { l: k || "—", c: "gris", sig: [] };
   const FASES = ["Consulta", "Análisis y respuesta", "Fabricante", "Cita", "Cerrado"];
   const CAMPOS = { estado: "Estado", fabricante: "Fabricante", descripcion: "Descripción", reclamacion_no: "Nº de gestión del fabricante", resultado: "Resultado", concesionario: "Concesionario", cita_at: "Cita",
-    notas: "Notas", vehiculo: "Vehículo", tramitada_at: "Tramitada", resolucion_at: "Resolución", horas: "Horas solicitadas", horas_aprobadas: "Horas aprobadas", mecanico: "Mecánico", fecha: "Fecha",
+    notas: "Notas", vehiculo: "Vehículo", tramitada_at: "Tramitada", resolucion_at: "Resolución", horas: "Horas", horas_aprobadas: "Horas aprobadas", mecanico: "Mecánico", fecha: "Fecha",
     referencia: "Referencia", cantidad: "Cantidad", origen_pieza: "Origen", repuesto_recibido_at: "Recibida / repuesta", anulada: "Anulada", fecha_entrada: "Entrada", archivado: "Archivado",
     cobertura: "Cobertura", info_pedida_at: "Información pedida", cliente_informado_at: "Cliente informado", presupuesto_caso_id: "Presupuesto en Casos", tipo: "Tipo", caso_id: "Caso" };
   const num = (v) => (v === "" || v == null ? null : Number(String(v).replace(",", ".")));
@@ -53,16 +52,14 @@
   const esCli = (g) => g.origen === "cliente";
   const pasoVisible = (g) => (x) => (!x.cli || esCli(g)) && (!x.flota || !esCli(g));
 
+  // Cada problema lleva sus horas de resolución; las piezas cuelgan del problema.
   function totales(lineas) {
     const vivas = lineas.filter((l) => !l.anulada);
-    const tr = vivas.filter((l) => l.tipo === "trabajo"), pz = vivas.filter((l) => l.tipo === "pieza");
-    const porMec = {}; tr.forEach((l) => { const k = l.mecanico || "—"; porMec[k] = (porMec[k] || 0) + Number(l.horas || 0); });
-    const aprob = tr.filter((l) => l.horas_aprobadas != null);
-    return { horas: tr.reduce((a, l) => a + Number(l.horas || 0), 0), aprobadas: aprob.reduce((a, l) => a + Number(l.horas_aprobadas || 0), 0), conAprob: aprob.length, trabajos: tr.length,
+    const pr = vivas.filter((l) => l.tipo === "problema"), pz = vivas.filter((l) => l.tipo === "pieza");
+    const tr = vivas.filter((l) => l.tipo === "trabajo"); // expedientes antiguos
+    return { horas: [...pr, ...tr].reduce((a, l) => a + Number(l.horas || 0), 0),
       piezas: pz.reduce((a, l) => a + Number(l.cantidad || 0), 0), lineasPieza: pz.length,
-      pendFab: pz.filter((l) => l.origen_pieza === "fabricante" && !l.repuesto_recibido_at).length,
-      pendStock: pz.filter((l) => l.origen_pieza !== "fabricante" && !l.repuesto_recibido_at).length,
-      problemas: vivas.filter((l) => l.tipo === "problema").length, porMec };
+      pendFab: pz.filter((l) => !l.repuesto_recibido_at).length, problemas: pr.length };
   }
   function aviso(g, t) {
     const hEst = horas(g.estado_at || g.created_at), d = Math.floor(hEst / 24), e = g.estado;
@@ -76,14 +73,13 @@
       if (t && t.pendFab && hc < 72) return { t: `Faltan ${t.pendFab} pieza${t.pendFab > 1 ? "s" : ""} para la cita`, c: "rojo" };
       if (hc < -24) return { t: "Cita pasada: ¿cerrar?", c: "ambar" };
     }
-    if (e === "cerrada" && t && t.pendStock) return { t: `${t.pendStock} pieza${t.pendStock > 1 ? "s" : ""} por reponer`, c: "ambar" };
     if (e === "cita_pedida" && g.cita_at && new Date(g.cita_at) < new Date()) return { t: "Cita pasada", c: "ambar" };
     return null;
   }
   function textoEventoG(ev) {
     const d = ev.detalle || {};
     if (ev.tipo === "g_creado") return `Expediente ${d.numero} creado`;
-    if (ev.tipo === "g_linea_alta") return d.linea === "problema" ? `Problema añadido: “${d.descripcion || ""}”` : d.linea === "trabajo" ? `Trabajo: “${d.descripcion || ""}” · ${fmtH(d.horas)} solicitadas` : `Pieza: ${d.cantidad || 1} × ${d.referencia ? d.referencia + " " : ""}${d.descripcion || ""}`;
+    if (ev.tipo === "g_linea_alta") return d.linea === "problema" ? `Problema añadido: “${d.descripcion || ""}”${d.horas ? " · " + fmtH(d.horas) : ""}` : d.linea === "trabajo" ? `Trabajo: “${d.descripcion || ""}” · ${fmtH(d.horas)} solicitadas` : `Pieza: ${d.cantidad || 1} × ${d.referencia ? d.referencia + " " : ""}${d.descripcion || ""}`;
     if (ev.texto) return ev.texto;
     const pref = ev.tipo === "g_linea_cambio" ? `${d.linea === "problema" ? "Problema" : d.linea === "trabajo" ? "Trabajo" : "Pieza"} “${d.descripcion || ""}”: ` : "";
     const partes = Object.keys(d).filter((k) => ev.tipo !== "g_linea_cambio" || !["linea", "descripcion"].includes(k)).map((k) => {
@@ -152,7 +148,6 @@
       [cuenta(["tramitada"]), "Esperando al fabricante", "azul"],
       [cuenta(["aprobada", "parcial"]), "Por dar cita", "ambar"],
       [cuenta(["cita_asignada"]), "Con cita", "verde"],
-      [lista.filter((g) => g.estado === "cerrada" && tot[g.id].pendStock).length, "Piezas por reponer", "violeta"],
     ];
     const th = { fontSize: "11px", letterSpacing: ".08em", textTransform: "uppercase", color: T.inkSoft, fontWeight: 700, padding: "10px 12px", textAlign: "left", borderBottom: `1.5px solid ${T.border}` };
     const td = { padding: "11px 12px", borderBottom: `1px solid ${T.border}`, verticalAlign: "top", fontSize: "13.5px" };
@@ -171,7 +166,7 @@
         : !visibles.length ? h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft } }, lista.length ? "Ningún expediente con ese filtro." : "Todavía no hay expedientes.")
         : h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", overflowX: "auto" } },
           h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "1040px" } },
-            h("thead", null, h("tr", null, ["Nº", "Vehículo", "Cliente", "Fabricante · nº gestión", "Estado", "Horas sol. / apr.", "Piezas", "Entrada"].map((x) => h("th", { key: x, style: th }, x)))),
+            h("thead", null, h("tr", null, ["Nº", "Vehículo", "Cliente", "Fabricante · nº gestión", "Estado", "Horas", "Piezas", "Entrada"].map((x) => h("th", { key: x, style: th }, x)))),
             h("tbody", null, visibles.map((g) => { const t = tot[g.id], s = est(g.estado), av = aviso(g, t);
               return h("tr", { key: g.id, "data-g-fila": g.numero, onClick: () => setAbierta(g.id), style: { cursor: "pointer" } },
                 h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, whiteSpace: "nowrap" } }, g.numero, g.tipo === "chasis" ? h("div", null, h(Chip, { c: "gris" }, "Chasis")) : null),
@@ -179,8 +174,8 @@
                 h("td", { style: td }, esCli(g) ? h(React.Fragment, null, nombreCli(g.cliente), h(ChipCli, { c: g.cliente })) : h(Chip, { c: "gris" }, "Flota alquiler")),
                 h("td", { style: td }, g.fabricante || "—", g.reclamacion_no ? h("div", { style: { fontSize: "12px", fontFamily: "'JetBrains Mono', monospace", color: T.inkSoft } }, g.reclamacion_no) : null),
                 h("td", { style: td }, h(Chip, { c: s.c }, s.l), av ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: av.c }, av.t)) : null),
-                h("td", { style: { ...td, fontWeight: 700, whiteSpace: "nowrap" } }, fmtH(t.horas), t.conAprob ? h("span", { style: { color: t.aprobadas < t.horas ? CH.rojo.fg : CH.verde.fg } }, " / " + fmtH(t.aprobadas)) : null),
-                h("td", { style: td }, t.lineasPieza ? `${t.piezas} (${t.lineasPieza - t.pendFab - t.pendStock}/${t.lineasPieza} recibidas)` : "—"),
+                h("td", { style: { ...td, fontWeight: 700, whiteSpace: "nowrap" } }, fmtH(t.horas)),
+                h("td", { style: td }, t.lineasPieza ? `${t.piezas} (${t.lineasPieza - t.pendFab}/${t.lineasPieza} recibidas)` : "—"),
                 h("td", { style: td }, fFecha(g.fecha_entrada || g.created_at)));
             })))),
       nueva ? h(NuevaConsulta, { T, F, inicial: { tipo: "garantia" }, onClose: () => setNueva(false), onCreated: (c, gid) => { setNueva(false); cargar(); if (gid) setAbierta(gid); } }) : null,
@@ -249,7 +244,7 @@
   function Expediente({ T, F, id, onClose, onChanged }) {
     const [g, setG] = useState(null); const [ls, setLs] = useState([]); const [fotos, setFotos] = useState([]); const [urls, setUrls] = useState({}); const [ev, setEv] = useState([]);
     const [d, setD] = useState({}); const [msg, setMsg] = useState(""); const [trab, setTrab] = useState(false);
-    const [nuevoProb, setNuevoProb] = useState(""); const [verFoto, setVerFoto] = useState(null);
+    const [nuevoProb, setNuevoProb] = useState(""); const [nuevoH, setNuevoH] = useState(""); const [verFoto, setVerFoto] = useState(null);
     const [pend, setPend] = useState(null); const [citaTmp, setCitaTmp] = useState(""); const [codTmp, setCodTmp] = useState("");
     const [verFicha, setVerFicha] = useState(false); const [bitKey, setBitKey] = useState(0); const [alta, setAlta] = useState("");
     const I = inp(T);
@@ -399,28 +394,24 @@
 
         // ---- fotos generales
         h(Box, { T }, h(Lbl, { T }, `Fotos y documentación (${fotos.filter((f) => !f.linea_id).length})`),
-          h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-4px", marginBottom: "6px" } }, `Las fotos que manda el cliente a ${POSVENTA}, fotos del taller, de la placa del bastidor, etc. Las de cada problema, mejor dentro del problema.`),
+          h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-4px", marginBottom: "6px" } }, `Las fotos que manda el cliente a ${POSVENTA}, fotos del taller, de la placa del bastidor, etc.`),
           h(Fotos, { T, fotos: fotos.filter((f) => !f.linea_id), urls, onVer: setVerFoto }),
           h(SubirFotos, { T, trab, inicial: s.f != null && s.f <= 1 ? "cliente" : "antes", onFiles: (fs, et) => subirFotos(fs, null, et) })),
 
         // ---- problemas
         !chasis ? h(Box, { T }, h(Lbl, { T }, `Problemas (${problemas.length})`),
-          h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-4px", marginBottom: "8px" } }, "Cada problema: si lo cubre la garantía, los trabajos con las horas que solicitas (y luego las que aprueba el fabricante), las piezas y sus fotos."),
-          problemas.map((p, i) => h(Problema, { key: p.id, T, n: i + 1, p, g, ls, fotos: fotos.filter((f) => f.linea_id === p.id), urls, trab, addLinea, updLinea, subirFotos, onVerFoto: setVerFoto })),
+          h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-4px", marginBottom: "8px" } }, "Cada problema con sus horas de resolución y la pieza que necesita."),
+          problemas.map((p, i) => h(Problema, { key: p.id, T, n: i + 1, p, g, ls, trab, addLinea, updLinea })),
           ls.some((l) => l.tipo === "problema" && l.anulada) ? h("div", { style: { fontSize: "12.5px", color: T.inkSoft, display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" } }, "Anulados:",
             ls.filter((l) => l.tipo === "problema" && l.anulada).map((l) => h("button", { key: l.id, onClick: () => updLinea(l.id, { anulada: false }), title: "Reactivar", style: { ...btn(T, "s"), textDecoration: "line-through", color: T.inkSoft } }, l.descripcion || "(sin descripción)"))) : null,
-          h("div", { style: { display: "flex", gap: "8px", marginTop: "10px" } },
-            h("input", { value: nuevoProb, onChange: (e) => setNuevoProb(e.target.value), onKeyDown: async (e) => { if (e.key === "Enter" && nuevoProb.trim()) { if (await addLinea({ tipo: "problema", descripcion: nuevoProb.trim() })) setNuevoProb(""); } }, placeholder: "Nuevo problema (p. ej. Filtración en claraboya trasera)", "aria-label": "Nuevo problema", style: I }),
-            h("button", { "data-g-add-prob": "1", disabled: trab || !nuevoProb.trim(), onClick: async () => { if (await addLinea({ tipo: "problema", descripcion: nuevoProb.trim() })) setNuevoProb(""); }, style: btn(T, "p") }, "Añadir problema"))) : null,
-
-        // ---- totales
-        !chasis ? h(Box, { T }, h(Lbl, { T }, "Totales"),
-          h("div", { style: { display: "flex", gap: "22px", flexWrap: "wrap", alignItems: "baseline" } },
-            h("div", null, h("div", { style: { fontSize: "26px", fontWeight: 800 } }, fmtH(t.horas)), h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "horas solicitadas")),
-            h("div", null, h("div", { style: { fontSize: "26px", fontWeight: 800, color: !t.conAprob ? T.inkFaint : t.aprobadas < t.horas ? CH.rojo.fg : CH.verde.fg } }, t.conAprob ? fmtH(t.aprobadas) : "—"), h("div", { style: { fontSize: "12px", color: T.inkSoft } }, t.conAprob ? `aprobadas (${t.conAprob}/${t.trabajos} trabajos)` : "aprobadas")),
-            h("div", null, h("div", { style: { fontSize: "26px", fontWeight: 800 } }, t.piezas), h("div", { style: { fontSize: "12px", color: T.inkSoft } }, `piezas (${t.lineasPieza} referencias)`)),
-            h("div", null, h("div", { style: { fontSize: "26px", fontWeight: 800, color: t.pendFab + t.pendStock ? CH.ambar.fg : CH.verde.fg } }, t.lineasPieza - t.pendFab - t.pendStock, "/", t.lineasPieza), h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "recibidas / repuestas")),
-            h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, Object.entries(t.porMec).map(([m, n]) => `${m}: ${fmtH(n)}`).join(" · ")))) : null,
+          h("div", { style: { display: "grid", gridTemplateColumns: "1fr 110px auto", gap: "8px", marginTop: "10px" } },
+            h("input", { value: nuevoProb, onChange: (e) => setNuevoProb(e.target.value), placeholder: "Nuevo problema (p. ej. Filtración en claraboya trasera)", "aria-label": "Nuevo problema", style: I }),
+            h("input", { value: nuevoH, onChange: (e) => setNuevoH(e.target.value), inputMode: "decimal", placeholder: "Horas", "aria-label": "Horas del nuevo problema", style: I }),
+            h("button", { "data-g-add-prob": "1", disabled: trab || !nuevoProb.trim(), onClick: async () => { if (await addLinea({ tipo: "problema", descripcion: nuevoProb.trim(), horas: num(nuevoH) })) { setNuevoProb(""); setNuevoH(""); } }, style: btn(T, "p") }, "Añadir problema")),
+          problemas.length ? h("div", { style: { display: "flex", gap: "22px", flexWrap: "wrap", marginTop: "12px", paddingTop: "10px", borderTop: `1px solid ${T.border}`, fontSize: "13.5px" } },
+            h("span", null, "Total horas: ", h("b", null, fmtH(t.horas))),
+            h("span", null, "Piezas: ", h("b", null, t.piezas)),
+            t.lineasPieza ? h("span", null, "Recibidas: ", h("b", { style: { color: t.pendFab ? CH.ambar.fg : CH.verde.fg } }, `${t.lineasPieza - t.pendFab}/${t.lineasPieza}`)) : null) : null) : null,
 
         // ---- lo que no cubre
         esCli(g) && !chasis && (noCubre.length || g.estado === "rechazada" || g.presupuesto_caso_id) ? h(Box, { T, tone: "rojo" }, h(Lbl, { T }, "Lo que no cubre la garantía"),
@@ -465,59 +456,41 @@
       h("button", { disabled: trab, onClick: () => ref.current && ref.current.click(), style: btn(T, "s") }, "📷 Añadir fotos"),
       h("input", { ref, type: "file", accept: "image/*", multiple: true, style: { display: "none" }, onChange: (e) => { onFiles(e.target.files, et); e.target.value = ""; } }));
   }
-  // Horas aprobadas: se escriben cuando responde el fabricante (se guardan al salir del campo)
-  function HorasAprob({ T, l, onSave }) {
-    const [v, setV] = useState(l.horas_aprobadas == null ? "" : String(l.horas_aprobadas).replace(".", ","));
-    useEffect(() => { setV(l.horas_aprobadas == null ? "" : String(l.horas_aprobadas).replace(".", ",")); }, [l.horas_aprobadas]);
-    const guardar = () => { const n = num(v); if ((n == null ? null : n) !== (l.horas_aprobadas == null ? null : Number(l.horas_aprobadas))) onSave(n); };
-    return h("input", { value: v, onChange: (e) => setV(e.target.value), onBlur: guardar, onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); }, disabled: l.anulada, inputMode: "decimal", placeholder: "aprob.", "aria-label": "Horas aprobadas", title: "Horas aprobadas por el fabricante",
-      style: { ...inp(T), width: "70px", padding: "4px 6px", fontSize: "12.5px", textAlign: "right", borderColor: l.horas_aprobadas != null && Number(l.horas_aprobadas) < Number(l.horas || 0) ? CH.rojo.bd : T.borderHi } });
+  // Campo de horas que se guarda al salir de él
+  function HorasCampo({ T, valor, onSave, disabled }) {
+    const txt = (x) => (x == null ? "" : String(x).replace(".", ","));
+    const [v, setV] = useState(txt(valor));
+    useEffect(() => { setV(txt(valor)); }, [valor]);
+    const guardar = () => { const n = num(v); if ((n == null ? null : n) !== (valor == null ? null : Number(valor))) onSave(n); };
+    return h("span", { style: { display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "12.5px", color: T.inkSoft } },
+      h("input", { value: v, onChange: (e) => setV(e.target.value), onBlur: guardar, onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); }, disabled, inputMode: "decimal", placeholder: "0", "aria-label": "Horas de resolución",
+        style: { ...inp(T), width: "64px", padding: "5px 7px", fontSize: "13px", textAlign: "right", fontWeight: 700 } }), "h");
   }
 
-  function Problema({ T, n, p, g, ls, fotos, urls, trab, addLinea, updLinea, subirFotos, onVerFoto }) {
-    const tr = ls.filter((l) => l.problema_id === p.id && l.tipo === "trabajo");
+  function Problema({ T, n, p, g, ls, trab, addLinea, updLinea }) {
     const pz = ls.filter((l) => l.problema_id === p.id && l.tipo === "pieza");
-    const hoy = new Date(); const hoyStr = `${hoy.getFullYear()}-${pad(hoy.getMonth() + 1)}-${pad(hoy.getDate())}`;
-    const [nt, setNt] = useState({ descripcion: "", horas: "", mecanico: MECANICOS[0], fecha: hoyStr });
-    const [np, setNp] = useState({ referencia: "", descripcion: "", cantidad: "1", origen_pieza: "fabricante" });
+    const tr = ls.filter((l) => l.problema_id === p.id && l.tipo === "trabajo" && !l.anulada); // expedientes antiguos
+    const [np, setNp] = useState({ referencia: "", descripcion: "", cantidad: "1" });
     const I = { ...inp(T), padding: "7px 9px", fontSize: "13px" };
     const td = { padding: "6px 6px", borderBottom: `1px solid ${T.border}`, fontSize: "13px", verticalAlign: "middle" };
-    const vivos = tr.filter((l) => !l.anulada);
-    const hp = vivos.reduce((a, l) => a + Number(l.horas || 0), 0);
     return h("div", { "data-g-problema": n, style: { border: `1px solid ${p.cobertura ? CH[COB_C[p.cobertura]].bd : T.border}`, borderRadius: "12px", padding: "12px", marginBottom: "10px", background: T.bg } },
       h("div", { style: { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", flexWrap: "wrap" } },
-        h("b", null, `${n}. ${p.descripcion || "(sin descripción)"}`), h("span", { style: { display: "flex", gap: "6px", alignItems: "center" } }, h(Chip, null, fmtH(hp) + " sol."),
-          h("button", { onClick: () => { if (window.confirm("¿Anular este problema? Sus trabajos y piezas dejarán de contar en el expediente (se puede reactivar).")) updLinea(p.id, { anulada: true }); }, title: "Anular este problema (queda en el historial)", style: { ...btn(T, "s"), color: T.inkSoft } }, "Anular"))),
+        h("b", null, `${n}. ${p.descripcion || "(sin descripción)"}`),
+        h("span", { style: { display: "flex", gap: "8px", alignItems: "center" } }, h(HorasCampo, { T, valor: p.horas, onSave: (v) => updLinea(p.id, { horas: v }) }),
+          h("button", { onClick: () => { if (window.confirm("¿Anular este problema? Sus piezas dejarán de contar en el expediente (se puede reactivar).")) updLinea(p.id, { anulada: true }); }, title: "Anular este problema (queda en el historial)", style: { ...btn(T, "s"), color: T.inkSoft } }, "Anular"))),
+      tr.length ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px" } }, "Anotado antes: " + tr.map((l) => `${l.descripcion} (${fmtH(l.horas)})`).join(" · ")) : null,
       g.tipo !== "chasis" ? h("div", { "data-g-cob": n, style: { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", marginTop: "8px" } }, h("span", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft } }, "¿Lo cubre la garantía?"),
         COBERTURA.map(([k, l]) => h("button", { key: k, type: "button", "data-cob": k, onClick: () => updLinea(p.id, { cobertura: p.cobertura === k ? null : k }), style: { ...btn(T, "s"), background: p.cobertura === k ? CH[COB_C[k]].bg : T.surface, borderColor: p.cobertura === k ? CH[COB_C[k]].bd : T.borderHi, color: p.cobertura === k ? CH[COB_C[k]].fg : T.ink, fontWeight: p.cobertura === k ? 800 : 600 } }, l))) : null,
-      h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, margin: "10px 0 4px" } }, "Trabajos · horas solicitadas / aprobadas"),
-      tr.length ? h("table", { style: { width: "100%", borderCollapse: "collapse" } }, h("tbody", null, tr.map((l) => h("tr", { key: l.id, style: { opacity: l.anulada ? 0.45 : 1, textDecoration: l.anulada ? "line-through" : "none" } },
-        h("td", { style: td }, l.descripcion), h("td", { style: { ...td, fontWeight: 700, whiteSpace: "nowrap" } }, fmtH(l.horas)),
-        h("td", { style: { ...td, whiteSpace: "nowrap" } }, h(HorasAprob, { T, l, onSave: (v) => updLinea(l.id, { horas_aprobadas: v }) })),
-        h("td", { style: td }, l.mecanico || "—"), h("td", { style: td }, l.fecha ? fFecha(l.fecha) : "—"),
-        h("td", { style: { ...td, textAlign: "right" } }, h("button", { onClick: () => updLinea(l.id, { anulada: !l.anulada }), style: { ...btn(T, "s"), fontSize: "11.5px" } }, l.anulada ? "Reactivar" : "Anular")))))) : null,
-      h("div", { style: { display: "grid", gridTemplateColumns: "2fr .8fr 1fr 1fr auto", gap: "6px", marginTop: "6px" } },
-        h("input", { value: nt.descripcion, onChange: (e) => setNt((x) => ({ ...x, descripcion: e.target.value })), placeholder: "Trabajo (qué se hace)", "aria-label": "Trabajo realizado", style: I }),
-        h("input", { value: nt.horas, onChange: (e) => setNt((x) => ({ ...x, horas: e.target.value })), placeholder: "Horas sol.", inputMode: "decimal", "aria-label": "Horas", style: I }),
-        h("select", { value: nt.mecanico, onChange: (e) => setNt((x) => ({ ...x, mecanico: e.target.value })), "aria-label": "Mecánico", style: I }, MECANICOS.map((m) => h("option", { key: m, value: m }, m))),
-        h("input", { type: "date", value: nt.fecha, onChange: (e) => setNt((x) => ({ ...x, fecha: e.target.value })), "aria-label": "Fecha", style: I }),
-        h("button", { "data-g-add-trab": n, disabled: trab || !nt.descripcion.trim() || !(num(nt.horas) > 0), onClick: async () => { if (await addLinea({ tipo: "trabajo", problema_id: p.id, descripcion: nt.descripcion.trim(), horas: num(nt.horas), mecanico: nt.mecanico, fecha: nt.fecha || null })) setNt((x) => ({ ...x, descripcion: "", horas: "" })); }, style: btn(T, "s") }, "Añadir")),
-      h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, margin: "12px 0 4px" } }, "Piezas"),
-      pz.length ? h("table", { style: { width: "100%", borderCollapse: "collapse" } }, h("tbody", null, pz.map((l) => h("tr", { key: l.id, style: { opacity: l.anulada ? 0.45 : 1, textDecoration: l.anulada ? "line-through" : "none" } },
-        h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" } }, l.referencia || "—"), h("td", { style: td }, l.descripcion), h("td", { style: { ...td, fontWeight: 700 } }, `× ${Number(l.cantidad || 1)}`),
-        h("td", { style: td }, l.origen_pieza === "fabricante" ? "Pedida al fabricante" : "De nuestro stock"),
-        h("td", { style: td }, h("label", { style: { display: "flex", gap: "5px", alignItems: "center", whiteSpace: "nowrap" } }, h("input", { type: "checkbox", checked: !!l.repuesto_recibido_at, disabled: l.anulada, onChange: (e) => updLinea(l.id, { repuesto_recibido_at: e.target.checked ? new Date().toISOString() : null }) }),
-          l.origen_pieza === "fabricante" ? (l.repuesto_recibido_at ? `Recibida ${fFecha(l.repuesto_recibido_at)}` : "Recibida") : (l.repuesto_recibido_at ? `Repuesta ${fFecha(l.repuesto_recibido_at)}` : "Repuesta"))),
-        h("td", { style: { ...td, textAlign: "right" } }, h("button", { onClick: () => updLinea(l.id, { anulada: !l.anulada }), style: { ...btn(T, "s"), fontSize: "11.5px" } }, l.anulada ? "Reactivar" : "Anular")))))) : null,
-      h("div", { style: { display: "grid", gridTemplateColumns: "1fr 2fr .6fr 1.3fr auto", gap: "6px", marginTop: "6px" } },
+      pz.length ? h("table", { style: { width: "100%", borderCollapse: "collapse", marginTop: "8px" } }, h("tbody", null, pz.map((l) => h("tr", { key: l.id, style: { opacity: l.anulada ? 0.45 : 1, textDecoration: l.anulada ? "line-through" : "none" } },
+        h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", width: "120px" } }, l.referencia || "—"), h("td", { style: td }, l.descripcion), h("td", { style: { ...td, fontWeight: 700, width: "50px" } }, `× ${Number(l.cantidad || 1)}`),
+        h("td", { style: { ...td, width: "150px" } }, h("label", { style: { display: "flex", gap: "5px", alignItems: "center", whiteSpace: "nowrap" } }, h("input", { type: "checkbox", checked: !!l.repuesto_recibido_at, disabled: l.anulada, onChange: (e) => updLinea(l.id, { repuesto_recibido_at: e.target.checked ? new Date().toISOString() : null }) }),
+          l.repuesto_recibido_at ? `Recibida ${fFecha(l.repuesto_recibido_at)}` : "Recibida")),
+        h("td", { style: { ...td, textAlign: "right", width: "80px" } }, h("button", { onClick: () => updLinea(l.id, { anulada: !l.anulada }), style: { ...btn(T, "s"), fontSize: "11.5px" } }, l.anulada ? "Reactivar" : "Anular")))))) : null,
+      h("div", { style: { display: "grid", gridTemplateColumns: "1fr 2fr .5fr auto", gap: "6px", marginTop: "8px" } },
         h("input", { value: np.referencia, onChange: (e) => setNp((x) => ({ ...x, referencia: e.target.value })), placeholder: "Referencia", "aria-label": "Referencia", style: I }),
-        h("input", { value: np.descripcion, onChange: (e) => setNp((x) => ({ ...x, descripcion: e.target.value })), placeholder: "Descripción de la pieza", "aria-label": "Pieza", style: I }),
+        h("input", { value: np.descripcion, onChange: (e) => setNp((x) => ({ ...x, descripcion: e.target.value })), placeholder: "Pieza necesaria", "aria-label": "Pieza", style: I }),
         h("input", { value: np.cantidad, onChange: (e) => setNp((x) => ({ ...x, cantidad: e.target.value })), inputMode: "decimal", "aria-label": "Cantidad", style: I }),
-        h("select", { value: np.origen_pieza, onChange: (e) => setNp((x) => ({ ...x, origen_pieza: e.target.value })), "aria-label": "Origen", style: I }, h("option", { value: "fabricante" }, "Pedida al fabricante"), h("option", { value: "stock" }, "De nuestro stock")),
-        h("button", { "data-g-add-pieza": n, disabled: trab || !np.descripcion.trim(), onClick: async () => { if (await addLinea({ tipo: "pieza", problema_id: p.id, referencia: np.referencia.trim() || null, descripcion: np.descripcion.trim(), cantidad: num(np.cantidad) || 1, origen_pieza: np.origen_pieza })) setNp({ referencia: "", descripcion: "", cantidad: "1", origen_pieza: np.origen_pieza }); }, style: btn(T, "s") }, "Añadir")),
-      h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, margin: "12px 0 4px" } }, `Fotos (${fotos.length})`),
-      h(Fotos, { T, fotos, urls, onVer: onVerFoto }),
-      h(SubirFotos, { T, trab, inicial: ["consulta", "esperando_info", "analisis"].includes(g.estado) ? "cliente" : "antes", onFiles: (fs, et) => subirFotos(fs, p.id, et) }));
+        h("button", { "data-g-add-pieza": n, disabled: trab || !np.descripcion.trim(), onClick: async () => { if (await addLinea({ tipo: "pieza", problema_id: p.id, referencia: np.referencia.trim() || null, descripcion: np.descripcion.trim(), cantidad: num(np.cantidad) || 1, origen_pieza: "fabricante" })) setNp({ referencia: "", descripcion: "", cantidad: "1" }); }, style: btn(T, "s") }, "Añadir pieza")));
   }
 
   // ---------- resumen imprimible para tramitar en la web del fabricante ----------
@@ -527,16 +500,15 @@
     const probs = ls.filter((l) => l.tipo === "problema" && !l.anulada && l.cobertura !== "no_cubre");
     const nH = (x) => Number(x || 0).toLocaleString("es-ES");
     const bloque = (p, i) => {
-      const tr = ls.filter((l) => l.problema_id === p.id && l.tipo === "trabajo" && !l.anulada);
+      const hp = Number(p.horas || 0) + ls.filter((l) => l.problema_id === p.id && l.tipo === "trabajo" && !l.anulada).reduce((a, l) => a + Number(l.horas || 0), 0);
       const pz = ls.filter((l) => l.problema_id === p.id && l.tipo === "pieza" && !l.anulada);
       const fs = fotos.filter((f) => f.linea_id === p.id && urls[f.path]);
-      return `<section><h2>${i + 1}. ${esc(p.descripcion)}${p.cobertura === "a_valorar" ? ' <span class="tag">a valorar</span>' : ""}</h2>
-        ${tr.length ? `<table><tr><th>Trabajo</th><th>Horas solicitadas</th><th>Aprobadas</th><th>Mecánico</th><th>Fecha</th></tr>${tr.map((l) => `<tr><td>${esc(l.descripcion)}</td><td>${nH(l.horas)}</td><td>${l.horas_aprobadas == null ? "" : nH(l.horas_aprobadas)}</td><td>${esc(l.mecanico || "")}</td><td>${l.fecha ? esc(fFecha(l.fecha)) : ""}</td></tr>`).join("")}</table>` : ""}
-        ${pz.length ? `<table><tr><th>Referencia</th><th>Pieza</th><th>Cant.</th><th>Origen</th></tr>${pz.map((l) => `<tr><td class="m">${esc(l.referencia || "")}</td><td>${esc(l.descripcion)}</td><td>${esc(Number(l.cantidad || 1))}</td><td>${l.origen_pieza === "fabricante" ? "Fabricante" : "Stock taller"}</td></tr>`).join("")}</table>` : ""}
+      return `<section><h2>${i + 1}. ${esc(p.descripcion)}${p.cobertura === "a_valorar" ? ' <span class="tag">a valorar</span>' : ""} · ${nH(hp)} h</h2>
+        ${pz.length ? `<table><tr><th>Referencia</th><th>Pieza</th><th>Cant.</th></tr>${pz.map((l) => `<tr><td class="m">${esc(l.referencia || "")}</td><td>${esc(l.descripcion)}</td><td>${esc(Number(l.cantidad || 1))}</td></tr>`).join("")}</table>` : ""}
         ${fs.length ? `<div class="fotos">${fs.map((f) => `<figure><img src="${urls[f.path]}"><figcaption>${esc((ETIQUETAS.find((x) => x[0] === f.etiqueta) || ["", ""])[1])}</figcaption></figure>`).join("")}</div>` : ""}</section>`;
     };
     const gen = fotos.filter((f) => !f.linea_id && urls[f.path]);
-    const hSol = probs.reduce((a, p) => a + ls.filter((l) => l.problema_id === p.id && l.tipo === "trabajo" && !l.anulada).reduce((b, l) => b + Number(l.horas || 0), 0), 0);
+    const hSol = probs.reduce((a, p) => a + Number(p.horas || 0) + ls.filter((l) => l.problema_id === p.id && l.tipo === "trabajo" && !l.anulada).reduce((b, l) => b + Number(l.horas || 0), 0), 0);
     const nPz = probs.reduce((a, p) => a + ls.filter((l) => l.problema_id === p.id && l.tipo === "pieza" && !l.anulada).reduce((b, l) => b + Number(l.cantidad || 0), 0), 0);
     const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(g.numero)} · Resumen de garantía</title><style>
       body{font-family:system-ui,sans-serif;color:#0F1B2E;margin:24px;font-size:13px}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 6px}
@@ -551,7 +523,7 @@
       <div><b>Vehículo</b> ${esc(v.modelo || "")}</div><div><b>Matrícula</b> <span class="m">${esc(v.matricula || "")}</span></div>
       <div><b>Bastidor</b> <span class="m">${esc(v.bastidor || "")}</span></div><div><b>${g.origen === "flota" ? "Flota" : "Cliente"}</b> ${esc(g.origen === "flota" ? v.ac || "" : nombreCli(g.cliente))}</div></div>
       ${g.descripcion ? `<p>${esc(g.descripcion)}</p>` : ""}
-      <div class="tot"><div>${esc(nH(hSol))} h<span>horas solicitadas</span></div><div>${esc(nPz)}<span>piezas</span></div><div>${esc(probs.length)}<span>problemas</span></div></div>
+      <div class="tot"><div>${esc(nH(hSol))} h<span>horas</span></div><div>${esc(nPz)}<span>piezas</span></div><div>${esc(probs.length)}<span>problemas</span></div></div>
       ${probs.map(bloque).join("")}
       ${gen.length ? `<section><h2>Fotos generales</h2><div class="fotos">${gen.map((f) => `<figure><img src="${urls[f.path]}"><figcaption>${esc((ETIQUETAS.find((x) => x[0] === f.etiqueta) || ["", ""])[1])}</figcaption></figure>`).join("")}</div></section>` : ""}
       <p style="color:#8B98AB;font-size:11px;margin-top:20px">AC·LLAR · generado ${esc(fFechaHora(new Date().toISOString()))} · no incluye los problemas que no cubre la garantía</p></body></html>`;
