@@ -72,7 +72,7 @@
     en_garantias: { l: "En Garantías", f: "cerrado", c: "violeta", fin: true, gar: true },
   };
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
-  const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas · Garantía"], ["cita", "Cita"], ["taller", "En taller"], ["retirar", "Para retirar"]];
+  const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["taller", "En taller"], ["retirar", "Para retirar"]];
   const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "taller", "retirar"];
   const CAMPOS = { estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
     garantia_100: "100 % garantía", senal_importe: "Importe señal", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
@@ -303,7 +303,7 @@
       const bcNo = c.cliente && c.cliente.bc_no; if (!bcNo || est(c.estado).fin) return null;
       const desde = String(c.created_at || "").slice(0, 10);
       const libres = (tipo) => bcServ.filter((x) => x.tipo === tipo && x.activo && x.cliente_no === bcNo && !vinculados.has(tipo + ":" + norm(x.no)) && (!x.fecha_pedido || x.fecha_pedido >= desde));
-      if (!c.oferta_bc && !c.pedido_bc && c.estado === "presupuesto_por_hacer") { const o = libres("oferta"); if (o.length) return { tipo: "oferta", doc: o[0] }; }
+      if (!c.oferta_bc && !c.pedido_bc) { const o = libres("oferta"); if (o.length) return { tipo: "oferta", doc: o[0] }; }
       if (!c.pedido_bc && (c.oferta_bc || c.garantia_resultado === "parcial")) { const pe = libres("pedido"); if (pe.length) return { tipo: "pedido", doc: pe[0] }; }
       return null;
     };
@@ -573,6 +573,7 @@
               altaMsg === "trabajando" ? h("span", { style: { color: T.inkSoft } }, "Creando en BC…")
                 : h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } },
                   altaMsg && altaMsg.dup ? h("button", { onClick: () => onCliente(caso.cliente_id), style: btn(T, "p") }, "Revisar en la ficha del cliente") : h("button", { "data-crm-alta-caso": "1", onClick: altaDesdeCaso, style: btn(T, "p") }, "Dar de alta en BC"),
+                  h("button", { "data-crm-ya-en-bc": "1", onClick: () => onCliente(caso.cliente_id), style: btn(T) }, "Ya existe en BC: vincular"),
                   altaMsg && altaMsg.txt ? h("span", { style: { fontSize: "12.5px", color: altaMsg.err || altaMsg.dup ? T.danger : T.ok } }, altaMsg.txt) : null))
             : h(React.Fragment, null,
               sugerencia ? h("div", { "data-crm-sugerencia": "1", style: { background: CH.azul.bg, border: `1px solid ${CH.azul.bd}`, borderRadius: "10px", padding: "10px 12px", fontSize: "13px", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
@@ -622,6 +623,36 @@
   }
 
   // ---------- ficha del cliente ----------
+  // Busca en BC el cliente que corresponde a una ficha del CRM: sugiere por NIF, teléfono, email o nombre, y permite buscar a mano.
+  function BuscarEnBC({ T, c, onVincular, ocupado }) {
+    const [sug, setSug] = useState(null); const [q, setQ] = useState(""); const [res, setRes] = useState([]);
+    const t = useRef(null);
+    useEffect(() => { (async () => {
+      const conds = [];
+      const tel = String(c.telefono || "").replace(/\D/g, "").slice(-9), em = String(c.email || "").trim().toLowerCase(), nif = String(c.nif || "").replace(/[\s.-]/g, "").toUpperCase();
+      if (nif.length >= 8) conds.push(`nif.ilike.%${qSafe(nif)}%`);
+      if (tel.length >= 9) conds.push(`telefono.ilike.%${tel}%`);
+      if (em.includes("@")) conds.push(`email.ilike.${qSafe(em)}`);
+      const nom = qSafe([c.nombre, c.apellidos].filter(Boolean).join(" ")); if (nom.length >= 4) conds.push(`nombre.ilike.%${nom}%`);
+      if (!conds.length) { setSug([]); return; }
+      const { data } = await sb().from("bc_clientes").select("no,nombre,nif,telefono,email,ciudad").or(conds.join(",")).limit(6);
+      const puntos = (x) => (nif && String(x.nif || "").toUpperCase().includes(nif) ? 4 : 0) + (tel && String(x.telefono || "").includes(tel) ? 2 : 0) + (em && String(x.email || "").toLowerCase() === em ? 2 : 0);
+      setSug((data || []).map((x) => ({ ...x, puntos: puntos(x) })).sort((a, b) => b.puntos - a.puntos));
+    })(); }, [c.id]);
+    useEffect(() => { clearTimeout(t.current); const v = qSafe(q); if (v.length < 2) { setRes([]); return; }
+      t.current = setTimeout(async () => { const { data } = await sb().from("bc_clientes").select("no,nombre,nif,telefono,email,ciudad").or(`nombre.ilike.%${v}%,no.ilike.%${v}%,nif.ilike.%${v}%,telefono.ilike.%${v}%,email.ilike.%${v}%`).limit(8); setRes(data || []); }, 300); }, [q]);
+    const fila = (x, destacar) => h("div", { key: x.no, "data-bc-cand": x.no, style: { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", padding: "7px 0", borderTop: `1px solid ${CH.ambar.bd}`, fontSize: "13px" } },
+      h("span", null, h("b", null, x.nombre), " ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: T.inkSoft } }, x.no),
+        destacar && x.puntos ? h(Chip, { c: "verde", style: { marginLeft: "6px" } }, x.puntos >= 4 ? "Mismo NIF" : "Mismo teléfono / email") : null,
+        h("div", { style: { fontSize: "12px", color: T.inkSoft } }, [x.nif, x.telefono, x.email, x.ciudad].filter(Boolean).join(" · "))),
+      h("button", { "data-bc-vincular": x.no, disabled: ocupado, onClick: () => onVincular(x.no), style: btn(T, destacar && x.puntos ? "p" : "s") }, "Es este: vincular"));
+    return h("div", { "data-crm-buscar-bc": "1" },
+      h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "4px" } }, "¿Ya existe en BC? Vincúlalo (también se emparejan sus vehículos)"),
+      sug == null ? h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, "Buscando coincidencias…")
+        : sug.length ? sug.map((x) => fila(x, true)) : h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, "No hay coincidencias por NIF, teléfono, email ni nombre."),
+      h("input", { type: "search", value: q, onChange: (e) => setQ(e.target.value), placeholder: "Buscar otro cliente en BC (nombre, nº C0…, NIF, teléfono)", "aria-label": "Buscar en BC", style: { ...inp(T), marginTop: "8px" } }),
+      res.filter((x) => !(sug || []).some((y) => y.no === x.no)).map((x) => fila(x, false)));
+  }
   function ClientePanel({ T, F, id, casos, bcServ, onClose, onCaso, onNueva, onChanged }) {
     const [c, setC] = useState(null); const [d, setD] = useState({}); const [msg, setMsg] = useState(""); const [ev, setEv] = useState([]);
     const [alta, setAlta] = useState(null); // null | "trabajando" | { duplicados } | { error }
@@ -681,7 +712,36 @@
         setAlta({ error: (res && res.error) || "Error desconocido" });
       } catch (e) { setAlta({ error: String(e.message || e) }); }
     };
-    const vincular = async (no) => { const { error } = await sb().from("crm_clientes").update({ bc_no: no }).eq("id", c.id); if (error) { setAlta({ error: error.message.includes("duplicate") ? "Ese cliente de BC ya está vinculado a otra ficha del CRM." : error.message }); return; } setAlta(null); setMsg(`Vinculado al cliente de BC ${no}.`); cargar(); onChanged && onChanged(); };
+    // Vincula la ficha con un cliente que ya existe en BC y empareja sus vehículos con los productos de servicio de BC (por matrícula o bastidor)
+    const vincular = async (no) => {
+      setAlta("trabajando");
+      const { error } = await sb().from("crm_clientes").update({ bc_no: no }).eq("id", c.id);
+      if (error) { setAlta({ error: /duplicate|unique/i.test(error.message) ? "Ese cliente de BC ya está vinculado a otra ficha del CRM." : error.message }); return; }
+      const ps = (await sb().from("bc_productos_servicio").select("*").eq("cliente_no", no).eq("activo", true)).data || [];
+      const hechos = [];
+      const lista = vehiculos.map((v) => {
+        if (v.bc_ps) return v;
+        const m = normMat(v.matricula), bs = normMat(v.bastidor);
+        const p = ps.find((x) => (m && x.serie_norm === m) || (bs && normMat(x.alias || "").includes(bs)));
+        if (!p) return v;
+        hechos.push(`${v.modelo || p.descripcion} → ${p.no}`);
+        const nv = { ...v, bc_ps: p.no }; delete nv.bc_error; delete nv.forzar; return nv;
+      });
+      if (hechos.length) await sb().from("crm_clientes").update({ vehiculos: lista }).eq("id", c.id);
+      await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto: `Ficha vinculada al cliente de BC ${no}.` + (hechos.length ? " Vehículos: " + hechos.join(" · ") : ""), cliente_id: c.id });
+      setAlta(null); setMsg(`Vinculado al cliente de BC ${no}.` + (hechos.length ? " Vehículo vinculado: " + hechos.join(" · ") + "." : vehiculos.length ? " Ningún vehículo coincide por matrícula o bastidor: revísalo abajo." : ""));
+      cargar(); onChanged && onChanged();
+    };
+    // Documentos de BC del cliente que aún no están en ningún caso, y casos abiertos donde vincularlos
+    const enCasos = new Set(); casos.forEach((x) => { if (x.oferta_bc) enCasos.add("oferta:" + String(x.oferta_bc).toUpperCase()); if (x.pedido_bc) enCasos.add("pedido:" + String(x.pedido_bc).toUpperCase()); });
+    const abiertos = casos.filter((x) => x.cliente_id === c.id && !est(x.estado).fin);
+    const vincularDoc = async (doc, caso) => {
+      const p = doc.tipo === "oferta" ? { oferta_bc: doc.no } : { pedido_bc: doc.no };
+      if (doc.tipo === "oferta" && caso.estado === "presupuesto_por_hacer") p.estado = "presupuesto_hecho";
+      const { error } = await sb().from("crm_casos").update(p).eq("id", caso.id);
+      setMsg(error ? "No se pudo vincular: " + error.message : `${doc.tipo === "oferta" ? "Oferta" : "Pedido"} ${doc.no} vinculado al caso.`);
+      onChanged && onChanged();
+    };
     const susCasos = casos.filter((x) => x.cliente_id === c.id);
     const docs = c.bc_no ? bcServ.filter((x) => x.cliente_no === c.bc_no).sort((a, b) => String(b.fecha_pedido || "").localeCompare(String(a.fecha_pedido || ""))) : [];
     const I = inp(T);
@@ -693,8 +753,9 @@
         c.bc_no ? h(Chip, { c: "verde" }, "Cliente BC ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, c.bc_no)) : h(Chip, { c: "ambar" }, "Pendiente de alta en BC"),
         h("div", { style: { marginLeft: "auto", display: "flex", gap: "8px" } }, h("button", { onClick: () => onNueva(c), style: btn(T, "p") }, "+ Nueva consulta"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×"))),
       h("div", { style: { padding: "16px 22px 40px", display: "flex", flexDirection: "column", gap: "14px" } },
-        !c.bc_no ? h(Box, { T, tone: "ambar" }, h(Lbl, { T }, "Alta en Business Central"),
-          h("div", { style: { fontSize: "13px", marginBottom: "8px" } }, "Se crea en BC con la configuración habitual (GENERICO · NAC · CLIENTES, 30D, precios IVA incluido). Antes se comprueba que no exista ya."),
+        !c.bc_no ? h(Box, { T, tone: "ambar" }, h(Lbl, { T }, "Business Central"),
+          h(BuscarEnBC, { T, c, onVincular: vincular, ocupado: alta === "trabajando" }),
+          h("div", { style: { fontSize: "13px", margin: "12px 0 8px", paddingTop: "10px", borderTop: `1px solid ${CH.ambar.bd}` } }, h("b", null, "¿No existe en BC? "), "Se crea con la configuración habitual (GENERICO · NAC · CLIENTES, 30D, precios IVA incluido). Antes se comprueba que no exista ya."),
           alta === "trabajando" ? h("div", { style: { fontSize: "13px", color: T.inkSoft } }, "Comprobando y creando en BC…")
             : alta && alta.duplicados ? h("div", null, h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "6px", color: T.warn } }, "Ya hay clientes en BC que coinciden. ¿Es alguno de estos?"),
               alta.duplicados.map((x) => h("div", { key: x.no, style: { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", padding: "6px 0", borderTop: `1px solid ${T.border}`, fontSize: "13px" } },
@@ -748,10 +809,12 @@
             h(Box, { T }, h(Lbl, { T }, "En Business Central"),
               !c.bc_no ? h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Aún no está en BC.")
                 : docs.length ? h("div", { style: { overflowX: "auto" } }, h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "460px" } },
-                  h("thead", null, h("tr", null, ["Documento", "Nº", "Fecha", "Estado", "IVA incl."].map((x) => h("th", { key: x, style: th }, x)))),
+                  h("thead", null, h("tr", null, ["Documento", "Nº", "Fecha", "Estado", "IVA incl.", "Caso"].map((x) => h("th", { key: x, style: th }, x)))),
                   h("tbody", null, docs.map((x) => h("tr", { key: x.tipo + x.no, style: { color: x.activo ? T.ink : T.inkSoft } },
                     h("td", { style: td }, x.tipo === "oferta" ? "Oferta" : "Pedido"), h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontSize: "12.5px" } }, x.no),
-                    h("td", { style: td }, x.fecha_pedido ? fFecha(x.fecha_pedido) : "—"), h("td", { style: td }, x.activo ? x.estado || "—" : h(Chip, null, "Ya no está en BC")), h("td", { style: { ...td, textAlign: "right", fontWeight: 700 } }, eur(x.importe_iva)))))))
+                    h("td", { style: td }, x.fecha_pedido ? fFecha(x.fecha_pedido) : "—"), h("td", { style: td }, x.activo ? x.estado || "—" : h(Chip, null, "Ya no está en BC")), h("td", { style: { ...td, textAlign: "right", fontWeight: 700 } }, eur(x.importe_iva)),
+                    h("td", { style: td }, enCasos.has(x.tipo + ":" + String(x.no).toUpperCase()) ? h(Chip, { c: "verde" }, "Vinculado")
+                      : !x.activo ? "—" : abiertos.filter((k) => !(x.tipo === "oferta" ? k.oferta_bc : k.pedido_bc)).map((k) => h("button", { key: k.id, "data-crm-doc-vincular": x.no, onClick: () => vincularDoc(x, k), title: k.consulta || "", style: { ...btn(T, "s"), display: "block", marginBottom: "4px" } }, `Vincular a: ${lbl(TIPOS, k.tipo)}${k.vehiculo ? " · " + k.vehiculo : ""}`))))))))
                 : h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Sin ofertas ni pedidos de servicio abiertos.")),
             h(Box, { T }, h(Lbl, { T }, "Últimos movimientos"), h(Historial, { T, eventos: ev }))))));
   }
