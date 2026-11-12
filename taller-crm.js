@@ -335,7 +335,9 @@
       metoca: abiertos.filter((c) => pel(c) === "nos" && (!me || c.responsable === me || !c.responsable)).sort(ordPlazo),
       espera: abiertos.filter((c) => ["cli", "cita"].includes(pel(c))).sort(ordPlazo),
       prov: abiertos.filter((c) => pel(c) === "prov").sort(ordPlazo),
-      todos: (filtroTodos === "abiertos" ? abiertos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => est(c.estado).fin && !est(c.estado).gar) : casos).slice().sort(ordVence),
+      cerrados: casos.filter((c) => c.estado === "retirado").sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
+      descartados: casos.filter((c) => ["descartado", "cerrado", "rechazado", "sin_respuesta"].includes(c.estado)).sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
+      todos: (filtroTodos === "abiertos" ? abiertos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => c.estado === "retirado") : casos).slice().sort(ordVence),
     };
     const nVencidos = listas.metoca.filter((c) => plazo(c).nivel === "vencido").length;
     const nRecordar = listas.espera.filter((c) => plazo(c).nivel === "vencido").length;
@@ -366,6 +368,8 @@
         tabBtn("espera", "Esperando al cliente", listas.espera.length, nRecordar ? "ambar" : "gris"),
         tabBtn("prov", "Esperando piezas / proveedor", listas.prov.length, nReclamar ? "ambar" : "gris"),
         tabBtn("tablero", "Tablero", null),
+        tabBtn("cerrados", "Cerrados", listas.cerrados.length, "gris"),
+        tabBtn("descartados", "Descartados", listas.descartados.length, "gris"),
         tabBtn("todos", "Todos", null),
         h("div", { style: { marginLeft: "auto", display: "flex", gap: "8px", alignItems: "center", paddingBottom: "8px", flexWrap: "wrap" } },
           nVencidos ? h(Chip, { c: "rojo" }, `${nVencidos} tarea${nVencidos > 1 ? "s" : ""} vencida${nVencidos > 1 ? "s" : ""}`) : null,
@@ -377,7 +381,7 @@
       cargando ? h("div", { style: { color: T.inkFaint, fontSize: "13px" } }, "Cargando…")
         : vista === "tablero" ? h(Tablero, { T, casos: abiertos, onOpen: setCasoId })
         : h(React.Fragment, null,
-          vista === "todos" ? h("div", null, h(Seg, { T, opts: [["abiertos", "Abiertos"], ["garantias", "En Garantías"], ["cerrados", "Cerrados"], ["todos", "Todos"]], value: filtroTodos, onChange: setFiltroTodos })) : null,
+          vista === "todos" ? h("div", null, h(Seg, { T, opts: [["abiertos", "Abiertos"], ["garantias", "En Garantías"], ["todos", "Todos"]], value: filtroTodos, onChange: setFiltroTodos })) : null,
           vista === "espera" ? h(React.Fragment, null,
             [["cli", "Esperando al cliente", "Nadie espera respuesta del cliente."], ["cita", "Con cita dada", null]].map(([k, tit, vac]) => {
               const xs = listas.espera.filter((c) => pel(c) === k);
@@ -385,7 +389,7 @@
               return h("div", { key: k, style: { display: "flex", flexDirection: "column", gap: "8px" } }, h("div", { style: { fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft } }, `${tit} (${xs.length})`),
                 h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, vacio: vac }));
             }))
-          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
+          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "cerrados" ? "Aún no hay casos terminados." : vista === "descartados" ? "No hay casos descartados." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
       casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, vinculados, sugerencia: sugerencia(casoAbierto), syncAhora, sincronizando, onRefresh: cargar, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
       clienteId ? h(ClientePanel, { T, F, id: clienteId, casos, bcServ, onClose: () => setClienteId(null), onCaso: (id) => { setClienteId(null); setCasoId(id); }, onNueva: (cliente) => { setClienteId(null); setNueva({ cliente }); }, onChanged: cargar }) : null,
       nueva ? h(NuevaConsulta, { T, F, inicial: nueva, onClose: () => setNueva(null), onCreated: (c, gid) => { setNueva(null); actualizarCaso(c); if (gid) abrirExpediente(gid); else setCasoId(c.id); } }) : null);
@@ -456,7 +460,7 @@
           const pz = plazo(c), v = chipPlazo(pz), s = est(c.estado);
           const doc = docBC(bcServ, c);
           return h("tr", { key: c.id, "data-crm-caso": c.id, onClick: () => onOpen(c.id), style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
-            h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : h("span", { style: { color: T.inkFaint } }, "—")),
+            h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : s.fin && (c.cerrado_at || c.estado_at) ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.cerrado_at || c.estado_at)) : h("span", { style: { color: T.inkFaint } }, "—")),
             h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: td }, lbl(TIPOS, c.tipo)),
             h("td", { style: td }, h(Chip, { c: s.c }, s.l), s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
