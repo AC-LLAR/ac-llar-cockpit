@@ -486,6 +486,27 @@
   }
 
   // ---------- ficha del caso ----------
+  // Cambiar de paso a mano (atrás o adelante): para cuando la realidad no sigue el orden previsto.
+  const PASOS_MANUALES = Object.keys(E).filter((k) => !E[k].fin && !/^garantia_|cobertura/.test(k));
+  function CambioPaso({ T, caso, onConfirm, onCancel, guardando }) {
+    const [to, setTo] = useState(""); const [nota, setNota] = useState(""); const [cita, setCita] = useState(toLocalInput(caso.cita_at));
+    const I = inp(T);
+    const parcial = ["avisado_retirar", "piezas_recibidas", "retirado", "trabajo_terminado"].includes(caso.estado);
+    const grupos = FASES.map(([f, n]) => [n, PASOS_MANUALES.filter((k) => E[k].f === f)]).filter(([, xs]) => xs.length);
+    const necesitaCita = to === "cita_asignada";
+    return h("div", { "data-cambio-paso": "1", style: { background: T.bg, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px", display: "flex", flexDirection: "column", gap: "10px" } },
+      parcial ? h("button", { "data-paso-parcial": "1", disabled: guardando, onClick: () => onConfirm("cliente_avisado_piezas", "Entrega parcial: se llevó una parte; el resto está pedido al proveedor." + (nota.trim() ? " " + nota.trim() : ""), null), style: { ...btn(T), textAlign: "left" } },
+        h("b", null, "Entrega parcial"), h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 600 } }, "Se llevó una parte y el resto está pedido → pasa a Esperando piezas / proveedor")) : null,
+      h(Field, { T, label: "Llevar el caso al paso" }, h("select", { "data-paso-destino": "1", value: to, onChange: (e) => setTo(e.target.value), style: I },
+        h("option", { value: "" }, "Elige el paso…"),
+        grupos.map(([n, xs]) => h("optgroup", { key: n, label: n }, xs.map((k) => h("option", { key: k, value: k, disabled: k === caso.estado }, `${E[k].l} · ${PELOTA[(PL[k] || {}).p || "nos"]}${k === caso.estado ? " (actual)" : ""}`)))))),
+      necesitaCita ? h(Field, { T, label: "Fecha y hora de la cita" }, h("input", { type: "datetime-local", value: cita || "", onChange: (e) => setCita(e.target.value), style: I })) : null,
+      h(Field, { T, label: "Nota (por qué se cambia, opcional)" }, h("textarea", { rows: 2, "data-paso-nota": "1", value: nota, onChange: (e) => setNota(e.target.value), placeholder: "p. ej. se llevó los perfiles; los embellecedores llegan la semana que viene", style: { ...I, resize: "vertical" } })),
+      h("div", { style: { display: "flex", gap: "8px" } },
+        h("button", { "data-paso-ok": "1", disabled: !to || guardando || (necesitaCita && !cita), onClick: () => onConfirm(to, nota.trim(), necesitaCita ? fromLocalInput(cita) : null), style: btn(T, "p") }, "Cambiar de paso"),
+        h("button", { onClick: onCancel, style: btn(T) }, "Cancelar")),
+      h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "El plazo vuelve a empezar desde ahora y el cambio queda anotado en la bitácora."));
+  }
   // Descartar o cerrar sin completar: motivo rápido + nota final obligatoria (queda también en la bitácora)
   const MOTIVOS = {
     descartar: ["No es trabajo nuestro", "No nos interesa / no compensa", "Fuera de zona", "Otro"],
@@ -546,7 +567,7 @@
     const [pend, setPend] = useState(null); // paso que necesita un dato (cita)
     const [citaTmp, setCitaTmp] = useState("");
     const [pasando, setPasando] = useState(false);
-    const [cerrando, setCerrando] = useState(false); const [motivo, setMotivo] = useState("");
+    const [cerrando, setCerrando] = useState(false); const [cambiando, setCambiando] = useState(false);
     const [d, setD] = useState({});
     useEffect(() => { setD({ proxima_accion: caso.proxima_accion || "", responsable: caso.responsable || "", fecha_limite: toLocalInput(caso.fecha_limite), oferta_bc: caso.oferta_bc || "", pedido_bc: caso.pedido_bc || "", senal_importe: caso.senal_importe ?? "",
       garantia_fabricante: caso.garantia_fabricante || "", garantia_reclamacion: caso.garantia_reclamacion || "", garantia_cubre: caso.garantia_cubre || "", garantia_no_cubre: caso.garantia_no_cubre || "", piezas_previstas: caso.piezas_previstas || "", cita_at: toLocalInput(caso.cita_at), vehiculo: caso.vehiculo || "", tipo: caso.tipo || "", canal: caso.canal || "", consulta: caso.consulta || "" }); }, [caso.id, caso.updated_at]);
@@ -595,7 +616,13 @@
       await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto: `${modo === "descartar" ? "Caso descartado" : "Caso cerrado sin completar"} · ${txt}`, caso_id: caso.id, cliente_id: caso.cliente_id });
       if (await guardar({ estado: modo === "descartar" ? "descartado" : "cerrado", cerrado_at: NOW, recordar_at: null, motivo_cierre: txt }, modo === "descartar" ? "Caso descartado." : "Caso cerrado.")) setCerrando(false);
     };
-    const reabrir = () => guardar({ estado: "respondida", cerrado_at: null }, "Caso reabierto.");
+    const cambiarPaso = async (to, nota, cita) => {
+      await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto: `Paso cambiado a mano: ${est(caso.estado).l} → ${est(to).l}` + (nota ? ` · ${nota}` : ""), caso_id: caso.id, cliente_id: caso.cliente_id });
+      const p = { estado: to, recordar_at: null };
+      if (est(caso.estado).fin) { p.cerrado_at = null; p.motivo_cierre = null; }
+      if (cita) p.cita_at = cita;
+      if (await guardar(p, `Caso llevado a "${est(to).l}".`)) setCambiando(false);
+    };
 
     const s = est(caso.estado), fi = RECORRIDO.indexOf(s.f);
     const oferta = caso.oferta_bc && bcServ.find((x) => x.tipo === "oferta" && norm(x.no) === norm(caso.oferta_bc));
@@ -639,7 +666,8 @@
           s.gar ? null : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center" } },
             RECORRIDO.map((f, i) => { const done = s.f === "cerrado" || i < fi, cur = i === fi; return h("div", { key: f, style: { borderRadius: "6px", padding: "6px 2px", background: cur ? T.rust : done ? CH.verde.bg : T.bgAlt, color: cur ? "#fff" : done ? CH.verde.fg : T.inkSoft } }, ["Consulta", "Presup.", "Piezas", "Cita", "Taller", "Retirar"][i]); })),
           h("div", { style: { marginTop: "12px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Estado actual"), h(Chip, { c: s.c, style: { fontSize: "13px" } }, s.l), chipPlazo(plazo(caso)) ? h(Chip, { c: chipPlazo(plazo(caso)).c }, chipPlazo(plazo(caso)).t) : null),
-          s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("div", { "data-crm-motivo": "1", style: { fontSize: "13px", background: T.bg, borderRadius: "8px", padding: "8px 10px", flex: "1 1 100%", whiteSpace: "pre-wrap" } }, h("b", null, "Motivo del cierre: "), caso.motivo_cierre) : null, h("button", { onClick: reabrir, disabled: guardando, style: btn(T) }, "Reabrir caso"))
+          s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("div", { "data-crm-motivo": "1", style: { fontSize: "13px", background: T.bg, borderRadius: "8px", padding: "8px 10px", flex: "1 1 100%", whiteSpace: "pre-wrap" } }, h("b", null, "Motivo del cierre: "), caso.motivo_cierre) : null, cambiando ? h("div", { style: { flex: "1 1 100%" } }, h(CambioPaso, { T, caso, guardando, onConfirm: cambiarPaso, onCancel: () => setCambiando(false) }))
+              : h("button", { "data-crm-reabrir": "1", onClick: () => setCambiando(true), disabled: guardando, style: btn(T) }, "Reabrir en un paso…"))
             : h("div", { style: { marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" } },
               h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, "Siguiente paso"),
               caso.estado === "comprobante_recibido" ? h("button", { onClick: avisarAna, disabled: guardando, style: btn(T, "wa") }, "💬 Avisar a Ana por WhatsApp") : null,
@@ -647,8 +675,11 @@
               pend ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px" } },
                 h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })),
                 h("button", { disabled: !citaTmp || guardando, onClick: () => paso(pend), style: btn(T, "p") }, "Confirmar cita"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
-              cerrando ? h(CierreBox, { T, que: "caso", guardando, onConfirm: cerrar, onCancel: () => setCerrando(false) })
-                : h("button", { "data-crm-descartar": "1", onClick: () => setCerrando(true), style: { ...btn(T, "s"), alignSelf: "flex-start", color: T.inkSoft, marginTop: "4px" } }, "✕ Descartar o cerrar sin completar…")),
+              cambiando ? h(CambioPaso, { T, caso, guardando, onConfirm: cambiarPaso, onCancel: () => setCambiando(false) })
+                : cerrando ? h(CierreBox, { T, que: "caso", guardando, onConfirm: cerrar, onCancel: () => setCerrando(false) })
+                : h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px" } },
+                  h("button", { "data-crm-cambiar-paso": "1", onClick: () => setCambiando(true), style: { ...btn(T, "s"), color: T.inkSoft } }, "↺ Cambiar de paso (atrás o adelante)…"),
+                  h("button", { "data-crm-descartar": "1", onClick: () => setCerrando(true), style: { ...btn(T, "s"), color: T.inkSoft } }, "✕ Descartar o cerrar sin completar…"))),
           msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: /^No se|no lo aceptó/.test(msg) ? T.danger : T.ok } }, msg) : null),
 
         h(ExpedientesCaso, { T, caso, onPasar: pasar, pasando }),
