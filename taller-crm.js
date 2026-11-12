@@ -302,6 +302,8 @@
     const [clienteId, setClienteId] = useState(() => { try { const x = localStorage.getItem("acllar_crm_abrir_cliente"); if (x) localStorage.removeItem("acllar_crm_abrir_cliente"); return x || null; } catch (e) { return null; } });
     const [nueva, setNueva] = useState(null); // null | {} | { bc } | { cliente }
     const [filtroTodos, setFiltroTodos] = useState("abiertos");
+    const [mover, setMover] = useState(null); // { caso, tab } al soltar un caso sobre una pestaña
+    const [sobre, setSobre] = useState(null); // pestaña bajo el cursor mientras se arrastra
     const rol = window.acllarCloud && window.acllarCloud.rol ? window.acllarCloud.rol() : null;
     const sinAcceso = rol && rol !== "admin" && rol !== "comercial";
 
@@ -356,7 +358,13 @@
       return null;
     };
 
-    const tabBtn = (id, label, n, tone) => h("button", { key: id, onClick: () => cambiarVista(id), style: { cursor: "pointer", border: "none", background: "transparent", fontFamily: "inherit", color: vista === id ? T.ink : T.inkSoft, fontWeight: vista === id ? 800 : 700, fontSize: "14px", padding: "10px 14px", borderBottom: `3px solid ${vista === id ? T.rust : "transparent"}`, marginBottom: "-2px", display: "flex", alignItems: "center", gap: "6px" } },
+    const DESTINOS = ["metoca", "espera", "prov", "cerrados", "descartados"];
+    const soltar = (id) => DESTINOS.includes(id) ? {
+      onDragOver: (e) => { if (e.dataTransfer.types.includes("text/caso")) { e.preventDefault(); if (sobre !== id) setSobre(id); } },
+      onDragLeave: () => setSobre(null),
+      onDrop: (e) => { e.preventDefault(); setSobre(null); const cid = e.dataTransfer.getData("text/caso"); const c = casos.find((x) => x.id === cid); if (c) setMover({ caso: c, tab: id }); },
+    } : {};
+    const tabBtn = (id, label, n, tone) => h("button", { key: id, "data-crm-tab": id, onClick: () => cambiarVista(id), ...soltar(id), style: { cursor: "pointer", border: "none", background: sobre === id ? CH.azul.bg : "transparent", outline: sobre === id ? `2px dashed ${CH.azul.bd}` : "none", borderRadius: sobre === id ? "8px 8px 0 0" : 0, fontFamily: "inherit", color: vista === id ? T.ink : T.inkSoft, fontWeight: vista === id ? 800 : 700, fontSize: "14px", padding: "10px 14px", borderBottom: `3px solid ${vista === id ? T.rust : "transparent"}`, marginBottom: "-2px", display: "flex", alignItems: "center", gap: "6px" } },
       label, n != null ? h(Chip, { c: tone || "gris" }, n) : null);
 
     return h("div", { "data-crm": "1", style: { fontFamily: F.body, color: T.ink, display: "flex", flexDirection: "column", gap: "16px" } },
@@ -387,9 +395,10 @@
               const xs = listas.espera.filter((c) => pel(c) === k);
               if (!xs.length && !vac) return null;
               return h("div", { key: k, style: { display: "flex", flexDirection: "column", gap: "8px" } }, h("div", { style: { fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft } }, `${tit} (${xs.length})`),
-                h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, vacio: vac }));
+                h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, vacio: vac, arrastrable: true }));
             }))
-          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "cerrados" ? "Aún no hay casos terminados." : vista === "descartados" ? "No hay casos descartados." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
+          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, arrastrable: true, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "cerrados" ? "Aún no hay casos terminados." : vista === "descartados" ? "No hay casos descartados." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
+      mover ? h(MoverDialog, { T, F, ...mover, onClose: () => setMover(null), onSaved: (c) => { actualizarCaso(c); setMover(null); } }) : null,
       casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, vinculados, sugerencia: sugerencia(casoAbierto), syncAhora, sincronizando, onRefresh: cargar, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
       clienteId ? h(ClientePanel, { T, F, id: clienteId, casos, bcServ, onClose: () => setClienteId(null), onCaso: (id) => { setClienteId(null); setCasoId(id); }, onNueva: (cliente) => { setClienteId(null); setNueva({ cliente }); }, onChanged: cargar }) : null,
       nueva ? h(NuevaConsulta, { T, F, inicial: nueva, onClose: () => setNueva(null), onCreated: (c, gid) => { setNueva(null); actualizarCaso(c); if (gid) abrirExpediente(gid); else setCasoId(c.id); } }) : null);
@@ -449,7 +458,7 @@
   }
 
   // ---------- lista ----------
-  function Lista({ T, casos, bcServ, sugerencia, onOpen, vacio }) {
+  function Lista({ T, casos, bcServ, sugerencia, onOpen, vacio, arrastrable }) {
     if (!casos.length) return h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft, fontSize: "14px" } }, vacio);
     const th = { fontSize: "11px", letterSpacing: ".08em", textTransform: "uppercase", color: T.inkSoft, fontWeight: 700, padding: "10px 12px", textAlign: "left", borderBottom: `1.5px solid ${T.border}` };
     const td = { padding: "11px 12px", borderBottom: `1px solid ${T.border}`, verticalAlign: "top", fontSize: "13.5px" };
@@ -459,7 +468,8 @@
         h("tbody", null, casos.map((c) => {
           const pz = plazo(c), v = chipPlazo(pz), s = est(c.estado);
           const doc = docBC(bcServ, c);
-          return h("tr", { key: c.id, "data-crm-caso": c.id, onClick: () => onOpen(c.id), style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
+          return h("tr", { key: c.id, "data-crm-caso": c.id, onClick: () => onOpen(c.id), draggable: !!(arrastrable && !s.gar), title: arrastrable && !s.gar ? "Clic para abrir · arrastra a otra pestaña para moverlo" : undefined,
+            onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
             h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : s.fin && (c.cerrado_at || c.estado_at) ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.cerrado_at || c.estado_at)) : h("span", { style: { color: T.inkFaint } }, "—")),
             h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: td }, lbl(TIPOS, c.tipo)),
@@ -483,13 +493,52 @@
         const xs = casos.filter((c) => est(c.estado).f === f);
         return h("section", { key: f, style: { background: T.bgAlt, borderRadius: "14px", padding: "10px", display: "flex", flexDirection: "column", gap: "8px", minHeight: "200px" } },
           h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft, padding: "4px 2px" } }, h("span", null, nombre), h(Chip, null, xs.length)),
-          xs.map((c) => { const v = chipPlazo(plazo(c)), s = est(c.estado); return h("button", { key: c.id, onClick: () => onOpen(c.id), style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
+          xs.map((c) => { const v = chipPlazo(plazo(c)), s = est(c.estado); return h("button", { key: c.id, "data-crm-card": c.id, onClick: () => onOpen(c.id), draggable: true, title: "Clic para abrir · arrastra a una pestaña para moverlo", onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
             h("b", null, nombreCli(c.cliente)), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lbl(TIPOS, c.tipo)].filter(Boolean).join(" · ")),
             h("span", null, h(Chip, { c: s.c }, s.l)), v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
       })));
   }
 
   // ---------- ficha del caso ----------
+  // Mover un caso soltándolo sobre una pestaña: se propone el paso más lógico de esa pestaña y se confirma.
+  const TAB_NOMBRE = { metoca: "Mis tareas", espera: "Esperando al cliente", prov: "Esperando piezas / proveedor", cerrados: "Cerrados", descartados: "Descartados" };
+  const SUGERIDO = {
+    espera: { pendiente_respuesta: "respondida", respondida: "respondida", presupuesto_por_hacer: "presupuesto_enviado", presupuesto_hecho: "presupuesto_enviado", aceptado: "senal_solicitada", contabilidad_avisada: "senal_solicitada", piezas_pedidas: "avisado_retirar", piezas_recibidas: "avisado_retirar", vehiculo_recibido: "avisado_retirar", trabajo_terminado: "avisado_retirar" },
+    metoca: { respondida: "presupuesto_por_hacer", presupuesto_enviado: "aceptado", senal_solicitada: "comprobante_recibido", cliente_avisado_piezas: "piezas_recibidas", avisado_retirar: "piezas_recibidas", cita_asignada: "vehiculo_recibido" },
+  };
+  async function moverCaso(caso, to, nota, extra) {
+    await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto: `Movido a "${est(to).l}" (desde ${est(caso.estado).l})` + (nota ? ` · ${nota}` : ""), caso_id: caso.id, cliente_id: caso.cliente_id });
+    const p = { estado: to, recordar_at: null, ...(extra || {}) };
+    if (est(caso.estado).fin && !est(to).fin) { p.cerrado_at = null; p.motivo_cierre = null; }
+    if (est(to).fin && !p.cerrado_at) p.cerrado_at = new Date().toISOString();
+    return await sb().from("crm_casos").update(p).eq("id", caso.id).select("*, cliente:crm_clientes(*)").single();
+  }
+  function MoverDialog({ T, F, caso, tab, onClose, onSaved }) {
+    const pelotas = { metoca: ["nos"], espera: ["cli", "cita"], prov: ["prov"] }[tab];
+    const opciones = tab === "cerrados" ? ["retirado"] : pelotas ? PASOS_MANUALES.filter((k) => pelotas.includes((PL[k] || {}).p) && k !== caso.estado) : [];
+    const sug = (SUGERIDO[tab] || {})[caso.estado];
+    const [to, setTo] = useState(opciones.includes(sug) ? sug : opciones[0] || "");
+    const [nota, setNota] = useState(""); const [cita, setCita] = useState(toLocalInput(caso.cita_at));
+    const [trab, setTrab] = useState(false); const [err, setErr] = useState("");
+    const I = inp(T);
+    const ir = async (destino, n, extra) => { setTrab(true); setErr(""); const { data, error } = await moverCaso(caso, destino, n, extra); setTrab(false); if (error) { setErr("No se pudo mover: " + error.message); return; } onSaved(data); };
+    return h("div", { role: "dialog", "aria-label": "Mover caso", style: { position: "fixed", inset: 0, zIndex: 1260, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "60px 12px", overflowY: "auto" } },
+      h("div", { onClick: onClose, style: { position: "fixed", inset: 0, background: "rgba(15,27,46,.35)" } }),
+      h("div", { style: { position: "relative", width: "min(560px, 100%)", background: T.surface, borderRadius: "16px", border: `1px solid ${T.border}`, padding: "20px", display: "flex", flexDirection: "column", gap: "12px", fontFamily: F.body, color: T.ink } },
+        h("div", { style: { fontFamily: F.display, fontSize: "20px", fontWeight: 800 } }, `Mover a ${TAB_NOMBRE[tab]}`),
+        h("div", { style: { fontSize: "13.5px", color: T.inkSoft } }, h("b", { style: { color: T.ink } }, nombreCli(caso.cliente)), ` · ${caso.vehiculo || lbl(TIPOS, caso.tipo)} · ahora en "${est(caso.estado).l}"`),
+        tab === "descartados" ? h(CierreBox, { T, que: "caso", guardando: trab, onCancel: onClose, onConfirm: (modo, mot, n) => ir(modo === "descartar" ? "descartado" : "cerrado", `${mot}: ${n}`, { motivo_cierre: `${mot}: ${n}` }) })
+          : !opciones.length ? h("div", { style: { fontSize: "13px" } }, "No hay ningún paso de esa pestaña al que llevarlo.")
+          : h(React.Fragment, null,
+            tab === "cerrados" ? h("div", { style: { fontSize: "13.5px" } }, "Se marcará como ", h("b", null, "Retirado"), " (trabajo terminado y entregado).")
+              : h(Field, { T, label: "¿En qué paso queda?" }, h("select", { "data-mover-destino": "1", value: to, onChange: (e) => setTo(e.target.value), style: I }, opciones.map((k) => h("option", { key: k, value: k }, `${E[k].l} — ${(PL[k] || {}).a || ""}`)))),
+            to === "cita_asignada" ? h(Field, { T, label: "Fecha y hora de la cita" }, h("input", { type: "datetime-local", value: cita || "", onChange: (e) => setCita(e.target.value), style: I })) : null,
+            h(Field, { T, label: "Nota (opcional)" }, h("textarea", { rows: 2, "data-mover-nota": "1", value: nota, onChange: (e) => setNota(e.target.value), style: { ...I, resize: "vertical" } })),
+            h("div", { style: { display: "flex", gap: "8px", justifyContent: "flex-end" } }, h("button", { onClick: onClose, style: btn(T) }, "Cancelar"),
+              h("button", { "data-mover-ok": "1", disabled: trab || !to || (to === "cita_asignada" && !cita), onClick: () => ir(to, nota.trim(), to === "cita_asignada" ? { cita_at: fromLocalInput(cita) } : null), style: btn(T, "p") }, trab ? "Moviendo…" : "Mover"))),
+        err ? h("div", { style: { color: T.danger, fontSize: "13px" } }, err) : null,
+        h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Queda anotado en la bitácora y el plazo empieza de nuevo.")));
+  }
   // Cambiar de paso a mano (atrás o adelante): para cuando la realidad no sigue el orden previsto.
   const PASOS_MANUALES = Object.keys(E).filter((k) => !E[k].fin && !/^garantia_|cobertura/.test(k));
   function CambioPaso({ T, caso, onConfirm, onCancel, guardando }) {
