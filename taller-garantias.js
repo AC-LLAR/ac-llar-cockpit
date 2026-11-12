@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -39,10 +39,11 @@
     cita_pedida: { l: "Cita pedida", c: "azul", chasis: true, sig: [{ to: "en_concesionario", l: "Vehículo en el concesionario" }, { to: "cerrada", l: "Cerrar" }] },
     en_concesionario: { l: "En el concesionario", c: "violeta", chasis: true, sig: [{ to: "cerrada", l: "Vuelto · cerrar" }] },
     cerrada: { l: "Cerrada", c: "gris", fin: true, f: 4, sig: [] },
+    descartada: { l: "Descartada", c: "gris", fin: true, f: 4, sig: [] },
   };
   const est = (k) => EST[k] || { l: k || "—", c: "gris", sig: [] };
   const FASES = ["Consulta", "Análisis y respuesta", "Fabricante", "Cita", "Cerrado"];
-  const CAMPOS = { estado: "Estado", fabricante: "Fabricante", descripcion: "Descripción", reclamacion_no: "Nº de gestión del fabricante", resultado: "Resultado", concesionario: "Concesionario", cita_at: "Cita",
+  const CAMPOS = { estado: "Estado", fabricante: "Fabricante", descripcion: "Descripción", reclamacion_no: "Nº de gestión del fabricante", motivo_cierre: "Motivo del cierre", resultado: "Resultado", concesionario: "Concesionario", cita_at: "Cita",
     notas: "Notas", vehiculo: "Vehículo", tramitada_at: "Tramitada", resolucion_at: "Resolución", horas: "Horas", horas_aprobadas: "Horas aprobadas", mecanico: "Mecánico", fecha: "Fecha",
     referencia: "Referencia", cantidad: "Cantidad", origen_pieza: "Origen", repuesto_recibido_at: "Recibida / repuesta", anulada: "Anulada", fecha_entrada: "Entrada", archivado: "Archivado",
     cobertura: "Cobertura", info_pedida_at: "Información pedida", cliente_informado_at: "Cliente informado", presupuesto_caso_id: "Presupuesto en Casos", tipo: "Tipo", caso_id: "Caso" };
@@ -246,6 +247,7 @@
     const [d, setD] = useState({}); const [msg, setMsg] = useState(""); const [trab, setTrab] = useState(false);
     const [nuevoProb, setNuevoProb] = useState(""); const [nuevoH, setNuevoH] = useState(""); const [verFoto, setVerFoto] = useState(null);
     const [pend, setPend] = useState(null); const [citaTmp, setCitaTmp] = useState(""); const [codTmp, setCodTmp] = useState("");
+    const [cerrando, setCerrando] = useState(false);
     const [verFicha, setVerFicha] = useState(false); const [bitKey, setBitKey] = useState(0); const [alta, setAlta] = useState("");
     const I = inp(T);
     const cargar = async () => {
@@ -341,6 +343,14 @@
       await anotar("nota", `Creado caso de presupuesto en Casos por lo que no cubre la garantía.`);
     };
     const resumen = () => abrirResumen(g, ls, fotos, urls, t);
+    const cerrarSin = async (modo, mot, nota) => {
+      const txt = `${mot}: ${nota}`;
+      if (await upd({ estado: modo === "descartar" ? "descartada" : "cerrada", motivo_cierre: txt, recordar_at: null }, modo === "descartar" ? "Expediente descartado." : "Expediente cerrado.")) {
+        await anotar("nota", `${modo === "descartar" ? "Expediente descartado" : "Expediente cerrado sin completar"} · ${txt}`);
+        if (g.caso_id) await sb().from("crm_casos").update({ motivo_cierre: txt }).eq("id", g.caso_id);
+        setCerrando(false);
+      }
+    };
     const sig = s.sig.filter(pasoVisible(g));
     const lblFase = (i) => { const done = s.fin || (s.f != null && i < s.f), cur = i === s.f; return h("div", { key: i, style: { borderRadius: "6px", padding: "6px 2px", background: cur ? T.rust : done ? CH.verde.bg : T.bgAlt, color: cur ? "#fff" : done ? CH.verde.fg : T.inkSoft } }, FASES[i]); };
 
@@ -376,8 +386,11 @@
               pend.cita ? h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", "data-g-cita": "1", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })) : null,
               h("button", { "data-g-confirmar": "1", disabled: trab || (pend.cita && !citaTmp), onClick: () => paso(pend), style: btn(T, "p") }, pend.codigo && !codTmp.trim() ? "Confirmar sin nº (lo pongo luego)" : "Confirmar"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
             pend && pend.codigo ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "El seguimiento de la tramitación se lleva en la web del fabricante. Aquí solo queda la fecha y su nº de gestión.") : null,
-            pend && pend.cita ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Pon una fecha en la que sepas que las piezas ya habrán llegado.") : null)
-            : h("button", { onClick: () => upd({ estado: chasis ? "abierta" : "analisis" }, "Expediente reabierto."), style: { ...btn(T), marginTop: "10px" } }, "Reabrir"),
+            pend && pend.cita ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Pon una fecha en la que sepas que las piezas ya habrán llegado.") : null,
+            cerrando ? h(CierreBox, { T, que: "expediente", guardando: trab, onConfirm: cerrarSin, onCancel: () => setCerrando(false) })
+              : h("button", { "data-g-descartar": "1", onClick: () => setCerrando(true), style: { ...btn(T, "s"), alignSelf: "flex-start", color: T.inkSoft, marginTop: "4px" } }, "✕ Descartar o cerrar sin completar…"))
+            : h(React.Fragment, null, g.motivo_cierre ? h("div", { style: { fontSize: "13px", background: T.bg, borderRadius: "8px", padding: "8px 10px", marginTop: "10px", whiteSpace: "pre-wrap" } }, h("b", null, "Motivo del cierre: "), g.motivo_cierre) : null,
+              h("button", { onClick: () => upd({ estado: chasis ? "abierta" : "analisis", motivo_cierre: null }, "Expediente reabierto."), style: { ...btn(T), marginTop: "10px" } }, "Reabrir")),
           msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: /^No se|no tiene/.test(msg) ? T.danger : T.ok } }, msg) : null),
 
         // ---- cliente

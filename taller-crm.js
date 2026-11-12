@@ -68,7 +68,8 @@
     retirado: { l: "Retirado", f: "cerrado", c: "gris", fin: true },
     rechazado: { l: "Rechazado", f: "cerrado", c: "gris", fin: true },
     sin_respuesta: { l: "Sin respuesta", f: "cerrado", c: "gris", fin: true },
-    cerrado: { l: "Cerrado", f: "cerrado", c: "gris", fin: true },
+    cerrado: { l: "Cerrado sin completar", f: "cerrado", c: "gris", fin: true },
+    descartado: { l: "Descartado", f: "cerrado", c: "gris", fin: true },
     en_garantias: { l: "En Garantías", f: "cerrado", c: "violeta", fin: true, gar: true },
   };
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
@@ -458,7 +459,7 @@
             h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : h("span", { style: { color: T.inkFaint } }, "—")),
             h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: td }, lbl(TIPOS, c.tipo)),
-            h("td", { style: td }, h(Chip, { c: s.c }, s.l)),
+            h("td", { style: td }, h(Chip, { c: s.c }, s.l), s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
             h("td", { style: td }, pz ? pz.accion : h("span", { style: { color: T.inkFaint } }, "—"), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, pz ? `${PELOTA[pz.pel]}${c.responsable && pz.pel === "nos" ? " · " + c.responsable : ""}` : "")),
             h("td", { style: td }, doc ? h(React.Fragment, null, h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" } }, doc.no), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, `${doc.tipo === "oferta" ? "Oferta" : "Pedido"} · ${eur(doc.importe_iva)}`))
               : c.garantia_100 ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, "100 % garantía") : h("span", { style: { color: T.inkFaint } }, "—"),
@@ -485,6 +486,25 @@
   }
 
   // ---------- ficha del caso ----------
+  // Descartar o cerrar sin completar: motivo rápido + nota final obligatoria (queda también en la bitácora)
+  const MOTIVOS = {
+    descartar: ["No es trabajo nuestro", "No nos interesa / no compensa", "Fuera de zona", "Otro"],
+    cerrar: ["El cliente no responde", "No acepta el presupuesto", "Lo arregló en otro taller", "El cliente lo ha cancelado", "Otro"],
+  };
+  function CierreBox({ T, que, onConfirm, onCancel, guardando }) {
+    const [modo, setModo] = useState("descartar"); const [mot, setMot] = useState(""); const [nota, setNota] = useState("");
+    const I = inp(T);
+    const ok = mot && nota.trim().length >= 3;
+    return h("div", { "data-cierre": "1", style: { background: T.bg, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px", display: "flex", flexDirection: "column", gap: "10px" } },
+      h(Seg, { T, opts: [["descartar", `Descartar ${que}`], ["cerrar", "Cerrar sin completar"]], value: modo, onChange: (v) => { setModo(v); setMot(""); } }),
+      h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, modo === "descartar" ? `El ${que} no es de nuestro interés: se cierra sin seguir.` : `El ${que} se ha caído por el camino: se cierra en el paso en que está.`),
+      h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, MOTIVOS[modo].map((m) => h("button", { key: m, type: "button", "data-motivo": m, onClick: () => setMot(m), style: { ...btn(T, "s"), background: mot === m ? T.ink : T.surface, color: mot === m ? T.bg : T.ink } }, m))),
+      h(Field, { T, label: "Nota final: por qué se cierra" }, h("textarea", { rows: 2, "data-cierre-nota": "1", value: nota, onChange: (e) => setNota(e.target.value), placeholder: "Explícalo brevemente", style: { ...I, resize: "vertical" } })),
+      h("div", { style: { display: "flex", gap: "8px" } },
+        h("button", { "data-cierre-ok": "1", disabled: !ok || guardando, onClick: () => onConfirm(modo, mot, nota.trim()), style: btn(T, "p") }, modo === "descartar" ? `Descartar ${que}` : `Cerrar ${que}`),
+        h("button", { onClick: onCancel, style: btn(T) }, "Cancelar"),
+        !ok ? h("span", { style: { fontSize: "12px", color: T.inkSoft, alignSelf: "center" } }, "Elige un motivo y escribe la nota.") : null));
+  }
   // Plazo del paso actual: quién tiene la pelota, qué toca, cuándo vence; responsable y "recordármelo el…"
   function PlazoBox({ T, caso, guardar, guardando }) {
     const pz = plazo(caso); const ch = chipPlazo(pz);
@@ -570,7 +590,11 @@
       window.open(`https://wa.me/${ANA_TEL}?text=${encodeURIComponent(txt)}`, "_blank", "noopener");
       await guardar({ senal_aviso_at: NOW, ...(caso.estado === "comprobante_recibido" ? { estado: "contabilidad_avisada" } : {}) }, "WhatsApp a Ana abierto y aviso registrado.");
     };
-    const cerrar = async () => { if (await guardar({ estado: "cerrado", cerrado_at: NOW, motivo_cierre: motivo.trim() || null })) { setCerrando(false); setMotivo(""); } };
+    const cerrar = async (modo, mot, nota) => {
+      const txt = `${mot}: ${nota}`;
+      await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto: `${modo === "descartar" ? "Caso descartado" : "Caso cerrado sin completar"} · ${txt}`, caso_id: caso.id, cliente_id: caso.cliente_id });
+      if (await guardar({ estado: modo === "descartar" ? "descartado" : "cerrado", cerrado_at: NOW, recordar_at: null, motivo_cierre: txt }, modo === "descartar" ? "Caso descartado." : "Caso cerrado.")) setCerrando(false);
+    };
     const reabrir = () => guardar({ estado: "respondida", cerrado_at: null }, "Caso reabierto.");
 
     const s = est(caso.estado), fi = RECORRIDO.indexOf(s.f);
@@ -615,7 +639,7 @@
           s.gar ? null : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center" } },
             RECORRIDO.map((f, i) => { const done = s.f === "cerrado" || i < fi, cur = i === fi; return h("div", { key: f, style: { borderRadius: "6px", padding: "6px 2px", background: cur ? T.rust : done ? CH.verde.bg : T.bgAlt, color: cur ? "#fff" : done ? CH.verde.fg : T.inkSoft } }, ["Consulta", "Presup.", "Piezas", "Cita", "Taller", "Retirar"][i]); })),
           h("div", { style: { marginTop: "12px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Estado actual"), h(Chip, { c: s.c, style: { fontSize: "13px" } }, s.l), chipPlazo(plazo(caso)) ? h(Chip, { c: chipPlazo(plazo(caso)).c }, chipPlazo(plazo(caso)).t) : null),
-          s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Motivo: " + caso.motivo_cierre) : null, h("button", { onClick: reabrir, disabled: guardando, style: btn(T) }, "Reabrir caso"))
+          s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("div", { "data-crm-motivo": "1", style: { fontSize: "13px", background: T.bg, borderRadius: "8px", padding: "8px 10px", flex: "1 1 100%", whiteSpace: "pre-wrap" } }, h("b", null, "Motivo del cierre: "), caso.motivo_cierre) : null, h("button", { onClick: reabrir, disabled: guardando, style: btn(T) }, "Reabrir caso"))
             : h("div", { style: { marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" } },
               h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, "Siguiente paso"),
               caso.estado === "comprobante_recibido" ? h("button", { onClick: avisarAna, disabled: guardando, style: btn(T, "wa") }, "💬 Avisar a Ana por WhatsApp") : null,
@@ -623,10 +647,8 @@
               pend ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px" } },
                 h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })),
                 h("button", { disabled: !citaTmp || guardando, onClick: () => paso(pend), style: btn(T, "p") }, "Confirmar cita"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
-              cerrando ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px" } },
-                h(Field, { T, label: "Motivo del cierre", style: { flex: 1 } }, h("input", { value: motivo, onChange: (e) => setMotivo(e.target.value), placeholder: "p. ej. lo arregló en otro taller", style: I })),
-                h("button", { onClick: cerrar, disabled: guardando, style: btn(T) }, "Cerrar caso"), h("button", { onClick: () => setCerrando(false), style: btn(T) }, "Cancelar"))
-                : h("button", { onClick: () => setCerrando(true), style: { ...btn(T, "s"), alignSelf: "flex-start", color: T.inkSoft } }, "Cerrar caso…")),
+              cerrando ? h(CierreBox, { T, que: "caso", guardando, onConfirm: cerrar, onCancel: () => setCerrando(false) })
+                : h("button", { "data-crm-descartar": "1", onClick: () => setCerrando(true), style: { ...btn(T, "s"), alignSelf: "flex-start", color: T.inkSoft, marginTop: "4px" } }, "✕ Descartar o cerrar sin completar…")),
           msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: /^No se|no lo aceptó/.test(msg) ? T.danger : T.ok } }, msg) : null),
 
         h(ExpedientesCaso, { T, caso, onPasar: pasar, pasando }),
@@ -991,5 +1013,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
