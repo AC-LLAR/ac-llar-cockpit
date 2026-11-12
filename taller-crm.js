@@ -74,7 +74,7 @@
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
   const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["taller", "En taller"], ["retirar", "Para retirar"]];
   const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "taller", "retirar"];
-  const CAMPOS = { estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
+  const CAMPOS = { estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
     garantia_100: "100 % garantía", senal_importe: "Importe señal", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
     piezas_previstas: "Llegada de piezas", cita_at: "Cita", cerrado_at: "Cerrado", motivo_cierre: "Motivo de cierre", archivado: "Archivado", rama: "Rama", vehiculo: "Vehículo",
@@ -114,24 +114,66 @@
   }
 
   // Avisos por tiempo (umbrales validados el 07/11/2026).
-  function aviso(c) {
-    const e = c.estado, hEst = horas(c.estado_at || c.created_at);
-    if (e === "pendiente_respuesta" && horas(c.created_at) > 24) return { t: `Sin responder ${Math.floor(horas(c.created_at))} h`, c: "rojo" };
-    if (e === "presupuesto_por_hacer" && hEst > 72) return { t: `Presupuesto sin hacer ${Math.floor(hEst / 24)} d`, c: "rojo" };
-    if (e === "presupuesto_enviado" && hEst > 168) return { t: `Enviado · ${Math.floor(hEst / 24)} d sin respuesta`, c: "rojo" };
-    if (e === "senal_solicitada" && hEst > 120) return { t: `Señal pedida hace ${Math.floor(hEst / 24)} d`, c: "rojo" };
-    if (e && e.startsWith("garantia_") && horas(c.garantia_ultimo_contacto || c.estado_at) > 168) return { t: "Fabricante: +7 d sin contacto", c: "rojo" };
-    if (e === "trabajo_terminado") return mismoDia(new Date(c.estado_at || c.created_at), new Date()) ? { t: "Avisar hoy al cliente", c: "ambar" } : { t: "Terminado · sin avisar", c: "rojo" };
-    return null;
+  // Plazos por paso: quién tiene la pelota, qué toca hacer y cuánto puede estar parado (h = horas; 0 = el mismo día).
+  // El plazo empieza al entrar en el paso; al avanzar se reinicia. Rojo solo si está vencido.
+  const PL = {
+    pendiente_respuesta: { p: "nos", a: "Responder al cliente", h: 48 },
+    respondida: { p: "cli", a: "Esperar su decisión", h: 120, v: "Volver a contactar" },
+    presupuesto_por_hacer: { p: "nos", a: "Hacer la oferta en BC", h: 48 },
+    presupuesto_hecho: { p: "nos", a: "Enviar el presupuesto al cliente", h: 12 },
+    presupuesto_enviado: { p: "cli", a: "Esperar que acepte el presupuesto", h: 168, v: "Recordar al cliente" },
+    aceptado: { p: "nos", a: "Pedir la señal o dar cita", h: 48 },
+    senal_solicitada: { p: "cli", a: "Esperar la transferencia y el comprobante", h: 120, v: "Recordar la señal" },
+    comprobante_recibido: { p: "nos", a: "Avisar a Ana", h: 0 },
+    contabilidad_avisada: { p: "nos", a: "Pedir las piezas", h: 48 },
+    piezas_pedidas: { p: "nos", a: "Avisar al cliente: piezas pedidas", h: 24 },
+    cliente_avisado_piezas: { p: "prov", a: "Esperar las piezas", h: 360, v: "Reclamar al proveedor" },
+    piezas_recibidas: { p: "nos", a: "Avisar al cliente o dar cita", h: 48 },
+    cita_asignada: { p: "cita", a: "Recibir el vehículo" },
+    vehiculo_recibido: { p: "nos", a: "Reparar", h: 120 },
+    trabajo_terminado: { p: "nos", a: "Avisar al cliente para retirar", h: 1 },
+    avisado_retirar: { p: "cli", a: "Que venga a recogerlo", h: 48, v: "Recordar que lo recoja" },
+    garantia_analisis: { p: "nos", a: "Analizar la garantía", h: 72 },
+    garantia_solicitada: { p: "prov", a: "Esperar al fabricante", h: 168, v: "Reclamar al fabricante" },
+    garantia_seguimiento: { p: "prov", a: "Esperar al fabricante", h: 168, v: "Reclamar al fabricante" },
+    garantia_parcial: { p: "nos", a: "Avisar al cliente de qué cubre", h: 24 },
+    cliente_avisado_cobertura: { p: "nos", a: "Pedir piezas o señal", h: 48 },
+  };
+  const PELOTA = { nos: "Nosotros", cli: "Cliente", prov: "Proveedor / fabricante", cita: "Cita" };
+  const finDia = (d) => { const x = new Date(d); x.setHours(23, 59, 0, 0); return x; };
+  function plazo(c) {
+    if (!c || est(c.estado).fin) return null;
+    const P = PL[c.estado] || { p: "nos", a: "Seguir con el caso", h: 48 };
+    const now = new Date(), ini = new Date(c.estado_at || c.created_at);
+    let pel = P.p, accion = P.a, limite;
+    if (c.estado === "piezas_recibidas" && c.cita_at && new Date(c.cita_at) > now) { pel = "cita"; accion = "Recibir el vehículo (cita ya dada)"; }
+    if (pel === "cita") {
+      if (!c.cita_at) { pel = "nos"; accion = "Poner fecha a la cita"; limite = finDia(ini); }
+      else { limite = new Date(c.cita_at); if (mismoDia(limite, now) || limite < now) pel = "nos"; }
+    } else limite = P.h === 0 ? finDia(ini) : new Date(ini.getTime() + P.h * 36e5);
+    const esCita = c.estado === "cita_asignada" || (c.estado === "piezas_recibidas" && accion.includes("cita ya dada"));
+    const pospuesto = c.recordar_at && new Date(c.recordar_at) > now ? new Date(c.recordar_at) : null;
+    let nivel = "ok";
+    if (pospuesto) nivel = "pospuesto";
+    else if (esCita) nivel = mismoDia(limite, now) ? "hoy" : limite < now ? "vencido" : "ok";
+    else if (limite < now) nivel = "vencido";
+    else if (mismoDia(limite, now)) nivel = "hoy";
+    if (esCita && nivel === "vencido") accion = "Cita pasada: ¿llegó el vehículo?";
+    else if (nivel === "vencido" && P.v) accion = P.v;
+    return { pel, accion, limite, nivel, pospuesto, esCita, desde: ini };
   }
-  function vence(c) {
-    if (!c.fecha_limite || est(c.estado).fin) return null;
-    const d = new Date(c.fecha_limite), now = new Date();
-    if (d < now && !mismoDia(d, now)) return { t: `VENCIDO ${Math.max(1, Math.floor((now - d) / 864e5))} d`, c: "rojo", ord: 0 };
-    if (mismoDia(d, now)) return { t: d < now ? `Hoy ${pad(d.getHours())}:${pad(d.getMinutes())} · vencido` : `Hoy ${pad(d.getHours())}:${pad(d.getMinutes())}`, c: d < now ? "rojo" : "ambar", ord: 1 };
-    const dias = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
-    return { t: `${dias[d.getDay()]} ${fFecha(d.toISOString())}`, c: "gris", ord: 2 };
+  const durTxt = (ms) => { const hh = Math.max(0, ms) / 36e5; return hh < 1 ? `${Math.max(1, Math.round(hh * 60))} min` : hh < 48 ? `${Math.floor(hh)} h` : `${Math.floor(hh / 24)} d`; };
+  const diaHora = (d) => `${["dom", "lun", "mar", "mié", "jue", "vie", "sáb"][d.getDay()]} ${fFecha(d.toISOString())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  function chipPlazo(pz) {
+    if (!pz) return null;
+    const now = Date.now();
+    if (pz.nivel === "pospuesto") return { c: "gris", t: `Pospuesto hasta ${fFecha(pz.pospuesto.toISOString())}` };
+    if (pz.esCita) return pz.nivel === "hoy" ? { c: "ambar", t: `Cita hoy ${pad(pz.limite.getHours())}:${pad(pz.limite.getMinutes())}` } : pz.nivel === "vencido" ? { c: "rojo", t: "Cita pasada" } : { c: "gris", t: `Cita ${diaHora(pz.limite)}` };
+    if (pz.nivel === "vencido") return { c: "rojo", t: pz.pel === "nos" ? `Vencido hace ${durTxt(now - pz.limite)}` : `${pz.accion} · ${durTxt(now - pz.desde)}` };
+    if (pz.nivel === "hoy") return { c: "ambar", t: `Hoy ${pad(pz.limite.getHours())}:${pad(pz.limite.getMinutes())}` };
+    return { c: "gris", t: pz.pel === "nos" ? `Quedan ${durTxt(pz.limite - now)}` : `Esperando ${durTxt(now - pz.desde)}` };
   }
+  const ordPlazo = (a, b) => { const r = { vencido: 0, hoy: 1, ok: 2, pospuesto: 3 }; const x = plazo(a), y = plazo(b); if (!x || !y) return (x ? 0 : 1) - (y ? 0 : 1); return (r[x.nivel] - r[y.nivel]) || (x.limite - y.limite); };
 
   // ---------- piezas visuales ----------
   const Chip = ({ c = "gris", children, title, style }) => { const k = CH[c] || CH.gris; return h("span", { title, style: { display: "inline-block", fontWeight: 700, fontSize: "11.5px", borderRadius: "7px", padding: "2px 8px", border: `1px solid ${k.bd}`, background: k.bg, color: k.fg, whiteSpace: "nowrap", lineHeight: 1.45, ...style } }, children); };
@@ -249,7 +291,7 @@
   // Vista principal
   // =====================================================================
   function CRMView({ T, F }) {
-    const [vista, setVista] = useState(() => { try { return localStorage.getItem("acllar_crm_vista") || "metoca"; } catch (e) { return "metoca"; } });
+    const [vista, setVista] = useState(() => { try { const v = localStorage.getItem("acllar_crm_vista"); return v && v !== "bandeja" ? v : "metoca"; } catch (e) { return "metoca"; } });
     const [casos, setCasos] = useState([]);
     const [bcServ, setBcServ] = useState([]);
     const [sync, setSync] = useState(null);
@@ -286,14 +328,15 @@
 
     const abiertos = casos.filter((c) => !est(c.estado).fin);
     const me = yo();
-    const ordVence = (a, b) => { const x = a.fecha_limite ? new Date(a.fecha_limite).getTime() : Infinity, y = b.fecha_limite ? new Date(b.fecha_limite).getTime() : Infinity; return x - y; };
+    const ordVence = ordPlazo;
+    const pel = (c) => (plazo(c) || {}).pel;
     const listas = {
-      bandeja: casos.filter((c) => c.estado === "pendiente_respuesta").sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
-      metoca: abiertos.filter((c) => !me || c.responsable === me || !c.responsable).sort(ordVence),
+      metoca: abiertos.filter((c) => pel(c) === "nos" && (!me || c.responsable === me || !c.responsable)).sort(ordPlazo),
+      espera: abiertos.filter((c) => ["cli", "prov", "cita"].includes(pel(c))).sort(ordPlazo),
       todos: (filtroTodos === "abiertos" ? abiertos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => est(c.estado).fin && !est(c.estado).gar) : casos).slice().sort(ordVence),
     };
-    const nVencidos = abiertos.filter((c) => { const v = vence(c); return v && v.c === "rojo"; }).length;
-    const nAvisos = abiertos.filter((c) => aviso(c)).length;
+    const nVencidos = listas.metoca.filter((c) => plazo(c).nivel === "vencido").length;
+    const nRecordar = listas.espera.filter((c) => plazo(c).nivel === "vencido").length;
     const ultSync = (sync || []).map((s) => s.ultimo_ok).filter(Boolean).sort().pop();
     const errSync = (sync || []).find((s) => s.ultimo_error);
     const casoAbierto = casoId && casos.find((c) => c.id === casoId);
@@ -316,13 +359,13 @@
         h(Buscador, { T, onCliente: (id) => setClienteId(id), onBC: (bc) => setNueva({ bc }) }),
         h("button", { "data-crm-nueva": "1", onClick: () => setNueva({}), style: { ...btn(T, "p"), height: "46px", padding: "0 20px", fontSize: "15px" } }, "+ Nueva consulta")),
       h("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px", borderBottom: `2px solid ${T.border}` } },
-        tabBtn("bandeja", "Bandeja", listas.bandeja.length, listas.bandeja.length ? "ambar" : "gris"),
-        tabBtn("metoca", me ? "Mis tareas" : "Pendientes", listas.metoca.length, "azul"),
+        tabBtn("metoca", me ? "Mis tareas" : "Pendientes", listas.metoca.length, nVencidos ? "rojo" : "azul"),
+        tabBtn("espera", "Esperando al cliente", listas.espera.length, nRecordar ? "ambar" : "gris"),
         tabBtn("tablero", "Tablero", null),
         tabBtn("todos", "Todos", null),
         h("div", { style: { marginLeft: "auto", display: "flex", gap: "8px", alignItems: "center", paddingBottom: "8px", flexWrap: "wrap" } },
-          nVencidos ? h(Chip, { c: "rojo" }, `${nVencidos} vencido${nVencidos > 1 ? "s" : ""}`) : null,
-          nAvisos ? h(Chip, { c: "ambar" }, `${nAvisos} aviso${nAvisos > 1 ? "s" : ""}`) : null,
+          nVencidos ? h(Chip, { c: "rojo" }, `${nVencidos} tarea${nVencidos > 1 ? "s" : ""} vencida${nVencidos > 1 ? "s" : ""}`) : null,
+          nRecordar ? h(Chip, { c: "ambar" }, `${nRecordar} para recordar al cliente`) : null,
           h("span", { title: errSync ? errSync.ultimo_error : "", style: { fontSize: "12px", color: errSync ? T.danger : T.inkFaint } }, errSync ? "⚠ Error al sincronizar con BC" : ultSync ? `BC sincronizado ${fFechaHora(ultSync)}` : ""),
           h("button", { "data-crm-sync": "1", onClick: syncAhora, disabled: sincronizando, title: "Traer ya los cambios de BC sin esperar a los 10 minutos", style: btn(T, "s") }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC"))),
       error ? h("div", { style: { color: T.danger, fontSize: "13px" } }, error) : null,
@@ -330,7 +373,14 @@
         : vista === "tablero" ? h(Tablero, { T, casos: abiertos, onOpen: setCasoId })
         : h(React.Fragment, null,
           vista === "todos" ? h("div", null, h(Seg, { T, opts: [["abiertos", "Abiertos"], ["garantias", "En Garantías"], ["cerrados", "Cerrados"], ["todos", "Todos"]], value: filtroTodos, onChange: setFiltroTodos })) : null,
-          h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, vacio: vista === "bandeja" ? "No hay consultas sin responder." : "Nada pendiente. Todo al día." })),
+          vista === "espera" ? h(React.Fragment, null,
+            [["cli", "Esperando al cliente", "Nadie espera respuesta del cliente."], ["prov", "Esperando piezas o al fabricante", null], ["cita", "Con cita dada", null]].map(([k, tit, vac]) => {
+              const xs = listas.espera.filter((c) => pel(c) === k);
+              if (!xs.length && !vac) return null;
+              return h("div", { key: k, style: { display: "flex", flexDirection: "column", gap: "8px" } }, h("div", { style: { fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft } }, `${tit} (${xs.length})`),
+                h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, vacio: vac }));
+            }))
+          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : "No hay casos." })),
       casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, vinculados, sugerencia: sugerencia(casoAbierto), syncAhora, sincronizando, onRefresh: cargar, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
       clienteId ? h(ClientePanel, { T, F, id: clienteId, casos, bcServ, onClose: () => setClienteId(null), onCaso: (id) => { setClienteId(null); setCasoId(id); }, onNueva: (cliente) => { setClienteId(null); setNueva({ cliente }); }, onChanged: cargar }) : null,
       nueva ? h(NuevaConsulta, { T, F, inicial: nueva, onClose: () => setNueva(null), onCreated: (c, gid) => { setNueva(null); actualizarCaso(c); if (gid) abrirExpediente(gid); else setCasoId(c.id); } }) : null);
@@ -396,16 +446,16 @@
     const td = { padding: "11px 12px", borderBottom: `1px solid ${T.border}`, verticalAlign: "top", fontSize: "13.5px" };
     return h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", overflowX: "auto" } },
       h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "940px" } },
-        h("thead", null, h("tr", null, ["Vence", "Cliente · vehículo", "Tipo", "Estado", "Próxima acción", "Business Central"].map((x) => h("th", { key: x, style: th }, x)))),
+        h("thead", null, h("tr", null, ["Plazo", "Cliente · vehículo", "Tipo", "Estado", "Próxima acción", "Business Central"].map((x) => h("th", { key: x, style: th }, x)))),
         h("tbody", null, casos.map((c) => {
-          const v = vence(c), av = aviso(c), s = est(c.estado);
+          const pz = plazo(c), v = chipPlazo(pz), s = est(c.estado);
           const doc = docBC(bcServ, c);
           return h("tr", { key: c.id, "data-crm-caso": c.id, onClick: () => onOpen(c.id), style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
-            h("td", { style: td }, v ? h(Chip, { c: v.c }, v.t) : h("span", { style: { color: T.inkFaint } }, "—")),
+            h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : h("span", { style: { color: T.inkFaint } }, "—")),
             h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: td }, lbl(TIPOS, c.tipo)),
-            h("td", { style: td }, h(Chip, { c: s.c }, s.l), av ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: av.c }, av.t)) : null),
-            h("td", { style: td }, c.proxima_accion || h("span", { style: { color: T.inkFaint } }, "—"), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, c.responsable || "")),
+            h("td", { style: td }, h(Chip, { c: s.c }, s.l)),
+            h("td", { style: td }, pz ? pz.accion : h("span", { style: { color: T.inkFaint } }, "—"), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, pz ? `${PELOTA[pz.pel]}${c.responsable && pz.pel === "nos" ? " · " + c.responsable : ""}` : "")),
             h("td", { style: td }, doc ? h(React.Fragment, null, h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" } }, doc.no), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, `${doc.tipo === "oferta" ? "Oferta" : "Pedido"} · ${eur(doc.importe_iva)}`))
               : c.garantia_100 ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, "100 % garantía") : h("span", { style: { color: T.inkFaint } }, "—"),
               sugerencia && sugerencia(c) ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: "azul" }, `${sugerencia(c).tipo === "oferta" ? "Oferta" : "Pedido"} en BC para vincular`)) : null));
@@ -424,13 +474,32 @@
         const xs = casos.filter((c) => est(c.estado).f === f);
         return h("section", { key: f, style: { background: T.bgAlt, borderRadius: "14px", padding: "10px", display: "flex", flexDirection: "column", gap: "8px", minHeight: "200px" } },
           h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft, padding: "4px 2px" } }, h("span", null, nombre), h(Chip, null, xs.length)),
-          xs.map((c) => { const av = aviso(c), v = vence(c), s = est(c.estado); return h("button", { key: c.id, onClick: () => onOpen(c.id), style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
+          xs.map((c) => { const v = chipPlazo(plazo(c)), s = est(c.estado); return h("button", { key: c.id, onClick: () => onOpen(c.id), style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
             h("b", null, nombreCli(c.cliente)), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lbl(TIPOS, c.tipo)].filter(Boolean).join(" · ")),
-            h("span", null, h(Chip, { c: s.c }, s.l)), av ? h("span", null, h(Chip, { c: av.c }, av.t)) : v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
+            h("span", null, h(Chip, { c: s.c }, s.l)), v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
       })));
   }
 
   // ---------- ficha del caso ----------
+  // Plazo del paso actual: quién tiene la pelota, qué toca, cuándo vence; responsable y "recordármelo el…"
+  function PlazoBox({ T, caso, guardar, guardando }) {
+    const pz = plazo(caso); const ch = chipPlazo(pz);
+    const [pos, setPos] = useState(""); const [abrir, setAbrir] = useState(false);
+    if (!pz) return null;
+    const I = inp(T);
+    return h(Box, { T, tone: pz.nivel === "vencido" ? "rojo" : pz.nivel === "hoy" ? "ambar" : undefined }, h(Lbl, { T }, "Plazo"),
+      h("div", { "data-crm-plazo": "1", style: { display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 14px", fontSize: "13.5px", alignItems: "center" } },
+        h("span", { style: { color: T.inkSoft } }, "Tiene la pelota"), h("b", null, PELOTA[pz.pel]),
+        h("span", { style: { color: T.inkSoft } }, "Toca"), h("b", null, pz.accion),
+        h("span", { style: { color: T.inkSoft } }, pz.esCita ? "Cita" : "Vence"), h("span", null, diaHora(pz.limite), " ", ch ? h(Chip, { c: ch.c, style: { marginLeft: "6px" } }, ch.t) : null),
+        h("span", { style: { color: T.inkSoft } }, "Responsable"), h("select", { value: caso.responsable || "", disabled: guardando, onChange: (e) => guardar({ responsable: e.target.value || null }, "Responsable cambiado."), style: { ...I, width: "auto", padding: "5px 8px" }, "aria-label": "Responsable" }, h("option", { value: "" }, "Sin responsable"), RESPONSABLES.map((r) => h("option", { key: r, value: r }, r)))),
+      h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "8px" } }, "El plazo es automático: empieza al entrar en este paso y se reinicia al pulsar el siguiente."),
+      pz.pospuesto ? h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "8px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "13px" } }, `Pospuesto hasta ${diaHora(pz.pospuesto)}.`), h("button", { onClick: () => guardar({ recordar_at: null }, "Ya no está pospuesto."), disabled: guardando, style: btn(T, "s") }, "Quitar"))
+        : abrir ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", marginTop: "8px", flexWrap: "wrap" } },
+          h(Field, { T, label: "Recordármelo el" }, h("input", { type: "datetime-local", "data-crm-posponer-fecha": "1", value: pos, onChange: (e) => setPos(e.target.value), style: I })),
+          h("button", { "data-crm-posponer-ok": "1", disabled: !pos || guardando, onClick: async () => { if (await guardar({ recordar_at: fromLocalInput(pos) }, "Pospuesto.")) { setAbrir(false); setPos(""); } }, style: btn(T, "p") }, "Posponer"), h("button", { onClick: () => setAbrir(false), style: btn(T) }, "Cancelar"))
+        : h("button", { "data-crm-posponer": "1", onClick: () => setAbrir(true), style: { ...btn(T, "s"), marginTop: "8px" } }, "Recordármelo el…"));
+  }
   // Expediente(s) de la pestaña Garantías ligados a este caso
   function ExpedientesCaso({ T, caso, onPasar, pasando }) {
     const [lista, setLista] = useState(null);
@@ -477,7 +546,7 @@
     const paso = async (s) => {
       if (s.to === "en_garantias") return pasar();
       if (s.to === "cita_asignada" && !pend) { setPend(s); setCitaTmp(d.cita_at || ""); return; }
-      const patch = { estado: s.to, ...(s.set || {}) };
+      const patch = { estado: s.to, recordar_at: null, ...(s.set || {}) };
       if (est(s.to).fin) patch.cerrado_at = NOW;
       if (s.to === "cita_asignada") patch.cita_at = fromLocalInput(citaTmp);
       if (await guardar(patch)) setPend(null);
@@ -541,7 +610,7 @@
         h(Box, { T }, h(Lbl, { T }, "Recorrido"),
           s.gar ? null : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center" } },
             RECORRIDO.map((f, i) => { const done = s.f === "cerrado" || i < fi, cur = i === fi; return h("div", { key: f, style: { borderRadius: "6px", padding: "6px 2px", background: cur ? T.rust : done ? CH.verde.bg : T.bgAlt, color: cur ? "#fff" : done ? CH.verde.fg : T.inkSoft } }, ["Consulta", "Presup.", "Piezas", "Cita", "Taller", "Retirar"][i]); })),
-          h("div", { style: { marginTop: "12px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Estado actual"), h(Chip, { c: s.c, style: { fontSize: "13px" } }, s.l), aviso(caso) ? h(Chip, { c: aviso(caso).c }, aviso(caso).t) : null),
+          h("div", { style: { marginTop: "12px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Estado actual"), h(Chip, { c: s.c, style: { fontSize: "13px" } }, s.l), chipPlazo(plazo(caso)) ? h(Chip, { c: chipPlazo(plazo(caso)).c }, chipPlazo(plazo(caso)).t) : null),
           s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("span", { style: { fontSize: "13px", color: T.inkSoft } }, "Motivo: " + caso.motivo_cierre) : null, h("button", { onClick: reabrir, disabled: guardando, style: btn(T) }, "Reabrir caso"))
             : h("div", { style: { marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" } },
               h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, "Siguiente paso"),
@@ -559,12 +628,7 @@
         h(ExpedientesCaso, { T, caso, onPasar: pasar, pasando }),
         h(Bitacora, { T, caso_id: caso.id, cliente_id: caso.cliente_id, recargar: caso.updated_at }),
 
-        s.gar ? null : h(Box, { T, tone: "ambar" }, h(Lbl, { T }, "Próxima acción"),
-          h("div", { style: { display: "grid", gridTemplateColumns: "1fr", gap: "8px" } },
-            h("input", { value: d.proxima_accion || "", onChange: set("proxima_accion"), placeholder: "¿Qué hay que hacer ahora?", style: I }),
-            h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
-              h("select", { value: d.responsable || "", onChange: set("responsable"), style: I, "aria-label": "Responsable" }, h("option", { value: "" }, "Sin responsable"), RESPONSABLES.map((r) => h("option", { key: r, value: r }, r))),
-              h("input", { type: "datetime-local", value: d.fecha_limite || "", onChange: set("fecha_limite"), style: I, "aria-label": "Fecha límite" })))),
+        s.gar || s.fin ? null : h(PlazoBox, { T, caso, guardar, guardando }),
 
         h(Box, { T }, h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h(Lbl, { T }, "Business Central"),
             enBC ? h("button", { onClick: syncAhora, disabled: sincronizando, style: { ...btn(T, "s"), marginBottom: "8px" } }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC") : null),
@@ -872,7 +936,7 @@
         }
         if (nuevoVeh && cliente.bc_no) enviarABC(cliente.id, false).catch(() => {}); // crea el producto de servicio en BC en segundo plano
         const ins = await sb().from("crm_casos").insert({ cliente_id: cliente.id, vehiculo: elegido ? vehTxt(elegido) : null, canal: k.canal, tipo: k.tipo, consulta: k.consulta.trim(), estado: "pendiente_respuesta", rama: k.tipo === "garantia" ? "garantia" : null,
-          proxima_accion: k.proxima_accion.trim() || null, responsable: k.responsable || null, fecha_limite: fromLocalInput(k.fecha_limite) }).select("*, cliente:crm_clientes(*)").single();
+          proxima_accion: null, responsable: k.responsable || null, fecha_limite: null }).select("*, cliente:crm_clientes(*)").single();
         if (ins.error) throw ins.error;
         if (k.tipo === "garantia") { const r = await pasarAGarantias(ins.data); onCreated(r.caso, r.gid); return; }
         onCreated(ins.data);
@@ -913,15 +977,15 @@
         h(Field, { T, label: k.tipo === "garantia" ? "Qué problema tiene (lo que cuenta el cliente)" : "Consulta" }, h("textarea", { rows: 3, value: k.consulta, onChange: setKk("consulta"), placeholder: k.tipo === "garantia" ? "p. ej. gotea la claraboya trasera cuando llueve" : "¿Qué necesita?", style: { ...I, resize: "vertical" } })),
         k.tipo === "garantia" ? h("div", { style: { background: CH.violeta.bg, border: `1px solid ${CH.violeta.bd}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px" } }, "Al guardar se abre su expediente de garantía, donde se piden las fotos al cliente, se analiza, se tramita con el fabricante y se da cita. Queda también registrado como caso.")
         : h("div", { style: { background: T.bg, borderRadius: "12px", padding: "12px", display: "grid", gridTemplateColumns: "2fr 1fr 1.3fr", gap: "10px" } },
-          h(Field, { T, label: "Próxima acción" }, h("input", { value: k.proxima_accion, onChange: setKk("proxima_accion"), style: I })),
+          h("div", { style: { fontSize: "13px", alignSelf: "center" } }, h("b", null, "Siguiente paso: responder al cliente"), h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Plazo automático de 48 h; luego cada paso pone el suyo.")),
           h(Field, { T, label: "Responsable" }, h("select", { value: k.responsable, onChange: setKk("responsable"), style: I }, h("option", { value: "" }, "—"), RESPONSABLES.map((r) => h("option", { key: r, value: r }, r)))),
-          h(Field, { T, label: "Para" }, h("input", { type: "datetime-local", value: k.fecha_limite, onChange: setKk("fecha_limite"), style: I }))),
+          h("span", null)),
         err ? h("div", { style: { color: T.danger, fontSize: "13px" } }, err) : null,
         h("div", { style: { display: "flex", justifyContent: "flex-end", gap: "10px" } }, h("button", { onClick: onClose, style: btn(T) }, "Cancelar"), h("button", { "data-crm-guardar-consulta": "1", onClick: guardar, disabled: guardando, style: btn(T, "p") }, guardando ? "Guardando…" : k.tipo === "garantia" ? "Guardar y pasar a Garantías" : "Guardar consulta"))));
   }
 
   window.AcllarCRM = CRMView;
-  window.AcllarCRM._test = { E, aviso, vence, textoEvento };
+  window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
   window.AcllarCRM._ui = { NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
