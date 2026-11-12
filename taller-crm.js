@@ -332,11 +332,13 @@
     const pel = (c) => (plazo(c) || {}).pel;
     const listas = {
       metoca: abiertos.filter((c) => pel(c) === "nos" && (!me || c.responsable === me || !c.responsable)).sort(ordPlazo),
-      espera: abiertos.filter((c) => ["cli", "prov", "cita"].includes(pel(c))).sort(ordPlazo),
+      espera: abiertos.filter((c) => ["cli", "cita"].includes(pel(c))).sort(ordPlazo),
+      prov: abiertos.filter((c) => pel(c) === "prov").sort(ordPlazo),
       todos: (filtroTodos === "abiertos" ? abiertos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => est(c.estado).fin && !est(c.estado).gar) : casos).slice().sort(ordVence),
     };
     const nVencidos = listas.metoca.filter((c) => plazo(c).nivel === "vencido").length;
     const nRecordar = listas.espera.filter((c) => plazo(c).nivel === "vencido").length;
+    const nReclamar = listas.prov.filter((c) => plazo(c).nivel === "vencido").length;
     const ultSync = (sync || []).map((s) => s.ultimo_ok).filter(Boolean).sort().pop();
     const errSync = (sync || []).find((s) => s.ultimo_error);
     const casoAbierto = casoId && casos.find((c) => c.id === casoId);
@@ -361,11 +363,13 @@
       h("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px", borderBottom: `2px solid ${T.border}` } },
         tabBtn("metoca", me ? "Mis tareas" : "Pendientes", listas.metoca.length, nVencidos ? "rojo" : "azul"),
         tabBtn("espera", "Esperando al cliente", listas.espera.length, nRecordar ? "ambar" : "gris"),
+        tabBtn("prov", "Esperando piezas / proveedor", listas.prov.length, nReclamar ? "ambar" : "gris"),
         tabBtn("tablero", "Tablero", null),
         tabBtn("todos", "Todos", null),
         h("div", { style: { marginLeft: "auto", display: "flex", gap: "8px", alignItems: "center", paddingBottom: "8px", flexWrap: "wrap" } },
           nVencidos ? h(Chip, { c: "rojo" }, `${nVencidos} tarea${nVencidos > 1 ? "s" : ""} vencida${nVencidos > 1 ? "s" : ""}`) : null,
           nRecordar ? h(Chip, { c: "ambar" }, `${nRecordar} para recordar al cliente`) : null,
+          nReclamar ? h(Chip, { c: "ambar" }, `${nReclamar} para reclamar al proveedor`) : null,
           h("span", { title: errSync ? errSync.ultimo_error : "", style: { fontSize: "12px", color: errSync ? T.danger : T.inkFaint } }, errSync ? "⚠ Error al sincronizar con BC" : ultSync ? `BC sincronizado ${fFechaHora(ultSync)}` : ""),
           h("button", { "data-crm-sync": "1", onClick: syncAhora, disabled: sincronizando, title: "Traer ya los cambios de BC sin esperar a los 10 minutos", style: btn(T, "s") }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC"))),
       error ? h("div", { style: { color: T.danger, fontSize: "13px" } }, error) : null,
@@ -374,13 +378,13 @@
         : h(React.Fragment, null,
           vista === "todos" ? h("div", null, h(Seg, { T, opts: [["abiertos", "Abiertos"], ["garantias", "En Garantías"], ["cerrados", "Cerrados"], ["todos", "Todos"]], value: filtroTodos, onChange: setFiltroTodos })) : null,
           vista === "espera" ? h(React.Fragment, null,
-            [["cli", "Esperando al cliente", "Nadie espera respuesta del cliente."], ["prov", "Esperando piezas o al fabricante", null], ["cita", "Con cita dada", null]].map(([k, tit, vac]) => {
+            [["cli", "Esperando al cliente", "Nadie espera respuesta del cliente."], ["cita", "Con cita dada", null]].map(([k, tit, vac]) => {
               const xs = listas.espera.filter((c) => pel(c) === k);
               if (!xs.length && !vac) return null;
               return h("div", { key: k, style: { display: "flex", flexDirection: "column", gap: "8px" } }, h("div", { style: { fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft } }, `${tit} (${xs.length})`),
                 h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, vacio: vac }));
             }))
-          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : "No hay casos." })),
+          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
       casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, vinculados, sugerencia: sugerencia(casoAbierto), syncAhora, sincronizando, onRefresh: cargar, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
       clienteId ? h(ClientePanel, { T, F, id: clienteId, casos, bcServ, onClose: () => setClienteId(null), onCaso: (id) => { setClienteId(null); setCasoId(id); }, onNueva: (cliente) => { setClienteId(null); setNueva({ cliente }); }, onChanged: cargar }) : null,
       nueva ? h(NuevaConsulta, { T, F, inicial: nueva, onClose: () => setNueva(null), onCreated: (c, gid) => { setNueva(null); actualizarCaso(c); if (gid) abrirExpediente(gid); else setCasoId(c.id); } }) : null);
