@@ -26,6 +26,7 @@
     esperando_info: { l: "Esperando información del cliente", c: "ambar", f: 0, sig: [{ to: "analisis", l: "Información recibida: analizar" }] },
     analisis: { l: "Análisis y respuesta al cliente", c: "violeta", f: 1, sig: [
       { to: "tramitada", l: "Tramitada con el fabricante", set: { tramitada_at: NOW }, codigo: true },
+      { to: "cita_asignada", l: "Garantía de AC·LLAR (sin fabricante): dar cita", set: { resultado: "propia", resolucion_at: NOW }, cita: true, propia: true },
       { to: "cerrada", l: "No es garantía: cerrar" }] },
     tramitada: { l: "Tramitada · esperando respuesta", c: "azul", f: 2, sig: [
       { to: "aprobada", l: "Aprobada", set: { resultado: "aprobada", resolucion_at: NOW } },
@@ -282,7 +283,7 @@
       const patch = { estado: x.to, ...(x.set || {}) };
       if (x.cita) { if (!citaTmp) { setMsg("Pon la fecha y hora de la cita."); return; } patch.cita_at = fromLocalInput(citaTmp); }
       if (x.codigo && codTmp.trim()) patch.reclamacion_no = codTmp.trim();
-      if (await upd(patch)) setPend(null);
+      if (await upd(patch)) { if (x.propia) await anotar("nota", "Garantía cubierta por AC·LLAR: no se tramita con el fabricante."); setPend(null); }
     };
     // Abre WhatsApp o el correo con el mensaje, lo anota en la bitácora y avanza el estado
     const enviar = async (canal, texto, asunto, clase, resumen, patch) => {
@@ -361,7 +362,7 @@
           h("div", { style: { display: "flex", gap: "8px", alignItems: "center" } }, h("button", { "data-g-resumen": "1", onClick: resumen, style: btn(T) }, "Resumen para el fabricante"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×"))),
         h("div", { style: { fontFamily: F.display, fontSize: "24px", fontWeight: 800 } }, h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.numero), " · ", vehLinea(g.vehiculo)),
         h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", fontSize: "13.5px", color: T.inkSoft } },
-          g.reclamacion_no ? h(Chip, { c: "violeta" }, "Nº de gestión ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.reclamacion_no)) : !chasis && s.f >= 2 && !s.fin ? h(Chip, { c: "rojo" }, "Falta el nº de gestión del fabricante") : null,
+          g.reclamacion_no ? h(Chip, { c: "violeta" }, "Nº de gestión ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.reclamacion_no)) : g.resultado === "propia" ? h(Chip, { c: "verde" }, "Garantía de AC·LLAR · sin fabricante") : !chasis && s.f >= 2 && !s.fin ? h(Chip, { c: "rojo" }, "Falta el nº de gestión del fabricante") : null,
           g.vehiculo && g.vehiculo.bastidor ? h("span", null, "Bastidor ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.vehiculo.bastidor)) : null,
           h("span", null, `Entrada ${fFecha(g.fecha_entrada || g.created_at)}`), g.cita_at ? h("span", null, `· Cita ${fLarga(g.cita_at)}`) : null),
         g.caso_id ? h("button", { onClick: () => irA("clientes", { acllar_crm_abrir_caso: g.caso_id }), style: { ...btn(T, "s"), alignSelf: "flex-start" } }, "Ver el caso de entrada en Casos →") : null),
