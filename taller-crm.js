@@ -502,6 +502,61 @@
       })));
   }
 
+  // ---------- fotos del caso (bucket privado "casos"; nada se borra: se anulan) ----------
+  const ETQ_FOTO = [["cliente", "Enviada por el cliente"], ["antes", "Antes"], ["despues", "Después"], ["pieza", "Pieza cambiada"], ["otra", "Otra"]];
+  async function comprimirFoto(file) {
+    try {
+      const bmp = await createImageBitmap(file);
+      const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+      return await new Promise((r) => c.toBlob((b) => r(b || file), "image/jpeg", 0.82));
+    } catch (e) { return file; }
+  }
+  function CasoFotos({ T, caso }) {
+    const [fotos, setFotos] = useState([]); const [urls, setUrls] = useState({}); const [ver, setVer] = useState(null);
+    const [et, setEt] = useState("cliente"); const [trab, setTrab] = useState(false); const [msg, setMsg] = useState(""); const ref = useRef(null);
+    const nota = (texto) => sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto, caso_id: caso.id, cliente_id: caso.cliente_id || null });
+    const cargar = async () => {
+      if (!sb()) return;
+      const { data } = await sb().from("crm_caso_fotos").select("*").eq("caso_id", caso.id).eq("anulada", false).order("created_at");
+      const xs = data || []; setFotos(xs);
+      const paths = xs.map((f) => f.path).filter((x) => !urls[x]);
+      if (paths.length) { const r = await sb().storage.from("casos").createSignedUrls(paths, 3600); const m = { ...urls }; (r.data || []).forEach((y) => { if (y.signedUrl) m[y.path] = y.signedUrl; }); setUrls(m); }
+    };
+    useEffect(() => { cargar(); }, [caso.id]);
+    const subir = async (files) => {
+      if (!files || !files.length) return;
+      setTrab(true); setMsg(`Subiendo ${files.length} foto${files.length > 1 ? "s" : ""}…`);
+      let ok = 0, fallo = "";
+      for (const f of Array.from(files)) {
+        const blob = await comprimirFoto(f);
+        const path = `${caso.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        const up = await sb().storage.from("casos").upload(path, blob, { contentType: "image/jpeg", upsert: false });
+        if (up.error) { fallo = up.error.message; continue; }
+        const ins = await sb().from("crm_caso_fotos").insert({ caso_id: caso.id, path, etiqueta: et, nombre: f.name || null });
+        if (!ins.error) ok++; else fallo = ins.error.message;
+      }
+      if (ok) await nota(`${ok} foto${ok > 1 ? "s" : ""} añadida${ok > 1 ? "s" : ""} (${lbl(ETQ_FOTO, et).toLowerCase()})`);
+      setTrab(false); setMsg(fallo ? "No se pudo subir alguna foto: " + fallo : `${ok} foto${ok > 1 ? "s" : ""} subida${ok > 1 ? "s" : ""}.`); cargar();
+    };
+    const quitar = async (f) => { await sb().from("crm_caso_fotos").update({ anulada: true }).eq("id", f.id); await nota("Foto retirada del caso"); setVer(null); cargar(); };
+    return h(Box, { T },
+      h(Lbl, { T }, `Fotos${fotos.length ? " · " + fotos.length : ""}`),
+      fotos.length ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", margin: "6px 0" } }, fotos.map((f) => h("button", { key: f.id, "data-caso-foto": f.id, onClick: () => setVer(f), title: lbl(ETQ_FOTO, f.etiqueta), style: { border: `1px solid ${T.border}`, borderRadius: "8px", padding: 0, background: T.bg, cursor: "pointer", position: "relative", width: "92px", height: "92px", overflow: "hidden" } },
+        urls[f.path] ? h("img", { src: urls[f.path], alt: lbl(ETQ_FOTO, f.etiqueta), style: { width: "100%", height: "100%", objectFit: "cover", display: "block" } }) : null,
+        h("span", { style: { position: "absolute", left: 3, bottom: 3, fontSize: "10px", fontWeight: 700, background: "rgba(15,27,46,.75)", color: "#fff", borderRadius: "5px", padding: "1px 5px" } }, lbl(ETQ_FOTO, f.etiqueta))))) : h("div", { style: { fontSize: "13px", color: T.inkSoft, margin: "4px 0" } }, "Sin fotos todavía."),
+      h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginTop: "6px" } },
+        h("select", { value: et, onChange: (e) => setEt(e.target.value), "aria-label": "Tipo de foto", style: { ...inp(T), width: "auto", padding: "6px 8px", fontSize: "13px" } }, ETQ_FOTO.map(([k, l]) => h("option", { key: k, value: k }, l))),
+        h("button", { "data-caso-fotos-add": "1", disabled: trab, onClick: () => ref.current && ref.current.click(), style: btn(T, "s") }, "📷 Añadir fotos"),
+        h("input", { ref, type: "file", accept: "image/*", multiple: true, style: { display: "none" }, onChange: (e) => { subir(e.target.files); e.target.value = ""; } })),
+      msg ? h("div", { style: { marginTop: "6px", fontSize: "12.5px", color: /^No se/.test(msg) ? T.danger : T.ok } }, msg) : null,
+      ver ? h("div", { role: "dialog", "aria-label": "Foto", onClick: () => setVer(null), style: { position: "fixed", inset: 0, zIndex: 1300, background: "rgba(0,0,0,.85)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "12px", padding: "20px" } },
+        urls[ver.path] ? h("img", { src: urls[ver.path], alt: "", style: { maxWidth: "100%", maxHeight: "80vh", borderRadius: "8px" } }) : null,
+        h("div", { style: { color: "#fff", fontSize: "13px" } }, `${lbl(ETQ_FOTO, ver.etiqueta)} · ${fFechaHora(ver.created_at)}${ver.created_by ? " · " + ver.created_by : ""}`),
+        h("div", { onClick: (e) => e.stopPropagation(), style: { display: "flex", gap: "8px" } }, h("a", { href: urls[ver.path], target: "_blank", rel: "noopener", style: { ...btn(T), textDecoration: "none" } }, "Abrir original"), h("button", { onClick: () => quitar(ver), style: { ...btn(T), color: T.danger } }, "Quitar del caso"))) : null);
+  }
+
   // ---------- ficha del caso ----------
   // Mover un caso soltándolo sobre una pestaña: se propone el paso más lógico de esa pestaña y se confirma.
   const TAB_NOMBRE = { metoca: "Mis tareas", espera: "Esperando al cliente", prov: "Esperando piezas / proveedor", cerrados: "Cerrados", descartados: "Descartados" };
@@ -739,6 +794,7 @@
           msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: /^No se|no lo aceptó/.test(msg) ? T.danger : T.ok } }, msg) : null),
 
         h(ExpedientesCaso, { T, caso, onPasar: pasar, pasando }),
+        h(CasoFotos, { T, caso }),
         h(Bitacora, { T, caso_id: caso.id, cliente_id: caso.cliente_id, recargar: caso.updated_at }),
 
         s.gar || s.fin ? null : h(PlazoBox, { T, caso, guardar, guardando }),
