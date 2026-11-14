@@ -14,6 +14,10 @@
   const RESPONSABLES = ["Sebastián", "Gonzalo", "Pablo"];
   const CANALES = [["telefono", "Teléfono"], ["email", "Email"], ["whatsapp", "WhatsApp"], ["presencial", "En persona"], ["otro", "Otro"]];
   const TIPOS = [["reparacion", "Reparación"], ["piezas", "Solo piezas"], ["gas", "Revisión de gas"], ["estanqueidad", "Estanqueidad"], ["aire", "Aire acondicionado"], ["peritaje", "Peritaje"], ["garantia", "Garantía"], ["otro", "Otro"]];
+  // Un caso puede tener varios tipos: se guardan separados por comas en crm_casos.tipo ("gas,piezas").
+  const tiposDe = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const lblTipos = (v) => tiposDe(v).map((k) => (TIPOS.find((t) => t[0] === k) || [k, k])[1]).join(" · ") || "—";
+  const tieneGar = (v) => tiposDe(v).includes("garantia");
   const TIPOS_CLI = [["propio", "Cliente propio"], ["externo", "Cliente externo"]];
   // Bitácora: lo que se va haciendo con el cliente o el fabricante. Fecha, hora y autor los pone el servidor.
   const CLASES = [["respondi", "Le respondí"], ["pedi", "Le pedí"], ["respondio", "Me respondió"], ["fabricante", "Fabricante"], ["llamada", "Llamada"], ["nota", "Nota"]];
@@ -189,6 +193,8 @@
   const Field = ({ T, label, children, style }) => h("label", { style: { display: "block", ...style } }, h("span", { style: { display: "block", fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, label), children);
   const Seg = ({ T, opts, value, onChange }) => h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, opts.map(([k, l]) => h("button", { key: k, type: "button", onClick: () => onChange(k),
     style: { cursor: "pointer", borderRadius: "9px", fontFamily: "inherit", fontWeight: 700, fontSize: "13px", padding: "7px 12px", border: `1px solid ${value === k ? T.ink : T.borderHi}`, background: value === k ? T.ink : T.surface, color: value === k ? T.bg : T.ink } }, l)));
+  const SegMulti = ({ T, opts, value, onChange }) => { const sel = tiposDe(value); return h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, opts.map(([k, l]) => { const on = sel.includes(k); return h("button", { key: k, type: "button", "aria-pressed": on, "data-tipo": k, onClick: () => onChange(opts.map((o) => o[0]).filter((x) => (x === k ? !on : sel.includes(x))).join(",")),
+    style: { cursor: "pointer", borderRadius: "9px", fontFamily: "inherit", fontWeight: 700, fontSize: "13px", padding: "7px 12px", border: `1px solid ${on ? T.ink : T.borderHi}`, background: on ? T.ink : T.surface, color: on ? T.bg : T.ink } }, (on ? "✓ " : "") + l); })); };
   const Drawer = ({ T, onClose, width = 580, children, label }) => h("div", { role: "dialog", "aria-label": label, style: { position: "fixed", inset: 0, zIndex: 1200, display: "flex", justifyContent: "flex-end" } },
     h("div", { onClick: onClose, style: { position: "absolute", inset: 0, background: "rgba(15,27,46,.35)" } }),
     h("div", { style: { position: "relative", width: `min(${width}px, 100vw)`, height: "100%", overflowY: "auto", background: T.bg, borderLeft: `1px solid ${T.border}`, boxShadow: "-10px 0 30px rgba(0,0,0,.15)" } }, children));
@@ -197,7 +203,7 @@
   function textoEvento(ev) {
     const d = ev.detalle || {};
     if (/^g_/.test(ev.tipo) && window.AcllarGarantias) return "Expediente de garantía · " + window.AcllarGarantias._test.textoEventoG(ev);
-    if (ev.tipo === "creado") return ev.caso_id ? `Caso creado · ${lbl(CANALES, d.canal)} · ${lbl(TIPOS, d.tipo)}` : "Cliente creado en el CRM";
+    if (ev.tipo === "creado") return ev.caso_id ? `Caso creado · ${lbl(CANALES, d.canal)} · ${lblTipos(d.tipo)}` : "Cliente creado en el CRM";
     if (ev.tipo === "bitacora") return `${lbl(CLASES, (ev.detalle || {}).clase)}: “${ev.texto}”`;
     if (ev.tipo === "nota") return `Nota: “${ev.texto}”`;
     if (ev.tipo === "llamada") return `Llamada: “${ev.texto}”`;
@@ -213,7 +219,7 @@
         const bc = a.filter((x) => x.bc_ps && de.some((y) => mismoVeh(x, y) && !y.bc_ps));
         return [add.length ? "Vehículo añadido: " + add.map(vehTxt).join(", ") : "", del.length ? "Vehículo quitado de la ficha: " + del.map(vehTxt).join(", ") : "", bc.length ? "Vehículo en BC: " + bc.map((x) => `${vehTxt(x)} (${x.bc_ps})`).join(", ") : ""].filter(Boolean).join(" · ") || "Vehículos actualizados";
       }
-      const f = (x) => (x == null || x === "" ? "—" : k === "tipo" ? lbl(TIPOS, x) : k === "canal" ? lbl(CANALES, x) : typeof x === "boolean" ? (x ? "sí" : "no") : /_at$|fecha_limite/.test(k) ? fFechaHora(x) : Array.isArray(x) ? x.join(", ") : String(x));
+      const f = (x) => (x == null || x === "" ? "—" : k === "tipo" ? lblTipos(x) : k === "canal" ? lbl(CANALES, x) : typeof x === "boolean" ? (x ? "sí" : "no") : /_at$|fecha_limite/.test(k) ? fFechaHora(x) : Array.isArray(x) ? x.join(", ") : String(x));
       return `${CAMPOS[k] || k}: ${f(v.de)} → ${f(v.a)}`;
     });
     return partes.join(" · ") || ev.tipo;
@@ -279,7 +285,7 @@
         fabricante: fabDeModelo(v.modelo), descripcion: caso.consulta || "", caso_id: caso.id });
       gid = g.id;
     }
-    const up = await sb().from("crm_casos").update({ estado: "en_garantias", tipo: "garantia", rama: "garantia" }).eq("id", caso.id).select("*, cliente:crm_clientes(*)").single();
+    const up = await sb().from("crm_casos").update({ estado: "en_garantias", tipo: tieneGar(caso.tipo) ? caso.tipo : ["garantia", ...tiposDe(caso.tipo)].join(","), rama: "garantia" }).eq("id", caso.id).select("*, cliente:crm_clientes(*)").single();
     if (up.error) throw up.error;
     return { gid, caso: up.data };
   }
@@ -469,7 +475,7 @@
             onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
             h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : s.fin && (c.cerrado_at || c.estado_at) ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.cerrado_at || c.estado_at)) : h("span", { style: { color: T.inkFaint } }, "—")),
             h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
-            h("td", { style: td }, lbl(TIPOS, c.tipo)),
+            h("td", { style: td }, lblTipos(c.tipo)),
             h("td", { style: td }, h(Chip, { c: s.c }, s.l), s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
             h("td", { style: td }, pz ? pz.accion : h("span", { style: { color: T.inkFaint } }, "—"), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, pz ? `${PELOTA[pz.pel]}${c.responsable && pz.pel === "nos" ? " · " + c.responsable : ""}` : "")),
             h("td", { style: td }, doc ? h(React.Fragment, null, h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" } }, doc.no), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, `${doc.tipo === "oferta" ? "Oferta" : "Pedido"} · ${eur(doc.importe_iva)}`))
@@ -491,7 +497,7 @@
         return h("section", { key: f, style: { background: T.bgAlt, borderRadius: "14px", padding: "10px", display: "flex", flexDirection: "column", gap: "8px", minHeight: "200px" } },
           h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft, padding: "4px 2px" } }, h("span", null, nombre), h(Chip, null, xs.length)),
           xs.map((c) => { const v = chipPlazo(plazo(c)), s = est(c.estado); return h("button", { key: c.id, "data-crm-card": c.id, onClick: () => onOpen(c.id), draggable: true, title: "Clic para abrir · arrastra a una pestaña para moverlo", onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
-            h("b", null, nombreCli(c.cliente)), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lbl(TIPOS, c.tipo)].filter(Boolean).join(" · ")),
+            h("b", null, nombreCli(c.cliente)), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lblTipos(c.tipo)].filter(Boolean).join(" · ")),
             h("span", null, h(Chip, { c: s.c }, s.l)), v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
       })));
   }
@@ -523,7 +529,7 @@
       h("div", { onClick: onClose, style: { position: "fixed", inset: 0, background: "rgba(15,27,46,.35)" } }),
       h("div", { style: { position: "relative", width: "min(560px, 100%)", background: T.surface, borderRadius: "16px", border: `1px solid ${T.border}`, padding: "20px", display: "flex", flexDirection: "column", gap: "12px", fontFamily: F.body, color: T.ink } },
         h("div", { style: { fontFamily: F.display, fontSize: "20px", fontWeight: 800 } }, `Mover a ${TAB_NOMBRE[tab]}`),
-        h("div", { style: { fontSize: "13.5px", color: T.inkSoft } }, h("b", { style: { color: T.ink } }, nombreCli(caso.cliente)), ` · ${caso.vehiculo || lbl(TIPOS, caso.tipo)} · ahora en "${est(caso.estado).l}"`),
+        h("div", { style: { fontSize: "13.5px", color: T.inkSoft } }, h("b", { style: { color: T.ink } }, nombreCli(caso.cliente)), ` · ${caso.vehiculo || lblTipos(caso.tipo)} · ahora en "${est(caso.estado).l}"`),
         tab === "descartados" ? h(CierreBox, { T, que: "caso", guardando: trab, onCancel: onClose, onConfirm: (modo, mot, n) => ir(modo === "descartar" ? "descartado" : "cerrado", `${mot}: ${n}`, { motivo_cierre: `${mot}: ${n}` }) })
           : !opciones.length ? h("div", { style: { fontSize: "13px" } }, "No hay ningún paso de esa pestaña al que llevarlo.")
           : h(React.Fragment, null,
@@ -600,7 +606,7 @@
     const [lista, setLista] = useState(null);
     useEffect(() => { let vivo = true; sb().from("garantias").select("id,numero,estado,fabricante,reclamacion_no").eq("caso_id", caso.id).order("created_at").then((r) => { if (vivo) setLista(r.data || []); }); return () => { vivo = false; }; }, [caso.id, caso.updated_at]);
     if (lista == null) return null;
-    if (!lista.length && caso.tipo !== "garantia" && caso.estado !== "en_garantias") return null;
+    if (!lista.length && !tieneGar(caso.tipo) && caso.estado !== "en_garantias") return null;
     return h(Box, { T, tone: "violeta" }, h(Lbl, { T }, "Garantía"),
       h("div", { "data-crm-expedientes": "1" },
         lista.length ? h(React.Fragment, null,
@@ -652,7 +658,7 @@
         garantia_fabricante: (v) => v || null, garantia_reclamacion: (v) => v || null, garantia_cubre: (v) => v || null, garantia_no_cubre: (v) => v || null, piezas_previstas: (v) => v || null, cita_at: fromLocalInput, vehiculo: (v) => v || null, tipo: (v) => v || null, canal: (v) => v || null, consulta: (v) => (String(v || "").trim() || null) };
       Object.keys(map).forEach((k) => { const v = map[k](d[k]); const old = caso[k] == null ? null : caso[k]; const same = /_at$|fecha_limite/.test(k) ? (v ? Math.floor(new Date(v).getTime() / 6e4) : null) === (old ? Math.floor(new Date(old).getTime() / 6e4) : null) : String(v ?? "") === String(old ?? ""); if (!same) p[k] = v; });
       if (!Object.keys(p).length) { setMsg("No hay cambios."); return; }
-      const aGar = p.tipo === "garantia" && !est(caso.estado).fin;
+      const aGar = p.tipo && tieneGar(p.tipo) && !tieneGar(caso.tipo) && !est(caso.estado).fin;
       guardar(p, aGar ? "Guardado. Pasa el caso a Garantías con el botón de la caja Garantía." : "Guardado.");
     };
     const avisarAna = async () => {
@@ -706,7 +712,7 @@
     return h(Drawer, { T, onClose, label: "Ficha del caso" },
       h("div", { style: { background: T.surface, padding: "18px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: "6px" } },
         h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-          h("span", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" } }, `Caso · ${lbl(TIPOS, caso.tipo)}${caso.rama && caso.rama !== "garantia" ? " · rama " + caso.rama : ""}`),
+          h("span", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" } }, `Caso · ${lblTipos(caso.tipo)}${caso.rama && caso.rama !== "garantia" ? " · rama " + caso.rama : ""}`),
           h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft, lineHeight: 1 } }, "×")),
         h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px" } }, h("button", { onClick: () => onCliente(caso.cliente_id), style: { border: "none", background: "transparent", padding: 0, textAlign: "left", cursor: "pointer", fontFamily: F.display, fontSize: "24px", fontWeight: 800, color: T.ink } }, nombreCli(caso.cliente), " ", h("span", { style: { fontSize: "13px", color: T.rust, fontWeight: 700 } }, "ficha →")), h(ChipCli, { c: caso.cliente })),
         h("div", { style: { fontSize: "13.5px", color: T.inkSoft } }, `${caso.vehiculo || "Sin vehículo"} · entró por ${lbl(CANALES, caso.canal).toLowerCase()} el ${fFecha(caso.created_at)}`),
@@ -774,7 +780,7 @@
 
         h(Box, { T }, h(Lbl, { T }, "Datos del caso"),
           h("div", { "data-crm-datos-caso": "1", style: { display: "grid", gap: "10px" } },
-            h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(Seg, { T, opts: TIPOS, value: d.tipo, onChange: (v) => setD((x) => ({ ...x, tipo: v })) })),
+            h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(SegMulti, { T, opts: TIPOS, value: d.tipo, onChange: (v) => setD((x) => ({ ...x, tipo: v })) })),
             h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Canal de entrada"), h(Seg, { T, opts: CANALES, value: d.canal, onChange: (v) => setD((x) => ({ ...x, canal: v })) })),
             h(Field, { T, label: "Consulta" }, h("textarea", { rows: 3, value: d.consulta || "", onChange: set("consulta"), style: { ...I, resize: "vertical" } })),
             h(Field, { T, label: "Vehículo" }, h("input", { value: d.vehiculo, onChange: set("vehiculo"), style: I })),
@@ -971,7 +977,7 @@
           h("div", { style: { flex: "999 1 360px", minWidth: 0, display: "flex", flexDirection: "column", gap: "14px" } },
             h(Box, { T }, h(Lbl, { T }, `Casos (${susCasos.length})`),
               susCasos.length ? susCasos.map((x) => h("button", { key: x.id, onClick: () => onCaso(x.id), style: { display: "flex", width: "100%", justifyContent: "space-between", gap: "8px", alignItems: "center", padding: "8px 0", border: "none", borderTop: `1px solid ${T.border}`, background: "transparent", cursor: "pointer", fontFamily: "inherit", color: T.ink, textAlign: "left" } },
-                h("span", null, h("b", null, lbl(TIPOS, x.tipo)), h("div", { style: { fontSize: "12px", color: T.inkSoft } }, `${fFecha(x.created_at)} · ${x.vehiculo || "—"}`)), h(Chip, { c: est(x.estado).c }, est(x.estado).l)))
+                h("span", null, h("b", null, lblTipos(x.tipo)), h("div", { style: { fontSize: "12px", color: T.inkSoft } }, `${fFecha(x.created_at)} · ${x.vehiculo || "—"}`)), h(Chip, { c: est(x.estado).c }, est(x.estado).l)))
                 : h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Sin casos abiertos.")),
             gars.length ? h(Box, { T, tone: "violeta" }, h(Lbl, { T }, `Garantías (${gars.length})`),
               gars.map((g) => h("button", { key: g.id, onClick: () => abrirExpediente(g.id), style: { display: "flex", width: "100%", justifyContent: "space-between", gap: "8px", alignItems: "center", padding: "8px 0", border: "none", borderTop: `1px solid ${T.border}`, background: "transparent", cursor: "pointer", fontFamily: "inherit", color: T.ink, textAlign: "left" } },
@@ -1042,17 +1048,17 @@
           if (!vs.some((x) => mismoVeh(x, elegido))) { const up = await sb().from("crm_clientes").update({ vehiculos: [...vs, elegido] }).eq("id", cliente.id); if (up.error) throw up.error; nuevoVeh = !elegido.bc_ps; }
         }
         if (nuevoVeh && cliente.bc_no) enviarABC(cliente.id, false).catch(() => {}); // crea el producto de servicio en BC en segundo plano
-        const ins = await sb().from("crm_casos").insert({ cliente_id: cliente.id, vehiculo: elegido ? vehTxt(elegido) : null, canal: k.canal, tipo: k.tipo, consulta: k.consulta.trim(), estado: "pendiente_respuesta", rama: k.tipo === "garantia" ? "garantia" : null,
+        const ins = await sb().from("crm_casos").insert({ cliente_id: cliente.id, vehiculo: elegido ? vehTxt(elegido) : null, canal: k.canal, tipo: k.tipo || "otro", consulta: k.consulta.trim(), estado: "pendiente_respuesta", rama: tieneGar(k.tipo) ? "garantia" : null,
           proxima_accion: null, responsable: k.responsable || null, fecha_limite: null }).select("*, cliente:crm_clientes(*)").single();
         if (ins.error) throw ins.error;
-        if (k.tipo === "garantia") { const r = await pasarAGarantias(ins.data); onCreated(r.caso, r.gid); return; }
+        if (tieneGar(k.tipo)) { const r = await pasarAGarantias(ins.data); onCreated(r.caso, r.gid); return; }
         onCreated(ins.data);
       } catch (e) { setErr("No se pudo guardar: " + (e.message || e)); setGuardando(false); }
     };
     return h("div", { role: "dialog", "aria-label": "Nueva consulta", style: { position: "fixed", inset: 0, zIndex: 1250, display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "30px 12px" } },
       h("div", { onClick: onClose, style: { position: "fixed", inset: 0, background: "rgba(15,27,46,.35)" } }),
       h("div", { style: { position: "relative", width: "min(680px, 100%)", background: T.surface, borderRadius: "16px", border: `1px solid ${T.border}`, boxShadow: "0 20px 50px rgba(15,27,46,.2)", padding: "22px", display: "flex", flexDirection: "column", gap: "14px", fontFamily: F.body, color: T.ink } },
-        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h("div", { style: { fontFamily: F.display, fontSize: "22px", fontWeight: 800 } }, k.tipo === "garantia" ? "Nueva garantía" : "Nueva consulta"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×")),
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h("div", { style: { fontFamily: F.display, fontSize: "22px", fontWeight: 800 } }, tieneGar(k.tipo) ? "Nueva garantía" : "Nueva consulta"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×")),
         sel ? h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", background: T.bg, borderRadius: "10px", padding: "10px 12px" } },
           h("span", null, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Cliente: "), h("b", null, sel.tipo === "crm" ? nombreCli(sel.c) : sel.bc.nombre), " ", (sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: T.inkSoft } }, sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) : h(Chip, { c: "ambar" }, "sin alta en BC")),
           h("button", { onClick: () => setSel(null), style: btn(T, "s") }, "Cambiar"))
@@ -1080,15 +1086,15 @@
             h("input", { value: veh.matricula, onChange: (e) => setVeh((x) => ({ ...x, matricula: e.target.value })), placeholder: "Matrícula", "aria-label": "Matrícula", style: I }),
             h("input", { value: veh.bastidor, onChange: (e) => setVeh((x) => ({ ...x, bastidor: e.target.value })), placeholder: "Bastidor (opcional)", "aria-label": "Bastidor", style: I })) : null),
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Canal"), h(Seg, { T, opts: CANALES, value: k.canal, onChange: (v) => setK((x) => ({ ...x, canal: v })) })),
-        h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(Seg, { T, opts: TIPOS, value: k.tipo, onChange: (v) => setK((x) => ({ ...x, tipo: v })) })),
-        h(Field, { T, label: k.tipo === "garantia" ? "Qué problema tiene (lo que cuenta el cliente)" : "Consulta" }, h("textarea", { rows: 3, value: k.consulta, onChange: setKk("consulta"), placeholder: k.tipo === "garantia" ? "p. ej. gotea la claraboya trasera cuando llueve" : "¿Qué necesita?", style: { ...I, resize: "vertical" } })),
-        k.tipo === "garantia" ? h("div", { style: { background: CH.violeta.bg, border: `1px solid ${CH.violeta.bd}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px" } }, "Al guardar se abre su expediente de garantía, donde se piden las fotos al cliente, se analiza, se tramita con el fabricante y se da cita. Queda también registrado como caso.")
+        h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(SegMulti, { T, opts: TIPOS, value: k.tipo, onChange: (v) => setK((x) => ({ ...x, tipo: v })) })),
+        h(Field, { T, label: tieneGar(k.tipo) ? "Qué problema tiene (lo que cuenta el cliente)" : "Consulta" }, h("textarea", { rows: 3, value: k.consulta, onChange: setKk("consulta"), placeholder: tieneGar(k.tipo) ? "p. ej. gotea la claraboya trasera cuando llueve" : "¿Qué necesita?", style: { ...I, resize: "vertical" } })),
+        tieneGar(k.tipo) ? h("div", { style: { background: CH.violeta.bg, border: `1px solid ${CH.violeta.bd}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px" } }, "Al guardar se abre su expediente de garantía, donde se piden las fotos al cliente, se analiza, se tramita con el fabricante y se da cita. Queda también registrado como caso.")
         : h("div", { style: { background: T.bg, borderRadius: "12px", padding: "12px", display: "grid", gridTemplateColumns: "2fr 1fr 1.3fr", gap: "10px" } },
           h("div", { style: { fontSize: "13px", alignSelf: "center" } }, h("b", null, "Siguiente paso: responder al cliente"), h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Plazo automático de 48 h; luego cada paso pone el suyo.")),
           h(Field, { T, label: "Responsable" }, h("select", { value: k.responsable, onChange: setKk("responsable"), style: I }, h("option", { value: "" }, "—"), RESPONSABLES.map((r) => h("option", { key: r, value: r }, r)))),
           h("span", null)),
         err ? h("div", { style: { color: T.danger, fontSize: "13px" } }, err) : null,
-        h("div", { style: { display: "flex", justifyContent: "flex-end", gap: "10px" } }, h("button", { onClick: onClose, style: btn(T) }, "Cancelar"), h("button", { "data-crm-guardar-consulta": "1", onClick: guardar, disabled: guardando, style: btn(T, "p") }, guardando ? "Guardando…" : k.tipo === "garantia" ? "Guardar y pasar a Garantías" : "Guardar consulta"))));
+        h("div", { style: { display: "flex", justifyContent: "flex-end", gap: "10px" } }, h("button", { onClick: onClose, style: btn(T) }, "Cancelar"), h("button", { "data-crm-guardar-consulta": "1", onClick: guardar, disabled: guardando, style: btn(T, "p") }, guardando ? "Guardando…" : tieneGar(k.tipo) ? "Guardar y pasar a Garantías" : "Guardar consulta"))));
   }
 
   window.AcllarCRM = CRMView;
