@@ -61,11 +61,10 @@
     cliente_avisado_cobertura: { l: "Cliente avisado de la cobertura", f: "piezas", c: "violeta", sig: [
       { to: "piezas_pedidas", l: "Piezas pedidas" },
       { to: "senal_solicitada", l: "Lo no cubierto lleva piezas sin stock → pedir señal 50 %" }] },
-    cita_asignada: { l: "Cita asignada", f: "cita", c: "verde", sig: [{ to: "vehiculo_recibido", l: "Vehículo recibido" }] },
-    vehiculo_recibido: { l: "Vehículo recibido", f: "taller", c: "violeta", sig: [{ to: "trabajo_terminado", l: "Trabajo terminado" }] },
-    trabajo_terminado: { l: "Trabajo terminado", f: "taller", c: "ambar", sig: [{ to: "avisado_retirar", l: "Cliente avisado para retirar" }] },
+    cita_asignada: { l: "Cita confirmada", f: "cita", c: "verde", sig: [{ to: "concluido", l: "Caso concluido: se fue con el trabajo hecho" }] },
     avisado_retirar: { l: "Avisado para retirar", f: "retirar", c: "azul", sig: [{ to: "retirado", l: "Retirado" }] },
     retirado: { l: "Retirado", f: "cerrado", c: "gris", fin: true },
+    concluido: { l: "Caso concluido", f: "cerrado", c: "gris", fin: true },
     rechazado: { l: "Rechazado", f: "cerrado", c: "gris", fin: true },
     sin_respuesta: { l: "Sin respuesta", f: "cerrado", c: "gris", fin: true },
     cerrado: { l: "Cerrado sin completar", f: "cerrado", c: "gris", fin: true },
@@ -73,8 +72,8 @@
     en_garantias: { l: "En Garantías", f: "cerrado", c: "violeta", fin: true, gar: true },
   };
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
-  const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["taller", "En taller"], ["retirar", "Para retirar"]];
-  const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "taller", "retirar"];
+  const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["retirar", "Para retirar"]];
+  const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "retirar"];
   const CAMPOS = { estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
     garantia_100: "100 % garantía", senal_importe: "Importe señal", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
@@ -130,9 +129,7 @@
     piezas_pedidas: { p: "nos", a: "Avisar al cliente: piezas pedidas", h: 24 },
     cliente_avisado_piezas: { p: "prov", a: "Esperar las piezas", h: 360, v: "Reclamar al proveedor" },
     piezas_recibidas: { p: "nos", a: "Avisar al cliente o dar cita", h: 48 },
-    cita_asignada: { p: "cita", a: "Recibir el vehículo" },
-    vehiculo_recibido: { p: "nos", a: "Reparar", h: 120 },
-    trabajo_terminado: { p: "nos", a: "Avisar al cliente para retirar", h: 1 },
+    cita_asignada: { p: "cita", a: "Que venga a la cita" },
     avisado_retirar: { p: "cli", a: "Que venga a recogerlo", h: 48, v: "Recordar que lo recoja" },
     garantia_analisis: { p: "nos", a: "Analizar la garantía", h: 72 },
     garantia_solicitada: { p: "prov", a: "Esperar al fabricante", h: 168, v: "Reclamar al fabricante" },
@@ -147,7 +144,7 @@
     const P = PL[c.estado] || { p: "nos", a: "Seguir con el caso", h: 48 };
     const now = new Date(), ini = new Date(c.estado_at || c.created_at);
     let pel = P.p, accion = P.a, limite;
-    if (c.estado === "piezas_recibidas" && c.cita_at && new Date(c.cita_at) > now) { pel = "cita"; accion = "Recibir el vehículo (cita ya dada)"; }
+    if (c.estado === "piezas_recibidas" && c.cita_at && new Date(c.cita_at) > now) { pel = "cita"; accion = "Que venga a la cita (cita ya dada)"; }
     if (pel === "cita") {
       if (!c.cita_at) { pel = "nos"; accion = "Poner fecha a la cita"; limite = finDia(ini); }
       else { limite = new Date(c.cita_at); if (mismoDia(limite, now) || limite < now) pel = "nos"; }
@@ -337,9 +334,9 @@
       metoca: abiertos.filter((c) => pel(c) === "nos" && (!me || c.responsable === me || !c.responsable)).sort(ordPlazo),
       espera: abiertos.filter((c) => ["cli", "cita"].includes(pel(c))).sort(ordPlazo),
       prov: abiertos.filter((c) => pel(c) === "prov").sort(ordPlazo),
-      cerrados: casos.filter((c) => c.estado === "retirado").sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
+      cerrados: casos.filter((c) => c.estado === "retirado" || c.estado === "concluido").sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
       descartados: casos.filter((c) => ["descartado", "cerrado", "rechazado", "sin_respuesta"].includes(c.estado)).sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
-      todos: (filtroTodos === "abiertos" ? abiertos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => c.estado === "retirado") : casos).slice().sort(ordVence),
+      todos: (filtroTodos === "abiertos" ? abiertos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => c.estado === "retirado" || c.estado === "concluido") : casos).slice().sort(ordVence),
     };
     const nVencidos = listas.metoca.filter((c) => plazo(c).nivel === "vencido").length;
     const nRecordar = listas.espera.filter((c) => plazo(c).nivel === "vencido").length;
@@ -488,7 +485,7 @@
 
   // ---------- tablero ----------
   function Tablero({ T, casos, onOpen }) {
-    return h("div", { style: { overflowX: "auto" } }, h("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, minmax(180px, 1fr))", gap: "12px", minWidth: "1100px" } },
+    return h("div", { style: { overflowX: "auto" } }, h("div", { style: { display: "grid", gridTemplateColumns: "repeat(5, minmax(180px, 1fr))", gap: "12px", minWidth: "920px" } },
       FASES.map(([f, nombre]) => {
         const xs = casos.filter((c) => est(c.estado).f === f);
         return h("section", { key: f, style: { background: T.bgAlt, borderRadius: "14px", padding: "10px", display: "flex", flexDirection: "column", gap: "8px", minHeight: "200px" } },
@@ -503,8 +500,8 @@
   // Mover un caso soltándolo sobre una pestaña: se propone el paso más lógico de esa pestaña y se confirma.
   const TAB_NOMBRE = { metoca: "Mis tareas", espera: "Esperando al cliente", prov: "Esperando piezas / proveedor", cerrados: "Cerrados", descartados: "Descartados" };
   const SUGERIDO = {
-    espera: { pendiente_respuesta: "respondida", respondida: "respondida", presupuesto_por_hacer: "presupuesto_enviado", presupuesto_hecho: "presupuesto_enviado", aceptado: "senal_solicitada", contabilidad_avisada: "senal_solicitada", piezas_pedidas: "avisado_retirar", piezas_recibidas: "avisado_retirar", vehiculo_recibido: "avisado_retirar", trabajo_terminado: "avisado_retirar" },
-    metoca: { respondida: "presupuesto_por_hacer", presupuesto_enviado: "aceptado", senal_solicitada: "comprobante_recibido", cliente_avisado_piezas: "piezas_recibidas", avisado_retirar: "piezas_recibidas", cita_asignada: "vehiculo_recibido" },
+    espera: { pendiente_respuesta: "respondida", respondida: "respondida", presupuesto_por_hacer: "presupuesto_enviado", presupuesto_hecho: "presupuesto_enviado", aceptado: "senal_solicitada", contabilidad_avisada: "senal_solicitada", piezas_pedidas: "avisado_retirar", piezas_recibidas: "avisado_retirar" },
+    metoca: { respondida: "presupuesto_por_hacer", presupuesto_enviado: "aceptado", senal_solicitada: "comprobante_recibido", cliente_avisado_piezas: "piezas_recibidas", avisado_retirar: "piezas_recibidas" },
   };
   async function moverCaso(caso, to, nota, extra) {
     await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto: `Movido a "${est(to).l}" (desde ${est(caso.estado).l})` + (nota ? ` · ${nota}` : ""), caso_id: caso.id, cliente_id: caso.cliente_id });
@@ -515,7 +512,7 @@
   }
   function MoverDialog({ T, F, caso, tab, onClose, onSaved }) {
     const pelotas = { metoca: ["nos"], espera: ["cli", "cita"], prov: ["prov"] }[tab];
-    const opciones = tab === "cerrados" ? ["retirado"] : pelotas ? PASOS_MANUALES.filter((k) => pelotas.includes((PL[k] || {}).p) && k !== caso.estado) : [];
+    const opciones = tab === "cerrados" ? ["concluido", "retirado"] : pelotas ? PASOS_MANUALES.filter((k) => pelotas.includes((PL[k] || {}).p) && k !== caso.estado) : [];
     const sug = (SUGERIDO[tab] || {})[caso.estado];
     const [to, setTo] = useState(opciones.includes(sug) ? sug : opciones[0] || "");
     const [nota, setNota] = useState(""); const [cita, setCita] = useState(toLocalInput(caso.cita_at));
@@ -544,7 +541,7 @@
   function CambioPaso({ T, caso, onConfirm, onCancel, guardando }) {
     const [to, setTo] = useState(""); const [nota, setNota] = useState(""); const [cita, setCita] = useState(toLocalInput(caso.cita_at));
     const I = inp(T);
-    const parcial = ["avisado_retirar", "piezas_recibidas", "retirado", "trabajo_terminado"].includes(caso.estado);
+    const parcial = ["avisado_retirar", "piezas_recibidas", "retirado"].includes(caso.estado);
     const grupos = FASES.map(([f, n]) => [n, PASOS_MANUALES.filter((k) => E[k].f === f)]).filter(([, xs]) => xs.length);
     const necesitaCita = to === "cita_asignada";
     return h("div", { "data-cambio-paso": "1", style: { background: T.bg, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px", display: "flex", flexDirection: "column", gap: "10px" } },
@@ -716,8 +713,8 @@
         caso.consulta ? h("div", { style: { fontSize: "13.5px", background: T.bg, borderRadius: "8px", padding: "8px 10px", marginTop: "4px", whiteSpace: "pre-wrap" } }, caso.consulta) : null),
       h("div", { style: { padding: "16px 20px 40px", display: "flex", flexDirection: "column", gap: "14px" } },
         h(Box, { T }, h(Lbl, { T }, "Recorrido"),
-          s.gar ? null : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center" } },
-            RECORRIDO.map((f, i) => { const done = s.f === "cerrado" || i < fi, cur = i === fi; return h("div", { key: f, style: { borderRadius: "6px", padding: "6px 2px", background: cur ? T.rust : done ? CH.verde.bg : T.bgAlt, color: cur ? "#fff" : done ? CH.verde.fg : T.inkSoft } }, ["Consulta", "Presup.", "Piezas", "Cita", "Taller", "Retirar"][i]); })),
+          s.gar ? null : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center" } },
+            RECORRIDO.map((f, i) => { const done = s.f === "cerrado" || i < fi, cur = i === fi; return h("div", { key: f, style: { borderRadius: "6px", padding: "6px 2px", background: cur ? T.rust : done ? CH.verde.bg : T.bgAlt, color: cur ? "#fff" : done ? CH.verde.fg : T.inkSoft } }, ["Consulta", "Presup.", "Piezas", "Cita", "Retirar"][i]); })),
           h("div", { style: { marginTop: "12px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Estado actual"), h(Chip, { c: s.c, style: { fontSize: "13px" } }, s.l), chipPlazo(plazo(caso)) ? h(Chip, { c: chipPlazo(plazo(caso)).c }, chipPlazo(plazo(caso)).t) : null),
           s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("div", { "data-crm-motivo": "1", style: { fontSize: "13px", background: T.bg, borderRadius: "8px", padding: "8px 10px", flex: "1 1 100%", whiteSpace: "pre-wrap" } }, h("b", null, "Motivo del cierre: "), caso.motivo_cierre) : null, cambiando ? h("div", { style: { flex: "1 1 100%" } }, h(CambioPaso, { T, caso, guardando, onConfirm: cambiarPaso, onCancel: () => setCambiando(false) }))
               : h("button", { "data-crm-reabrir": "1", onClick: () => setCambiando(true), disabled: guardando, style: btn(T) }, "Reabrir en un paso…"))
