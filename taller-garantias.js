@@ -9,7 +9,7 @@
 (function () {
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
-  const { h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
+  const { ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
     horas, pad, mismoDia, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
@@ -246,7 +246,7 @@
   function Expediente({ T, F, id, onClose, onChanged }) {
     const [g, setG] = useState(null); const [ls, setLs] = useState([]); const [fotos, setFotos] = useState([]); const [urls, setUrls] = useState({}); const [ev, setEv] = useState([]);
     const [d, setD] = useState({}); const [msg, setMsg] = useState(""); const [trab, setTrab] = useState(false);
-    const [nuevoProb, setNuevoProb] = useState(""); const [nuevoH, setNuevoH] = useState(""); const [verFoto, setVerFoto] = useState(null);
+    const [nuevoProb, setNuevoProb] = useState(""); const [nuevoH, setNuevoH] = useState(""); const [verFoto, setVerFoto] = useState(null); const [etG, setEtG] = useState("");
     const [pend, setPend] = useState(null); const [citaTmp, setCitaTmp] = useState(""); const [codTmp, setCodTmp] = useState("");
     const [cerrando, setCerrando] = useState(false);
     const [verFicha, setVerFicha] = useState(false); const [bitKey, setBitKey] = useState(0); const [alta, setAlta] = useState("");
@@ -407,10 +407,10 @@
         h(Bitacora, { T, caso_id: g.caso_id || null, garantia_id: g.id, cliente_id: g.cliente_id || null, titulo: "Bitácora del expediente", recargar: bitKey }),
 
         // ---- fotos generales
-        h(Box, { T }, h(Lbl, { T }, `Fotos y documentación (${fotos.filter((f) => !f.linea_id).length})`),
-          h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-4px", marginBottom: "6px" } }, `Las fotos que manda el cliente a ${POSVENTA}, fotos del taller, de la placa del bastidor, etc.`),
+        h(ZonaFotos, { T, disabled: trab, onAviso: setMsg, onFiles: (fs) => subirFotos(fs, null, etG || (s.f != null && s.f <= 1 ? "cliente" : "antes")) }, h(Box, { T }, h(Lbl, { T }, `Fotos y documentación (${fotos.filter((f) => !f.linea_id).length})`),
+          h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-4px", marginBottom: "6px" } }, `Las fotos que manda el cliente a ${POSVENTA}, fotos del taller, de la placa del bastidor, etc. Puedes arrastrarlas aquí desde el ordenador.`),
           h(Fotos, { T, fotos: fotos.filter((f) => !f.linea_id), urls, onVer: setVerFoto }),
-          h(SubirFotos, { T, trab, inicial: s.f != null && s.f <= 1 ? "cliente" : "antes", onFiles: (fs, et) => subirFotos(fs, null, et) })),
+          h(SubirFotos, { T, trab, inicial: s.f != null && s.f <= 1 ? "cliente" : "antes", et: etG, setEt: setEtG, onFiles: (fs, et) => subirFotos(fs, null, et) }))),
 
         // ---- problemas
         !chasis ? h(Box, { T }, h(Lbl, { T }, `Problemas (${problemas.length})`),
@@ -463,8 +463,9 @@
   const Fotos = ({ T, fotos, urls, onVer }) => fotos.length ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", margin: "6px 0" } }, fotos.map((f) => h("button", { key: f.id, onClick: () => onVer(f), title: f.etiqueta, style: { border: `1px solid ${T.border}`, borderRadius: "8px", padding: 0, background: T.bg, cursor: "pointer", position: "relative", width: "92px", height: "92px", overflow: "hidden" } },
     urls[f.path] ? h("img", { src: urls[f.path], alt: f.etiqueta || "foto", style: { width: "100%", height: "100%", objectFit: "cover", display: "block" } }) : null,
     h("span", { style: { position: "absolute", left: 3, bottom: 3, fontSize: "10px", fontWeight: 700, background: "rgba(15,27,46,.75)", color: "#fff", borderRadius: "5px", padding: "1px 5px" } }, (ETIQUETAS.find((x) => x[0] === f.etiqueta) || ["", "Foto"])[1])))) : null;
-  function SubirFotos({ T, trab, onFiles, inicial }) {
-    const [et, setEt] = useState(inicial || "antes"); const ref = useRef(null);
+  function SubirFotos({ T, trab, onFiles, inicial, et: etP, setEt: setEtP }) {
+    const [etL, setEtL] = useState(inicial || "antes"); const ref = useRef(null);
+    const et = etP || etL, setEt = (v) => { setEtL(v); if (setEtP) setEtP(v); };
     return h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginTop: "6px" } },
       h("select", { value: et, onChange: (e) => setEt(e.target.value), "aria-label": "Tipo de foto", style: { ...inp(T), width: "auto", padding: "6px 8px", fontSize: "13px" } }, ETIQUETAS.map(([k, l]) => h("option", { key: k, value: k }, l))),
       h("button", { disabled: trab, onClick: () => ref.current && ref.current.click(), style: btn(T, "s") }, "📷 Añadir fotos"),
