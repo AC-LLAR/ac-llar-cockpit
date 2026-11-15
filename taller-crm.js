@@ -233,20 +233,20 @@
   // ---------- bitácora (Casos y Garantías) ----------
   // Se guarda en crm_eventos (tipo "bitacora"), que no se puede editar ni borrar.
   // Un expediente de garantía ligado a un caso comparte la bitácora con él.
-  function Bitacora({ T, caso_id, garantia_id, cliente_id, titulo, recargar }) {
+  function Bitacora({ T, caso_id, garantia_id, montaje_id, cliente_id, titulo, recargar }) {
     const [lista, setLista] = useState(null); const [txt, setTxt] = useState(""); const [clase, setClase] = useState("respondi");
     const [msg, setMsg] = useState(""); const [guardando, setGuardando] = useState(false);
     const cargar = async () => {
-      const f = [caso_id && `caso_id.eq.${caso_id}`, garantia_id && `garantia_id.eq.${garantia_id}`].filter(Boolean).join(",");
+      const f = [caso_id && `caso_id.eq.${caso_id}`, garantia_id && `garantia_id.eq.${garantia_id}`, montaje_id && `montaje_id.eq.${montaje_id}`].filter(Boolean).join(",");
       if (!f) { setLista([]); return; }
       const { data } = await sb().from("crm_eventos").select("*").or(f).in("tipo", BITACORA).order("at", { ascending: true }).limit(1000);
       setLista(data || []);
     };
-    useEffect(() => { cargar(); }, [caso_id, garantia_id, recargar]);
+    useEffect(() => { cargar(); }, [caso_id, garantia_id, montaje_id, recargar]);
     const add = async () => {
       if (!txt.trim()) return;
       setGuardando(true); setMsg("");
-      const { error } = await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase }, texto: txt.trim(), caso_id: caso_id || null, garantia_id: garantia_id || null, cliente_id: cliente_id || null });
+      const { error } = await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase }, texto: txt.trim(), caso_id: caso_id || null, garantia_id: garantia_id || null, montaje_id: montaje_id || null, cliente_id: cliente_id || null });
       setGuardando(false);
       if (error) { setMsg("No se pudo guardar: " + error.message); return; }
       setTxt(""); cargar();
