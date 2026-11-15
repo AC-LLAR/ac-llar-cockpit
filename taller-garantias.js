@@ -9,7 +9,7 @@
 (function () {
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
-  const { ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
+  const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
     horas, pad, mismoDia, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
@@ -131,9 +131,13 @@
     const cargar = async () => {
       if (!sb() || sinAcceso) { setCargando(false); return; }
       const [a, b] = await Promise.all([
-        sb().from("garantias").select("*, cliente:crm_clientes(id,nombre,apellidos,bc_no,tipo_cliente)").eq("archivado", false).order("created_at", { ascending: false }).limit(2000),
+        sb().from("garantias").select("*, cliente:crm_clientes(id,nombre,apellidos,bc_no,tipo_cliente), caso:crm_casos!garantias_caso_id_fkey(id,clave)").eq("archivado", false).order("created_at", { ascending: false }).limit(2000),
         sb().from("garantia_lineas").select("garantia_id,tipo,horas,horas_aprobadas,cantidad,origen_pieza,repuesto_recibido_at,anulada").limit(20000),
       ]);
+      if (a.error) { // por si la columna Clave no se pudiera leer: carga como antes, sin ella
+        const r2 = await sb().from("garantias").select("*, cliente:crm_clientes(id,nombre,apellidos,bc_no,tipo_cliente)").eq("archivado", false).order("created_at", { ascending: false }).limit(2000);
+        if (!r2.error) a.data = r2.data, a.error = null;
+      }
       if (a.error) setError("No se pudieron cargar las garantías: " + a.error.message); else { setLista(a.data || []); setLineas(b.data || []); setError(""); }
       setCargando(false);
     };
@@ -168,12 +172,13 @@
         : !visibles.length ? h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft } }, lista.length ? "Ningún expediente con ese filtro." : "Todavía no hay expedientes.")
         : h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", overflowX: "auto" } },
           h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "1040px" } },
-            h("thead", null, h("tr", null, ["Nº", "Vehículo", "Cliente", "Fabricante · nº gestión", "Estado", "Horas", "Piezas", "Entrada"].map((x) => h("th", { key: x, style: th }, x)))),
+            h("thead", null, h("tr", null, ["Nº", "Vehículo", "Cliente", "Clave", "Fabricante · nº gestión", "Estado", "Horas", "Piezas", "Entrada"].map((x) => h("th", { key: x, style: th }, x)))),
             h("tbody", null, visibles.map((g) => { const t = tot[g.id], s = est(g.estado), av = aviso(g, t);
               return h("tr", { key: g.id, "data-g-fila": g.numero, onClick: () => setAbierta(g.id), style: { cursor: "pointer" } },
                 h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, whiteSpace: "nowrap" } }, g.numero, g.tipo === "chasis" ? h("div", null, h(Chip, { c: "gris" }, "Chasis")) : null),
                 h("td", { style: td }, h("b", null, vehLinea(g.vehiculo)), g.vehiculo && g.vehiculo.bastidor ? h("div", { style: { fontSize: "12px", color: T.inkSoft, fontFamily: "'JetBrains Mono', monospace" } }, g.vehiculo.bastidor) : null),
                 h("td", { style: td }, esCli(g) ? h(React.Fragment, null, nombreCli(g.cliente), h(ChipCli, { c: g.cliente })) : h(Chip, { c: "gris" }, "Flota alquiler")),
+                h("td", { style: { ...td, maxWidth: "200px" } }, g.caso ? h(CeldaClave, { T, valor: g.caso.clave, tabla: "crm_casos", id: g.caso.id }) : h(CeldaClave, { T, valor: g.clave, tabla: "garantias", id: g.id })),
                 h("td", { style: td }, g.fabricante || "—", g.reclamacion_no ? h("div", { style: { fontSize: "12px", fontFamily: "'JetBrains Mono', monospace", color: T.inkSoft } }, g.reclamacion_no) : null),
                 h("td", { style: td }, h(Chip, { c: s.c }, s.l), av ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: av.c }, av.t)) : null),
                 h("td", { style: { ...td, fontWeight: 700, whiteSpace: "nowrap" } }, fmtH(t.horas)),

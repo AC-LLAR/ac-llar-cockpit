@@ -78,7 +78,7 @@
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
   const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["retirar", "Para retirar"]];
   const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "retirar"];
-  const CAMPOS = { estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
+  const CAMPOS = { clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
     garantia_100: "100 % garantía", senal_importe: "Importe señal", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
     piezas_previstas: "Llegada de piezas", cita_at: "Cita", cerrado_at: "Cerrado", motivo_cierre: "Motivo de cierre", archivado: "Archivado", rama: "Rama", vehiculo: "Vehículo",
@@ -460,6 +460,25 @@
         : abierto && qSafe(q).length >= 2 ? h("div", { style: { position: "absolute", top: "50px", left: 0, right: 0, zIndex: 60, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px", fontSize: "13px", color: T.inkSoft } }, "Sin coincidencias. Usa “+ Nueva consulta” para darlo de alta.") : null);
   }
 
+
+  // Clave: 2-3 palabras para reconocer el caso en la tabla. Se edita en la propia celda (clic → escribir → Enter).
+  function CeldaClave({ T, valor, tabla, id }) {
+    const [v, setV] = useState(valor || ""); const [ed, setEd] = useState(false); const [err, setErr] = useState(false);
+    useEffect(() => { if (!ed) setV(valor || ""); }, [valor]);
+    const guardarClave = async () => {
+      setEd(false); const nv = String(v || "").trim().slice(0, 40) || null;
+      if ((nv || "") === (valor || "")) { setV(valor || ""); return; }
+      const { error } = await sb().from(tabla).update({ clave: nv }).eq("id", id);
+      if (error) { setErr(true); setV(valor || ""); } else { setErr(false); setV(nv || ""); }
+    };
+    const stop = (e) => e.stopPropagation();
+    if (ed) return h("input", { autoFocus: true, value: v, maxLength: 40, placeholder: "2-3 palabras", onClick: stop, onMouseDown: stop, onChange: (e) => setV(e.target.value),
+      onKeyDown: (e) => { e.stopPropagation(); if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setV(valor || ""); setEd(false); } }, onBlur: guardarClave,
+      style: { width: "100%", minWidth: "120px", boxSizing: "border-box", padding: "5px 8px", fontSize: "13px", fontFamily: "inherit", border: `1px solid ${T.rust}`, borderRadius: "8px", background: T.bg, color: T.ink } });
+    return h("button", { "data-clave": id, title: err ? "No se pudo guardar" : "Clic para escribir la clave", onClick: (e) => { e.stopPropagation(); setEd(true); },
+      style: { border: "none", background: "transparent", padding: 0, cursor: "text", textAlign: "left", fontFamily: "inherit", fontSize: "13.5px", fontWeight: v ? 800 : 400, color: err ? T.danger : v ? T.ink : T.inkFaint, textTransform: v ? "uppercase" : "none", letterSpacing: v ? ".02em" : 0 } }, v || "— añadir");
+  }
+
   // ---------- lista ----------
   function Lista({ T, casos, bcServ, sugerencia, onOpen, vacio, arrastrable }) {
     if (!casos.length) return h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft, fontSize: "14px" } }, vacio);
@@ -467,7 +486,7 @@
     const td = { padding: "11px 12px", borderBottom: `1px solid ${T.border}`, verticalAlign: "top", fontSize: "13.5px" };
     return h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", overflowX: "auto" } },
       h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "940px" } },
-        h("thead", null, h("tr", null, ["Plazo", "Cliente · vehículo", "Tipo", "Estado", "Próxima acción", "Business Central"].map((x) => h("th", { key: x, style: th }, x)))),
+        h("thead", null, h("tr", null, ["Plazo", "Cliente · vehículo", "Clave", "Tipo", "Estado", "Próxima acción", "Business Central"].map((x) => h("th", { key: x, style: th }, x)))),
         h("tbody", null, casos.map((c) => {
           const pz = plazo(c), v = chipPlazo(pz), s = est(c.estado);
           const doc = docBC(bcServ, c);
@@ -475,6 +494,7 @@
             onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
             h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : s.fin && (c.cerrado_at || c.estado_at) ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.cerrado_at || c.estado_at)) : h("span", { style: { color: T.inkFaint } }, "—")),
             h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
+            h("td", { style: { ...td, maxWidth: "200px" } }, h(CeldaClave, { T, valor: c.clave, tabla: "crm_casos", id: c.id })),
             h("td", { style: td }, lblTipos(c.tipo)),
             h("td", { style: td }, h(Chip, { c: s.c }, s.l), s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
             h("td", { style: td }, pz ? pz.accion : h("span", { style: { color: T.inkFaint } }, "—"), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, pz ? `${PELOTA[pz.pel]}${c.responsable && pz.pel === "nos" ? " · " + c.responsable : ""}` : "")),
@@ -1173,5 +1193,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
