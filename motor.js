@@ -9216,6 +9216,37 @@ const fmtFechaHora = (valor) => {
         arribaEntera: m.slice(0, Math.max(0, hr) + 1).map(entera), muestraEntera: m.slice(hr + 1, hr + 4).map(entera), ultimaEntera: entera(m[m.length - 1]) };
     } catch (e) { return { error: String((e && e.message) || e) }; }
   };
+  // Informe diario "Ingresos por opción de pago" (todas las formas de pago): una fila por pago y, en horizontal,
+  // un bloque de columnas por forma de pago (la fila encima de la cabecera lleva el nombre del bloque).
+  // Devuelve solo los pagos del bloque "Cargo a Fianza", de las sedes de las estadísticas.
+  const SEDES_YOY = ["valencia", "onil", "castellon"];
+  const extraerCargoFianzaDiario = (matrix, hr) => {
+    if (hr < 1) return null;
+    const cab = matrix[hr].map((v) => String(v || "").toLowerCase().trim());
+    if (cab.indexOf("alquiler") < 0) return null; // no es el informe de todos los pagos
+    const etiquetas = (matrix[hr - 1] || []).map((v) => String(v || "").toLowerCase().trim());
+    const inicios = etiquetas.map((t, i) => (t ? i : -1)).filter((i) => i >= 0);
+    const ini = etiquetas.indexOf("cargo a fianza");
+    const iFecha = cab.indexOf("fecha"), iVeh = cab.indexOf("vehículo"), iSede = cab.indexOf("lugar de entrega"), iRes = cab.indexOf("reserva");
+    const dias = new Set(), rows = [];
+    for (let k = hr + 1; k < matrix.length; k++) { const f = parseFechaEs((matrix[k] || [])[iFecha]); if (f) dias.add(ymdLocal(f)); }
+    if (ini < 0) return { rows, dias: [...dias] }; // ese día no hubo cargos a fianza
+    const fin = inicios.find((i) => i > ini) ?? cab.length;
+    const col = (n) => { for (let c = ini; c < fin; c++) if (cab[c] === n) return c; return -1; };
+    const iTot = col("total entrante"), iSub = col("sub total");
+    if (iTot < 0) return null;
+    const num = (v) => { const x = parseFloat(String(v ?? "").replace(",", ".")); return Number.isFinite(x) ? x : 0; };
+    for (let k = hr + 1; k < matrix.length; k++) {
+      const r = matrix[k] || [];
+      const f = parseFechaEs(r[iFecha]); if (!f) continue;
+      const tot = num(r[iTot]), sub = iSub >= 0 ? num(r[iSub]) : tot;
+      if (!tot && !sub) continue;
+      const sede = String(r[iSede] || "").trim();
+      if (!SEDES_YOY.includes(sede.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase())) continue;
+      rows.push({ fecha: ymdLocal(f), vehiculo: String(r[iVeh] || "").trim(), sede, totalEntrante: tot, subTotal: sub, reserva: String(r[iRes] || "").trim() });
+    }
+    return { rows, dias: [...dias] };
+  };
   const yoyDesdeMatriz = (matrix, fileName) => {
     const tipo = detectExcelType(matrix);
     if (tipo !== "ingresos" && tipo !== "reservas") return { ignorar: true, error: "no es un Excel de reservas ni de cargos a fianza" };
@@ -9226,8 +9257,12 @@ const fmtFechaHora = (valor) => {
       const arriba = matrix.slice(0, Math.max(0, hr)).flat().map((v) => String(v || "").toLowerCase().trim());
       const cab = hr >= 0 ? matrix[hr].map((v) => String(v || "").toLowerCase().trim()) : [];
       const extra = cab.slice(cab.indexOf("vehículo") + 1).filter((c) => c && c !== "sub total" && c !== "total entrante");
-      if (!arriba.includes("cargo a fianza") || extra.length)
+      if (!arriba.includes("cargo a fianza") || extra.length) {
+        // Envío diario de HQ (todas las formas de pago, solo del día): se toma solo el bloque "Cargo a Fianza" y se SUMA.
+        const d = extraerCargoFianzaDiario(matrix, hr);
+        if (d) return { tipo, diario: true, rows: d.rows, dias: d.dias };
         return { tipo, error: "no es el informe de Cargo a Fianza" + (extra.length ? " (trae columnas " + extra.slice(0, 3).join(", ") + "…, de todos los pagos)" : "") };
+      }
     }
     const parsed = tipo === "ingresos" ? parseIngresosExcel(matrix) : parseReservasExcel(matrix);
     if (parsed.error) return { tipo, error: parsed.error };
@@ -14449,6 +14484,23 @@ const scanResWatchFolder = async (handle) => {
         return { ok, msg };
       };
       if (r.error) return fin(false, r.error);
+      if (r.diario) {
+        // Suma los cargos a fianza del día a lo ya guardado, sin duplicar (fecha + vehículo + importe).
+        const key = YOY_STORAGE_KEYS.ingresos2026;
+        let prev = null;
+        try { const x = await window.storage.get(key); prev = x ? JSON.parse(x.value) : null; } catch (e) {}
+        if (!prev || !Array.isArray(prev.rows) || !prev.rows.length) return fin(false, "falta la carga completa del año (manda una vez la exportación de Cargo a Fianza desde el 01/01)");
+        const k = (x) => [x.fecha, String(x.vehiculo || "").toUpperCase(), Number(x.totalEntrante || 0).toFixed(2)].join("|");
+        const ya = new Set(prev.rows.map(k));
+        const nuevas = r.rows.filter((x) => x.fecha.startsWith("2026") && !ya.has(k(x)));
+        const diaTxt = (r.dias || []).map((d) => d.split("-").reverse().slice(0, 2).join("/")).join(", ") || "?";
+        if (!nuevas.length) return fin(true, `${prev.rows.length} cargos · ${diaTxt}: ${r.rows.length ? "ya estaban" : "0 cargos ese día"}`, prev.rows.length);
+        const rows = [...prev.rows, ...nuevas].sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+        const dataset = { ...prev, rows, meta: { ...(prev.meta || {}), rowCount: rows.length, dateMax: rows[rows.length - 1].fecha, ultimoDiario: { archivo: nombre, dias: r.dias, añadidas: nuevas.length, at: nowIso() } } };
+        await window.storage.set(key, JSON.stringify(dataset));
+        window.dispatchEvent(new CustomEvent("acllar-yoy", { detail: { key } }));
+        return fin(true, `${rows.length} cargos · +${nuevas.length} del ${diaTxt}`, rows.length);
+      }
       if (r.yearDetected !== 2026) return fin(false, `los datos parecen de ${r.yearDetected || "?"}, no de 2026: no se sustituye`);
       const key = r.tipo === "ingresos" ? YOY_STORAGE_KEYS.ingresos2026 : YOY_STORAGE_KEYS.reservas2026;
       let prev = null;
@@ -14456,10 +14508,16 @@ const scanResWatchFolder = async (handle) => {
       const n = r.dataset.rows.length, nPrev = prev && Array.isArray(prev.rows) ? prev.rows.length : 0;
       if (nPrev && n < nPrev * 0.5) return fin(false, `trae ${n} filas y había ${nPrev}: no se sustituye`);
       const maxPrev = prev && prev.meta && prev.meta.dateMax, maxNew = r.dataset.meta.dateMax;
-      if (maxPrev && maxNew && maxNew < maxPrev) return fin(false, `llega hasta el ${maxNew} y lo guardado llega hasta el ${maxPrev}: no se sustituye`);
+      if (maxPrev && maxNew && maxNew < maxPrev) {
+        // Ingresos: el completo sustituye hasta su última fecha y conserva los días posteriores ya sumados por el correo diario.
+        if (r.tipo !== "ingresos") return fin(false, `llega hasta el ${maxNew} y lo guardado llega hasta el ${maxPrev}: no se sustituye`);
+        const posteriores = prev.rows.filter((x) => String(x.fecha) > maxNew);
+        r.dataset.rows = [...r.dataset.rows, ...posteriores];
+        r.dataset.meta = { ...r.dataset.meta, rowCount: r.dataset.rows.length, dateMax: maxPrev, conservadosDiario: posteriores.length };
+      }
       await window.storage.set(key, JSON.stringify(r.dataset));
       window.dispatchEvent(new CustomEvent("acllar-yoy", { detail: { key } }));
-      return fin(true, `${n} filas · hasta el ${maxNew || "?"}`, n);
+      return fin(true, `${r.dataset.rows.length} filas · hasta el ${r.dataset.meta.dateMax || maxNew || "?"}`, r.dataset.rows.length);
     };
     const procesarAnualRef = useRef(null);
     procesarAnualRef.current = procesarAnual;
