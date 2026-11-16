@@ -404,6 +404,7 @@
       nuevasOtros.length ? h("div", { "data-crm-nuevas": "1", style: { background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: "12px", padding: "10px 12px", display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", fontSize: "13.5px" } },
         h("b", { style: { color: "#2F5BFF" } }, `🆕 ${nuevasOtros.length} consulta${nuevasOtros.length > 1 ? "s" : ""} nueva${nuevasOtros.length > 1 ? "s" : ""} de ${[...new Set(nuevasOtros.map((c) => quien(c.created_by)))].join(" y ")} en las últimas 24 h:`),
         nuevasOtros.map((c) => h("button", { key: c.id, "data-nueva-caso": c.id, onClick: () => setCasoId(c.id), style: { ...btn(T, "s"), background: T.surface } }, `${nombreCli(c.cliente)} · ${lblTipos(c.tipo)} · ${fFechaHora(c.created_at)}`))) : null,
+      h(CitasHoy, { T, recargar: casos }),
       h("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px", borderBottom: `2px solid ${T.border}` } },
         tabBtn("metoca", me ? "Mis tareas" : "Pendientes", listas.metoca.length, nVencidos ? "rojo" : "azul"),
         tabBtn("espera", "Esperando al cliente", listas.espera.length, nRecordar ? "ambar" : "gris"),
@@ -495,6 +496,39 @@
     if (x.kind === "garantia") return ((window.AcllarGarantias && window.AcllarGarantias._test.EST[x.estado]) || { l: x.estado }).l;
     return ((window.AcllarMontajes && window.AcllarMontajes._test.EST[x.estado]) || { l: x.estado }).l; } catch (e) { return x.estado; } };
   const abrirAbierto = (x) => (x.kind === "caso" ? irA("clientes", { acllar_crm_abrir_caso: x.id }) : x.kind === "garantia" ? irA("garantias", { acllar_garantia_abrir: x.id }) : irA("montajes", { acllar_montaje_abrir: x.id }));
+  // ---- Citas de hoy y de mañana (casos y garantías). De momento las citas se siguen apuntando también en Calendar.
+  const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  function CitasHoy({ T, recargar }) {
+    const [xs, setXs] = useState([]);
+    const cargar = async () => {
+      const ini = new Date(); ini.setHours(0, 0, 0, 0); const fin = new Date(ini.getTime() + 2 * 864e5);
+      try {
+        const [a, b] = await Promise.all([
+          sb().from("crm_casos").select("id,estado,cita_at,vehiculo,tipo,cliente:crm_clientes(id,nombre,apellidos)").eq("archivado", false).gte("cita_at", ini.toISOString()).lt("cita_at", fin.toISOString()).limit(100),
+          sb().from("garantias").select("id,numero,estado,cita_at,vehiculo,cliente:crm_clientes(id,nombre,apellidos)").eq("archivado", false).gte("cita_at", ini.toISOString()).lt("cita_at", fin.toISOString()).limit(100)]);
+        const casos = (a.data || []).filter((c) => !est(c.estado).fin && ["cita_asignada", "piezas_recibidas"].includes(c.estado))
+          .map((c) => ({ kind: "caso", id: c.id, at: c.cita_at, quien: nombreCli(c.cliente), veh: c.vehiculo, que: lblTipos(c.tipo) }));
+        const gars = (b.data || []).filter((g) => ["cita_asignada", "cita_pedida"].includes(g.estado))
+          .map((g) => ({ kind: "garantia", id: g.id, at: g.cita_at, quien: g.cliente ? nombreCli(g.cliente) : "Flota", veh: [g.vehiculo && g.vehiculo.ac, g.vehiculo && g.vehiculo.modelo].filter(Boolean).join(" "), que: `Garantía ${g.numero}` }));
+        setXs([...casos, ...gars].sort((p, q) => String(p.at).localeCompare(String(q.at))));
+      } catch (e) {}
+    };
+    useEffect(() => { cargar(); }, [recargar]); // se recarga a la vez que la lista (cada minuto y al cambiar algo)
+    const hoy = new Date(), man = new Date(Date.now() + 864e5);
+    const deHoy = xs.filter((x) => mismoDia(new Date(x.at), hoy)), deMan = xs.filter((x) => mismoDia(new Date(x.at), man));
+    if (!deHoy.length && !deMan.length) return null;
+    const hora = (x) => { const d = new Date(x.at); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+    const item = (x, grande) => { const pasada = new Date(x.at) < new Date(Date.now() - 3600e3);
+      return h("button", { key: x.kind + x.id, "data-cita": x.id, onClick: () => abrirAbierto(x), title: "Abrir",
+        style: { ...btn(T, "s"), background: T.surface, fontSize: grande ? "13px" : "12px", opacity: pasada ? 0.6 : 1, display: "inline-flex", gap: "6px", alignItems: "center" } },
+        h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, hora(x)), `${x.quien}${x.veh ? " · " + x.veh : ""} · ${x.que}`); };
+    return h("div", { "data-citas-hoy": "1", style: { background: deHoy.length ? CH.verde.bg : T.bg, border: `1px solid ${deHoy.length ? CH.verde.bd : T.border}`, borderRadius: "12px", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+      h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", fontSize: "13.5px" } },
+        h("b", { style: { color: deHoy.length ? CH.verde.fg : T.inkSoft } }, deHoy.length ? `📅 Hoy, ${DIAS[hoy.getDay()]} ${pad(hoy.getDate())}/${pad(hoy.getMonth() + 1)}: ${deHoy.length} cita${deHoy.length > 1 ? "s" : ""}` : "📅 Hoy no hay citas"),
+        deHoy.map((x) => item(x, true))),
+      deMan.length ? h("div", { "data-citas-manana": "1", style: { display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center", fontSize: "12.5px", color: T.inkSoft } },
+        h("span", { style: { fontWeight: 700 } }, `Mañana (${DIAS[man.getDay()]}): ${deMan.length}`), deMan.map((x) => item(x, false))) : null);
+  }
   function YaAbiertos({ T, items, titulo, onOpen }) {
     const xs = []; (items || []).forEach((x) => { if (!xs.some((y) => y.id === x.id)) xs.push(x); });
     if (!xs.length) return null;
@@ -1311,5 +1345,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();

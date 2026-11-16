@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -183,6 +183,7 @@
         h("button", { "data-g-nuevo": "1", onClick: () => setNuevo(true), style: { border: "none", background: "transparent", color: T.inkSoft, fontSize: "12px", textDecoration: "underline", cursor: "pointer", fontFamily: "inherit" } }, "¿Es un vehículo de nuestra flota de alquiler?")),
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: "10px" } }, kpis.map(([n, l, c]) => h("div", { key: l, style: { background: T.surface, border: `1px solid ${n ? CH[c].bd : T.border}`, borderRadius: "12px", padding: "10px 14px", minWidth: "150px" } },
         h("div", { style: { fontSize: "22px", fontWeight: 800, color: n ? CH[c].fg : T.inkFaint } }, n), h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, l)))),
+      h(CitasHoy, { T, recargar: lista }),
       h(Seg, { T, opts: [["abiertas", "Abiertas"], ["cerradas", "Cerradas"], ["todas", "Todas"]], value: filtro, onChange: setFiltro }),
       h(AvisoOrden, { T, orden, setOrden, nombres: NOMBRES_G }),
       error ? h("div", { style: { color: T.danger, fontSize: "13px" } }, error) : null,
