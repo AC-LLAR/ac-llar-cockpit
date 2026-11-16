@@ -98,6 +98,8 @@
     const [vista, setVista] = useState("curso"); const [txt, setTxt] = useState("");
     const [abierto, setAbierto] = useState(() => { try { const x = localStorage.getItem("acllar_montaje_abrir"); if (x) localStorage.removeItem("acllar_montaje_abrir"); return x || null; } catch (e) { return null; } });
     const [nuevo, setNuevo] = useState(false);
+    useEffect(() => { const f = (e) => { if (!e || e.detail !== "montajes") return; try { const x = localStorage.getItem("acllar_montaje_abrir"); if (x) { localStorage.removeItem("acllar_montaje_abrir"); setAbierto(x); } } catch (y) {} };
+      window.addEventListener("acllar-taller-tab", f); return () => window.removeEventListener("acllar-taller-tab", f); }, []);
     const rol = window.acllarCloud && window.acllarCloud.rol ? window.acllarCloud.rol() : null;
     const sinAcceso = rol && rol !== "admin" && rol !== "comercial";
     const cargar = async () => {

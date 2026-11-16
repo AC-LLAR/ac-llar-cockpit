@@ -320,6 +320,11 @@
     const [casoId, setCasoId] = useState(() => { try { const x = localStorage.getItem("acllar_crm_abrir_caso"); if (x) localStorage.removeItem("acllar_crm_abrir_caso"); return x || null; } catch (e) { return null; } });
     const [clienteId, setClienteId] = useState(() => { try { const x = localStorage.getItem("acllar_crm_abrir_cliente"); if (x) localStorage.removeItem("acllar_crm_abrir_cliente"); return x || null; } catch (e) { return null; } });
     const [nueva, setNueva] = useState(null); // null | {} | { bc } | { cliente }
+    // Si ya estamos en Casos y otro sitio pide abrir un caso o una ficha (irA), se abre aquí mismo
+    useEffect(() => { const f = (e) => { if (!e || e.detail !== "clientes") return; try {
+      const c = localStorage.getItem("acllar_crm_abrir_caso"); if (c) { localStorage.removeItem("acllar_crm_abrir_caso"); setNueva(null); setCasoId(c); }
+      const k = localStorage.getItem("acllar_crm_abrir_cliente"); if (k) { localStorage.removeItem("acllar_crm_abrir_cliente"); setNueva(null); setClienteId(k); } } catch (x) {} };
+      window.addEventListener("acllar-taller-tab", f); return () => window.removeEventListener("acllar-taller-tab", f); }, []);
     const [filtroTodos, setFiltroTodos] = useState("abiertos");
     const [mover, setMover] = useState(null); // { caso, tab } al soltar un caso sobre una pestaña
     const [sobre, setSobre] = useState(null); // pestaña bajo el cursor mientras se arrastra
@@ -388,7 +393,7 @@
 
     return h("div", { "data-crm": "1", style: { fontFamily: F.body, color: T.ink, display: "flex", flexDirection: "column", gap: "16px" } },
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center" } },
-        h(Buscador, { T, onCliente: (id) => setClienteId(id), onBC: (bc) => setNueva({ bc }) }),
+        h(Buscador, { T, onCliente: (id) => setClienteId(id), onBC: (bc) => setNueva({ bc }), onCaso: (id) => setCasoId(id) }),
         h("button", { "data-crm-nueva": "1", onClick: () => setNueva({}), style: { ...btn(T, "p"), height: "46px", padding: "0 20px", fontSize: "15px" } }, "+ Nueva consulta")),
       h("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px", borderBottom: `2px solid ${T.border}` } },
         tabBtn("metoca", me ? "Mis tareas" : "Pendientes", listas.metoca.length, nVencidos ? "rojo" : "azul"),
@@ -438,20 +443,58 @@
     let crmRows = a.data || [], bcRows = b.data || [];
     const vehDe = {};
     const mat = normMat(s);
-    if (mat.length >= 4 && /\d/.test(mat) && /[A-Z]/.test(mat)) {
-      const ps = await sb().from("bc_productos_servicio").select("no,descripcion,serie,cliente_no").ilike("serie_norm", `%${mat}%`).eq("activo", true).limit(8);
-      const nos = [...new Set((ps.data || []).map((x) => x.cliente_no).filter(Boolean))];
-      (ps.data || []).forEach((x) => { if (x.cliente_no) vehDe[x.cliente_no] = `${x.descripcion || ""} · ${x.serie || ""}`; });
-      if (nos.length) {
-        const [c2, b2] = await Promise.all([sb().from("crm_clientes").select("*").in("bc_no", nos), sb().from("bc_clientes").select("no,nombre,telefono,email,direccion,cp,ciudad,provincia,nif").in("no", nos)]);
-        crmRows = [...crmRows, ...(c2.data || []).filter((x) => !crmRows.some((y) => y.id === x.id))];
-        bcRows = [...bcRows, ...(b2.data || []).filter((x) => !bcRows.some((y) => y.no === x.no))];
-      }
+    let abiertos = [];
+    // Parece matrícula o bastidor: busca el vehículo (fichas del cockpit y BC) y lo que hay abierto de él
+    if (pareceVehiculo(s)) {
+      const r = await buscarVehiculo(s);
+      abiertos = r.abiertos;
+      const vehDeCli = {};
+      r.vehiculos.forEach((v) => { const t = [v.modelo, normMat(v.matricula) || null, v.bastidor ? "bastidor " + normMat(v.bastidor) : null].filter(Boolean).join(" · ");
+        if (v.cliente_id) vehDeCli[v.cliente_id] = t; if (v.bc_no) vehDe[v.bc_no] = t; });
+      const ids = Object.keys(vehDeCli).filter((id) => !crmRows.some((y) => y.id === id));
+      const nos = [...new Set(r.vehiculos.map((v) => v.bc_no).filter(Boolean))];
+      const [c2, b2] = await Promise.all([
+        ids.length ? sb().from("crm_clientes").select("*").in("id", ids) : { data: [] },
+        nos.length ? sb().from("bc_clientes").select("no,nombre,telefono,email,direccion,cp,ciudad,provincia,nif").in("no", nos) : { data: [] }]);
+      crmRows = [...crmRows, ...(c2.data || [])];
+      bcRows = [...bcRows, ...(b2.data || []).filter((x) => !bcRows.some((y) => y.no === x.no))];
+      crmRows.forEach((c) => { if (vehDeCli[c.id] && c.bc_no && !vehDe[c.bc_no]) vehDe[c.bc_no] = vehDeCli[c.id]; if (vehDeCli[c.id]) c.__veh = vehDeCli[c.id]; });
     }
-    const crm = crmRows.map((c) => ({ k: "crm:" + c.id, tipo: "crm", c, veh: c.bc_no && vehDe[c.bc_no] }));
+    const crm = crmRows.map((c) => ({ k: "crm:" + c.id, tipo: "crm", c, veh: c.__veh || (c.bc_no && vehDe[c.bc_no]) }));
     const ya = new Set(crmRows.map((c) => c.bc_no).filter(Boolean));
     const bc = bcRows.filter((x) => !ya.has(x.no)).map((x) => ({ k: "bc:" + x.no, tipo: "bc", bc: x, veh: vehDe[x.no] }));
-    return [...crm, ...bc];
+    const out = [...crm, ...bc]; out.abiertos = abiertos;
+    return out;
+  }
+  // ---- Vehículo ya abierto (para no cargar dos veces la misma consulta)
+  // Matrícula (letras y números) o trozo de bastidor (a veces solo los últimos números)
+  const pareceVehiculo = (s) => { const m = normMat(s); return m.length >= 4 && /\d/.test(m) && (/[A-Z]/.test(m) || m.length >= 5); };
+  async function buscarVehiculo(q) {
+    try { const r = await sb().rpc("buscar_vehiculo", { q }); if (r.error) throw r.error; return { vehiculos: (r.data && r.data.vehiculos) || [], abiertos: (r.data && r.data.abiertos) || [] }; }
+    catch (e) { return { vehiculos: [], abiertos: [] }; }
+  }
+  const FIN_CASO = ["retirado", "concluido", "rechazado", "sin_respuesta", "cerrado", "descartado", "en_garantias"];
+  async function abiertosDeCliente(clienteId) {
+    const [a, b] = await Promise.all([
+      sb().from("crm_casos").select("id,estado,cliente_id,vehiculo,created_at,created_by,consulta").eq("cliente_id", clienteId).eq("archivado", false).not("estado", "in", `(${FIN_CASO.join(",")})`).limit(20),
+      sb().from("garantias").select("id,numero,estado,cliente_id,vehiculo,created_at,created_by").eq("cliente_id", clienteId).eq("archivado", false).not("estado", "in", "(cerrada,descartada)").limit(20)]);
+    return [...(a.data || []).map((k) => ({ kind: "caso", id: k.id, estado: k.estado, cliente_id: k.cliente_id, vehiculo: k.vehiculo, created_at: k.created_at, created_by: k.created_by })),
+      ...(b.data || []).map((g) => ({ kind: "garantia", id: g.id, ref: g.numero, estado: g.estado, cliente_id: g.cliente_id, vehiculo: [g.vehiculo && g.vehiculo.modelo, g.vehiculo && normMat(g.vehiculo.matricula)].filter(Boolean).join(" · "), created_at: g.created_at, created_by: g.created_by }))];
+  }
+  const estadoDe = (x) => { try {
+    if (x.kind === "caso") return est(x.estado).l;
+    if (x.kind === "garantia") return ((window.AcllarGarantias && window.AcllarGarantias._test.EST[x.estado]) || { l: x.estado }).l;
+    return ((window.AcllarMontajes && window.AcllarMontajes._test.EST[x.estado]) || { l: x.estado }).l; } catch (e) { return x.estado; } };
+  const abrirAbierto = (x) => (x.kind === "caso" ? irA("clientes", { acllar_crm_abrir_caso: x.id }) : x.kind === "garantia" ? irA("garantias", { acllar_garantia_abrir: x.id }) : irA("montajes", { acllar_montaje_abrir: x.id }));
+  function YaAbiertos({ T, items, titulo, onOpen }) {
+    const xs = []; (items || []).forEach((x) => { if (!xs.some((y) => y.id === x.id)) xs.push(x); });
+    if (!xs.length) return null;
+    return h("div", { "data-ya-abiertos": "1", style: { background: CH.ambar.bg, border: `1px solid ${CH.ambar.bd}`, borderRadius: "10px", padding: "8px 10px", display: "flex", flexDirection: "column", gap: "6px" } },
+      h("div", { style: { fontSize: "12.5px", fontWeight: 800, color: CH.ambar.fg } }, titulo || "⚠ Ya hay algo abierto de este vehículo"),
+      xs.map((x) => h("div", { key: x.id, "data-abierto": x.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", fontSize: "13px", background: T.surface, borderRadius: "8px", padding: "6px 8px" } },
+        h("span", null, h("b", null, x.kind === "caso" ? "Caso" : x.kind === "garantia" ? `Garantía ${x.ref || ""}` : `Vehículo nuevo ${x.ref || ""}`), " · ", estadoDe(x), " · ", x.cliente || "", x.vehiculo ? " · " + x.vehiculo : "",
+          h("div", { style: { fontSize: "12px", color: T.inkSoft } }, `Cargado por ${quien(x.created_by)} el ${fFecha(x.created_at)}`)),
+        h("button", { type: "button", onMouseDown: (e) => e.preventDefault(), onClick: () => (onOpen ? onOpen(x) : abrirAbierto(x)), style: { ...btn(T, "s"), whiteSpace: "nowrap" } }, "Abrir →"))));
   }
   const ResultadoCliente = ({ T, r, onPick, cta }) => {
     const nom = r.tipo === "crm" ? nombreCli(r.c) : r.bc.nombre;
@@ -464,14 +507,16 @@
         r.veh ? h("div", { style: { fontSize: "12px", color: T.rust, fontWeight: 700 } }, "Vehículo: " + r.veh) : null),
       h("span", { style: { fontSize: "12px", fontWeight: 800, color: T.rust, whiteSpace: "nowrap" } }, cta));
   };
-  function Buscador({ T, onCliente, onBC }) {
+  function Buscador({ T, onCliente, onBC, onCaso }) {
     const [q, setQ] = useState(""); const [res, setRes] = useState([]); const [abierto, setAbierto] = useState(false);
+    const abrirX = (x) => { setAbierto(false); setQ(""); if (x.kind === "caso" && onCaso) onCaso(x.id); else abrirAbierto(x); };
     const t = useRef(null);
     useEffect(() => { clearTimeout(t.current); if (qSafe(q).length < 2) { setRes([]); return; } t.current = setTimeout(async () => { try { setRes(await buscarClientes(q)); setAbierto(true); } catch (e) {} }, 300); }, [q]);
     return h("div", { style: { position: "relative", flex: "1 1 420px" } },
       h("input", { type: "search", "data-crm-buscar": "1", "aria-label": "Buscar cliente", value: q, onChange: (e) => setQ(e.target.value), onFocus: () => setAbierto(true), onBlur: () => setTimeout(() => setAbierto(false), 200),
-        placeholder: "Buscar cliente por nombre, teléfono, email, NIF, matrícula o nº de BC", style: { ...inp(T), height: "46px", borderRadius: "12px", paddingLeft: "14px" } }),
-      abierto && res.length ? h("div", { style: { position: "absolute", top: "50px", left: 0, right: 0, zIndex: 60, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", boxShadow: "0 12px 30px rgba(0,0,0,.14)", overflow: "hidden", maxHeight: "420px", overflowY: "auto" } },
+        placeholder: "Buscar por cliente, teléfono, email, NIF, nº de BC, matrícula o bastidor", style: { ...inp(T), height: "46px", borderRadius: "12px", paddingLeft: "14px" } }),
+      abierto && (res.length || (res.abiertos || []).length) ? h("div", { "data-crm-buscar-res": "1", style: { position: "absolute", top: "50px", left: 0, right: 0, zIndex: 60, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", boxShadow: "0 12px 30px rgba(0,0,0,.14)", overflow: "hidden", maxHeight: "460px", overflowY: "auto" } },
+        (res.abiertos || []).length ? h("div", { style: { padding: "8px" } }, h(YaAbiertos, { T, items: res.abiertos, titulo: "⚠ Abierto con este vehículo: revísalo antes de cargar otra consulta", onOpen: abrirX })) : null,
         res.map((r) => h(ResultadoCliente, { key: r.k, T, r, cta: r.tipo === "crm" ? "Abrir ficha" : "Nueva consulta", onPick: (x) => { setAbierto(false); setQ(""); x.tipo === "crm" ? onCliente(x.c.id) : onBC(x.bc); } })))
         : abierto && qSafe(q).length >= 2 ? h("div", { style: { position: "absolute", top: "50px", left: 0, right: 0, zIndex: 60, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px", fontSize: "13px", color: T.inkSoft } }, "Sin coincidencias. Usa “+ Nueva consulta” para darlo de alta.") : null);
   }
@@ -1126,6 +1171,19 @@
       const no = sel ? (sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) : null;
       if (no) sb().from("bc_productos_servicio").select("*").eq("cliente_no", no).eq("activo", true).then((r) => setVehBC(r.data || []));
     }, [sel]);
+    // Aviso de duplicados: lo que ya hay abierto de este cliente o de este vehículo
+    const [abCli, setAbCli] = useState([]); const [abVeh, setAbVeh] = useState([]);
+    useEffect(() => { let vivo = true; setAbCli([]);
+      (async () => { let id = sel && sel.tipo === "crm" ? sel.c.id : null;
+        if (!id && sel && sel.tipo === "bc") { const r = await sb().from("crm_clientes").select("id").eq("bc_no", sel.bc.no).maybeSingle(); id = r.data && r.data.id; }
+        if (id) { const xs = await abiertosDeCliente(id); if (vivo) setAbCli(xs); } })().catch(() => {});
+      return () => { vivo = false; }; }, [sel]);
+    const tv = useRef(null);
+    const vehClaves = (() => { const v = vehSel != null ? (vehExistentes0()[vehSel] || {}) : veh; return [normMat(v.matricula), normMat(v.bastidor)].filter((x) => pareceVehiculo(x)); })();
+    useEffect(() => { clearTimeout(tv.current); if (!vehClaves.length) { setAbVeh([]); return; }
+      tv.current = setTimeout(async () => { const rs = await Promise.all(vehClaves.map(buscarVehiculo)); setAbVeh(rs.flatMap((r) => r.abiertos)); }, 400); }, [vehClaves.join("|")]);
+    const abrirDesdeAqui = (x) => { onClose(); abrirAbierto(x); };
+    function vehExistentes0() { const own = sel && sel.tipo === "crm" ? (sel.c.vehiculos || []).map(asVeh) : []; const extra = vehBC.filter((p) => !own.some((v) => v.bc_ps === p.no)).map(vehDeBC); return [...own, ...extra]; }
     const vehExistentes = (() => { const own = sel && sel.tipo === "crm" ? (sel.c.vehiculos || []).map(asVeh) : []; const extra = vehBC.filter((p) => !own.some((v) => v.bc_ps === p.no)).map(vehDeBC); return [...own, ...extra]; })();
     const setC = (f) => (e) => setCli((x) => ({ ...x, [f]: e.target.value }));
     const setKk = (f) => (e) => setK((x) => ({ ...x, [f]: e.target.value }));
@@ -1172,10 +1230,11 @@
           h("span", null, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Cliente: "), h("b", null, sel.tipo === "crm" ? nombreCli(sel.c) : sel.bc.nombre), " ", (sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: T.inkSoft } }, sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) : h(Chip, { c: "ambar" }, "sin alta en BC")),
           h("button", { onClick: () => setSel(null), style: btn(T, "s") }, "Cambiar"))
           : h(React.Fragment, null,
-            h(Field, { T, label: "1 · Escribe el teléfono o el nombre: si ya es cliente, aparece aquí" }, h("input", { type: "search", value: q, onChange: (e) => setQ(e.target.value), autoFocus: true, style: { ...I, borderColor: T.rust } })),
+            h(Field, { T, label: "1 · Escribe el teléfono, el nombre o la matrícula: si ya es cliente, aparece aquí" }, h("input", { type: "search", value: q, onChange: (e) => setQ(e.target.value), autoFocus: true, style: { ...I, borderColor: T.rust } })),
             res.length ? h("div", { style: { border: `1px solid ${T.border}`, borderRadius: "10px", overflow: "hidden", marginTop: "-6px" } },
               h("div", { style: { fontSize: "11px", fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: T.inkSoft, background: T.bg, padding: "6px 12px" } }, `Clientes que coinciden · ${res.length}`),
               res.map((r) => h(ResultadoCliente, { key: r.k, T, r, cta: "Usar", onPick: (x) => setSel(x) }))) : null,
+            (res.abiertos || []).length ? h(YaAbiertos, { T, items: res.abiertos, titulo: "⚠ Abierto con este vehículo: revísalo antes de cargar otra consulta", onOpen: abrirDesdeAqui }) : null,
             h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-6px" } }, "¿No aparece? Rellena sus datos y se crea como cliente nuevo. El alta en BC se hace después desde su ficha, con un botón."),
             h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" } },
               [["nombre", "Nombre"], ["apellidos", "Apellidos"], ["telefono", "Teléfono"], ["email", "Email"]].map(([f, l]) => h(Field, { key: f, T, label: l }, h("input", { value: cli[f], onChange: setC(f), style: I }))),
@@ -1194,6 +1253,8 @@
             h("input", { value: veh.modelo, onChange: (e) => setVeh((x) => ({ ...x, modelo: e.target.value })), placeholder: "Modelo", "aria-label": "Modelo", style: I }),
             h("input", { value: veh.matricula, onChange: (e) => setVeh((x) => ({ ...x, matricula: e.target.value })), placeholder: "Matrícula", "aria-label": "Matrícula", style: I }),
             h("input", { value: veh.bastidor, onChange: (e) => setVeh((x) => ({ ...x, bastidor: e.target.value })), placeholder: "Bastidor (opcional)", "aria-label": "Bastidor", style: I })) : null),
+        abVeh.length ? h(YaAbiertos, { T, items: abVeh, titulo: "⚠ Ya hay algo abierto de este vehículo. Si es la misma consulta, ábrela en vez de cargar otra.", onOpen: abrirDesdeAqui })
+          : abCli.length ? h(YaAbiertos, { T, items: abCli, titulo: `Este cliente ya tiene ${abCli.length === 1 ? "algo abierto" : abCli.length + " cosas abiertas"}: mira que no sea lo mismo`, onOpen: abrirDesdeAqui }) : null,
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Canal"), h(Seg, { T, opts: CANALES, value: k.canal, onChange: (v) => setK((x) => ({ ...x, canal: v })) })),
         h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(SegMulti, { T, opts: TIPOS, value: k.tipo, onChange: (v) => setK((x) => ({ ...x, tipo: v })) })),
         h(Field, { T, label: tieneGar(k.tipo) ? "Qué problema tiene (lo que cuenta el cliente)" : "Consulta" }, h("textarea", { rows: 3, value: k.consulta, onChange: setKk("consulta"), placeholder: tieneGar(k.tipo) ? "p. ej. gotea la claraboya trasera cuando llueve" : "¿Qué necesita?", style: { ...I, resize: "vertical" } })),

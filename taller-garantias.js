@@ -127,6 +127,8 @@
     const [filtro, setFiltro] = useState("abiertas"); const [txt, setTxt] = useState("");
     const [abierta, setAbierta] = useState(() => { try { const x = localStorage.getItem("acllar_garantia_abrir"); if (x) localStorage.removeItem("acllar_garantia_abrir"); return x || null; } catch (e) { return null; } });
     const [nuevo, setNuevo] = useState(false); const [nueva, setNueva] = useState(false);
+    useEffect(() => { const f = (e) => { if (!e || e.detail !== "garantias") return; try { const x = localStorage.getItem("acllar_garantia_abrir"); if (x) { localStorage.removeItem("acllar_garantia_abrir"); setAbierta(x); } } catch (y) {} };
+      window.addEventListener("acllar-taller-tab", f); return () => window.removeEventListener("acllar-taller-tab", f); }, []);
     const rol = window.acllarCloud && window.acllarCloud.rol ? window.acllarCloud.rol() : null;
     const sinAcceso = rol && rol !== "admin" && rol !== "comercial";
     const cargar = async () => {
