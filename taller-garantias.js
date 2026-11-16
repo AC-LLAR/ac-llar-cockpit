@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -255,6 +255,7 @@
     const [nuevoProb, setNuevoProb] = useState(""); const [nuevoH, setNuevoH] = useState(""); const [verFoto, setVerFoto] = useState(null); const [etG, setEtG] = useState("");
     const [pend, setPend] = useState(null); const [citaTmp, setCitaTmp] = useState(""); const [codTmp, setCodTmp] = useState("");
     const [cerrando, setCerrando] = useState(false);
+    const [devolviendo, setDevolviendo] = useState(false); const [devMot, setDevMot] = useState(""); const [devTipo, setDevTipo] = useState(""); const [devuelta, setDevuelta] = useState(null);
     const [verFicha, setVerFicha] = useState(false); const [bitKey, setBitKey] = useState(0); const [alta, setAlta] = useState("");
     const I = inp(T);
     const cargar = async () => {
@@ -358,6 +359,27 @@
         setCerrando(false);
       }
     };
+    // Garantía mal cargada: vuelve a Casos como consulta normal. La garantía no se borra: queda descartada con el motivo.
+    const devolver = async () => {
+      const mot = devMot.trim(), tipos = tiposDe(devTipo).filter((x) => x !== "garantia");
+      if (!mot || !tipos.length) return;
+      setTrab(true); setMsg("");
+      try {
+        let casoId = g.caso_id;
+        if (casoId) {
+          const r = await sb().from("crm_casos").update({ estado: "pendiente_respuesta", tipo: tipos.join(","), rama: null, motivo_cierre: null, recordar_at: null }).eq("id", casoId);
+          if (r.error) throw r.error;
+        } else {
+          const r = await sb().from("crm_casos").insert({ cliente_id: g.cliente_id, vehiculo: vehTxt(g.vehiculo) || null, canal: "otro", tipo: tipos.join(","), estado: "pendiente_respuesta",
+            consulta: g.descripcion || `Devuelta desde la garantía ${g.numero}`, responsable: yo() || null }).select("id").single();
+          if (r.error) throw r.error;
+          casoId = r.data.id; await sb().from("garantias").update({ caso_id: casoId }).eq("id", g.id);
+        }
+        await anotar("nota", `No es garantía: devuelta a Casos (${tipos.map((k) => (TIPOS.find((t) => t[0] === k) || [k, k])[1]).join(" · ")}) · ${mot}`);
+        await upd({ estado: "descartada", motivo_cierre: `Devuelta a Casos (mal cargada como garantía): ${mot}`, recordar_at: null }, "Devuelta a Casos: el caso está en Mis tareas como consulta pendiente de respuesta.");
+        setDevolviendo(false); setDevMot(""); setDevuelta(casoId);
+      } catch (e) { setTrab(false); setMsg("No se pudo devolver: " + (e.message || e)); }
+    };
     const sig = s.sig.filter(pasoVisible(g));
     const lblFase = (i) => { const done = s.fin || (s.f != null && i < s.f), cur = i === s.f; return h("div", { key: i, style: { borderRadius: "6px", padding: "6px 2px", background: cur ? T.rust : done ? CH.verde.bg : T.bgAlt, color: cur ? "#fff" : done ? CH.verde.fg : T.inkSoft } }, FASES[i]); };
 
@@ -395,8 +417,17 @@
             pend && pend.codigo ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "El seguimiento de la tramitación se lleva en la web del fabricante. Aquí solo queda la fecha y su nº de gestión.") : null,
             pend && pend.cita ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Pon una fecha en la que sepas que las piezas ya habrán llegado.") : null,
             cerrando ? h(CierreBox, { T, que: "expediente", guardando: trab, onConfirm: cerrarSin, onCancel: () => setCerrando(false) })
-              : h("button", { "data-g-descartar": "1", onClick: () => setCerrando(true), style: { ...btn(T, "s"), alignSelf: "flex-start", color: T.inkSoft, marginTop: "4px" } }, "✕ Descartar o cerrar sin completar…"))
+              : devolviendo ? h("div", { "data-g-devolver-box": "1", style: { display: "flex", flexDirection: "column", gap: "8px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: "10px", padding: "12px", marginTop: "4px" } },
+                h("div", { style: { fontWeight: 800, fontSize: "14px" } }, "No es garantía: devolver a Casos"),
+                h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, "El caso vuelve a Casos como consulta pendiente de respuesta. Este expediente no se borra: queda en Cerradas con el motivo."),
+                h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "¿Qué es en realidad?"), h(SegMulti, { T, opts: TIPOS.filter((x) => x[0] !== "garantia"), value: devTipo, onChange: setDevTipo })),
+                h(Field, { T, label: "Motivo (queda en la bitácora)" }, h("textarea", { rows: 2, "data-g-devolver-motivo": "1", value: devMot, onChange: (e) => setDevMot(e.target.value), placeholder: "p. ej. se cargó como garantía pero es una reparación normal", style: { ...I, resize: "vertical" } })),
+                h("div", { style: { display: "flex", gap: "8px" } }, h("button", { "data-g-devolver-ok": "1", disabled: trab || !devMot.trim() || !tiposDe(devTipo).length, onClick: devolver, style: btn(T, "p") }, "Devolver a Casos"), h("button", { onClick: () => setDevolviendo(false), style: btn(T) }, "Cancelar")))
+              : h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px" } },
+                esCli(g) ? h("button", { "data-g-devolver": "1", onClick: () => { setDevolviendo(true); setDevTipo(""); }, style: { ...btn(T, "s"), color: T.inkSoft } }, "↩ No es garantía: devolver a Casos…") : null,
+                h("button", { "data-g-descartar": "1", onClick: () => setCerrando(true), style: { ...btn(T, "s"), color: T.inkSoft } }, "✕ Descartar o cerrar sin completar…")))
             : h(React.Fragment, null, g.motivo_cierre ? h("div", { style: { fontSize: "13px", background: T.bg, borderRadius: "8px", padding: "8px 10px", marginTop: "10px", whiteSpace: "pre-wrap" } }, h("b", null, "Motivo del cierre: "), g.motivo_cierre) : null,
+              (devuelta || /^Devuelta a Casos/.test(g.motivo_cierre || "")) && (devuelta || g.caso_id) ? h("button", { "data-g-ir-caso": "1", onClick: () => irA("clientes", { acllar_crm_abrir_caso: devuelta || g.caso_id }), style: { ...btn(T, "p"), marginTop: "10px", marginRight: "8px" } }, "Abrir el caso en Casos →") : null,
               h("button", { onClick: () => upd({ estado: chasis ? "abierta" : "analisis", motivo_cierre: null }, "Expediente reabierto."), style: { ...btn(T), marginTop: "10px" } }, "Reabrir")),
           msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: /^No se|no tiene/.test(msg) ? T.danger : T.ok } }, msg) : null),
 

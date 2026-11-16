@@ -1209,5 +1209,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
