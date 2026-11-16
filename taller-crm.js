@@ -329,6 +329,7 @@
       const k = localStorage.getItem("acllar_crm_abrir_cliente"); if (k) { localStorage.removeItem("acllar_crm_abrir_cliente"); setNueva(null); setClienteId(k); } } catch (x) {} };
       window.addEventListener("acllar-taller-tab", f); return () => window.removeEventListener("acllar-taller-tab", f); }, []);
     const [filtroTodos, setFiltroTodos] = useState("abiertos");
+    const [orden, setOrden] = useOrden("acllar_orden_casos");
     const [mover, setMover] = useState(null); // { caso, tab } al soltar un caso sobre una pestaña
     const [sobre, setSobre] = useState(null); // pestaña bajo el cursor mientras se arrastra
     const rol = window.acllarCloud && window.acllarCloud.rol ? window.acllarCloud.rol() : null;
@@ -419,17 +420,17 @@
           h("button", { "data-crm-sync": "1", onClick: syncAhora, disabled: sincronizando, title: "Traer ya los cambios de BC sin esperar a los 10 minutos", style: btn(T, "s") }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC"))),
       error ? h("div", { style: { color: T.danger, fontSize: "13px" } }, error) : null,
       cargando ? h("div", { style: { color: T.inkFaint, fontSize: "13px" } }, "Cargando…")
-        : vista === "tablero" ? h(Tablero, { T, casos: abiertos, onOpen: setCasoId })
-        : h(React.Fragment, null,
+        : vista === "tablero" ? h(React.Fragment, null, h(AvisoOrden, { T, orden, setOrden, nombres: NOMBRES_CASOS }), h(Tablero, { T, casos: ordenar(abiertos, orden, ORDEN_CASOS), onOpen: setCasoId }))
+        : h(React.Fragment, null, h(AvisoOrden, { T, orden, setOrden, nombres: NOMBRES_CASOS }),
           vista === "todos" ? h("div", null, h(Seg, { T, opts: [["abiertos", "Abiertos"], ["garantias", "En Garantías"], ["todos", "Todos"]], value: filtroTodos, onChange: setFiltroTodos })) : null,
           vista === "espera" ? h(React.Fragment, null,
             [["cli", "Esperando al cliente", "Nadie espera respuesta del cliente."], ["cita", "Con cita dada", null]].map(([k, tit, vac]) => {
               const xs = listas.espera.filter((c) => pel(c) === k);
               if (!xs.length && !vac) return null;
               return h("div", { key: k, style: { display: "flex", flexDirection: "column", gap: "8px" } }, h("div", { style: { fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft } }, `${tit} (${xs.length})`),
-                h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, vacio: vac, arrastrable: true }));
+                h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, vacio: vac, arrastrable: true, orden, setOrden }));
             }))
-          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, arrastrable: true, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "cerrados" ? "Aún no hay casos terminados." : vista === "descartados" ? "No hay casos descartados." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
+          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, arrastrable: true, orden, setOrden, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "cerrados" ? "Aún no hay casos terminados." : vista === "descartados" ? "No hay casos descartados." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
       mover ? h(MoverDialog, { T, F, ...mover, onClose: () => setMover(null), onSaved: (c) => { actualizarCaso(c); setMover(null); } }) : null,
       casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, vinculados, sugerencia: sugerencia(casoAbierto), syncAhora, sincronizando, onRefresh: cargar, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
       clienteId ? h(ClientePanel, { T, F, id: clienteId, casos, bcServ, onClose: () => setClienteId(null), onCaso: (id) => { setClienteId(null); setCasoId(id); }, onNueva: (cliente) => { setClienteId(null); setNueva({ cliente }); }, onChanged: cargar }) : null,
@@ -549,19 +550,51 @@
   }
 
   // ---------- lista ----------
-  function Lista({ T, casos, bcServ, sugerencia, onOpen, vacio, arrastrable }) {
+  // ---------- ordenar listas por columna (clic: ▲, otro clic: ▼, tercero: orden normal). Se guarda en este navegador.
+  const cmpTxt = (a, b) => String(a || "").localeCompare(String(b || ""), "es", { sensitivity: "base", numeric: true });
+  const sigOrden = (o, k) => (!o || o.k !== k ? { k, d: 1 } : o.d === 1 ? { k, d: -1 } : null);
+  const ordenar = (xs, o, fns) => (!o || !fns[o.k] ? xs : xs.slice().sort((a, b) => o.d * fns[o.k](a, b)));
+  function useOrden(clave) {
+    const [o, setO] = useState(() => { try { return JSON.parse(localStorage.getItem(clave) || "null"); } catch (e) { return null; } });
+    return [o, (x) => { setO(x); try { if (x) localStorage.setItem(clave, JSON.stringify(x)); else localStorage.removeItem(clave); } catch (e) {} }];
+  }
+  function ThOrd({ T, th, label, k, orden, setOrden }) {
+    if (!k || !setOrden) return h("th", { style: th }, label);
+    const on = orden && orden.k === k;
+    return h("th", { "data-orden": k, onClick: () => setOrden(sigOrden(orden, k)), title: "Clic para ordenar · otro clic invierte · un tercero vuelve al orden normal",
+      style: { ...th, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", color: on ? T.ink : th.color } }, label, " ", h("span", { style: { opacity: on ? 1 : 0.35 } }, on ? (orden.d === 1 ? "▲" : "▼") : "↕"));
+  }
+  function AvisoOrden({ T, orden, setOrden, nombres }) {
+    if (!orden || !nombres[orden.k]) return null;
+    return h("div", { "data-orden-activo": orden.k, style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "12.5px", color: T.inkSoft } },
+      `Ordenado por ${nombres[orden.k][orden.d === 1 ? 0 : 1]}`, h("button", { "data-orden-quitar": "1", onClick: () => setOrden(null), style: { ...btn(T, "s"), fontSize: "12px", padding: "2px 8px" } }, "✕ Orden normal"));
+  }
+  const ESTADOS_ORDEN = Object.keys(E);
+  const ORDEN_CASOS = {
+    plazo: (a, b) => ordPlazo(a, b),
+    entrada: (a, b) => cmpTxt(a.created_at, b.created_at),
+    cliente: (a, b) => cmpTxt(nombreCli(a.cliente), nombreCli(b.cliente)),
+    tipo: (a, b) => cmpTxt(lblTipos(a.tipo), lblTipos(b.tipo)),
+    estado: (a, b) => ESTADOS_ORDEN.indexOf(a.estado) - ESTADOS_ORDEN.indexOf(b.estado),
+    accion: (a, b) => cmpTxt((plazo(a) || {}).accion, (plazo(b) || {}).accion) || ordPlazo(a, b),
+  };
+  const NOMBRES_CASOS = { plazo: ["vencimiento (lo más urgente primero)", "vencimiento (lo menos urgente primero)"], entrada: ["antigüedad (lo más antiguo primero)", "antigüedad (lo más reciente primero)"],
+    cliente: ["cliente (A-Z)", "cliente (Z-A)"], tipo: ["tipo de trabajo (A-Z)", "tipo de trabajo (Z-A)"], estado: ["estado (en el orden del recorrido)", "estado (al revés)"], accion: ["próxima acción (A-Z)", "próxima acción (Z-A)"] };
+  function Lista({ T, casos: casos0, bcServ, sugerencia, onOpen, vacio, arrastrable, orden, setOrden }) {
+    const casos = ordenar(casos0, orden, ORDEN_CASOS);
     if (!casos.length) return h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft, fontSize: "14px" } }, vacio);
     const th = { fontSize: "11px", letterSpacing: ".08em", textTransform: "uppercase", color: T.inkSoft, fontWeight: 700, padding: "10px 12px", textAlign: "left", borderBottom: `1.5px solid ${T.border}` };
     const td = { padding: "11px 12px", borderBottom: `1px solid ${T.border}`, verticalAlign: "top", fontSize: "13.5px" };
     return h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", overflowX: "auto" } },
       h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "940px" } },
-        h("thead", null, h("tr", null, ["Plazo", "Cliente · vehículo", "Clave", "Tipo", "Estado", "Próxima acción", "Business Central"].map((x) => h("th", { key: x, style: th }, x)))),
+        h("thead", null, h("tr", null, [["Plazo", "plazo"], ["Entrada", "entrada"], ["Cliente · vehículo", "cliente"], ["Clave"], ["Tipo", "tipo"], ["Estado", "estado"], ["Próxima acción", "accion"], ["Business Central"]].map(([x, k]) => h(ThOrd, { key: x, T, th, label: x, k, orden, setOrden })))),
         h("tbody", null, casos.map((c) => {
           const pz = plazo(c), v = chipPlazo(pz), s = est(c.estado);
           const doc = docBC(bcServ, c);
           return h("tr", { key: c.id, "data-crm-caso": c.id, onClick: () => onOpen(c.id), draggable: !!(arrastrable && !s.gar), title: arrastrable && !s.gar ? "Clic para abrir · arrastra a otra pestaña para moverlo" : undefined,
             onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
             h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : s.fin && (c.cerrado_at || c.estado_at) ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.cerrado_at || c.estado_at)) : h("span", { style: { color: T.inkFaint } }, "—")),
+            h("td", { style: { ...td, whiteSpace: "nowrap", color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.created_at)),
             h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h(ChipNueva, { x: c }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: { ...td, maxWidth: "200px" } }, h(CeldaClave, { T, valor: c.clave, tabla: "crm_casos", id: c.id })),
             h("td", { style: td }, lblTipos(c.tipo)),
@@ -1278,5 +1311,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();

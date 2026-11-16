@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, ChipNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -121,6 +121,18 @@
   };
 
   // =====================================================================
+  const ESTADOS_G = Object.keys(EST);
+  const ORDEN_G = (tot) => ({
+    numero: (a, b) => cmpTxt(a.numero, b.numero),
+    vehiculo: (a, b) => cmpTxt(vehLinea(a.vehiculo), vehLinea(b.vehiculo)),
+    cliente: (a, b) => cmpTxt(esCli(a) ? nombreCli(a.cliente) : "~flota", esCli(b) ? nombreCli(b.cliente) : "~flota"),
+    fabricante: (a, b) => cmpTxt(`${a.tipo === "chasis" ? "~" : ""}${a.fabricante || "~"}`, `${b.tipo === "chasis" ? "~" : ""}${b.fabricante || "~"}`),
+    estado: (a, b) => ESTADOS_G.indexOf(a.estado) - ESTADOS_G.indexOf(b.estado),
+    horas: (a, b) => ((tot[a.id] || {}).horas || 0) - ((tot[b.id] || {}).horas || 0),
+    entrada: (a, b) => cmpTxt(a.fecha_entrada || a.created_at, b.fecha_entrada || b.created_at),
+  });
+  const NOMBRES_G = { numero: ["nº (de menor a mayor)", "nº (de mayor a menor)"], vehiculo: ["vehículo (A-Z)", "vehículo (Z-A)"], cliente: ["cliente (A-Z)", "cliente (Z-A)"], fabricante: ["fabricante (A-Z)", "fabricante (Z-A)"],
+    estado: ["estado (en el orden del recorrido)", "estado (al revés)"], horas: ["horas (de menos a más)", "horas (de más a menos)"], entrada: ["antigüedad (lo más antiguo primero)", "antigüedad (lo más reciente primero)"] };
   function GarantiasView({ T, F, flota }) {
     const [lista, setLista] = useState([]); const [lineas, setLineas] = useState([]);
     const [cargando, setCargando] = useState(true); const [error, setError] = useState("");
@@ -145,12 +157,14 @@
       setCargando(false);
     };
     useEffect(() => { cargar(); const t = setInterval(cargar, 60000); return () => clearInterval(t); }, []);
+    const [orden, setOrden] = useOrden("acllar_orden_garantias");
     if (sinAcceso) return h("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "36px", textAlign: "center", color: T.inkSoft } }, "Tu cuenta no tiene acceso a Garantías.");
 
     const tot = {}; lista.forEach((g) => { tot[g.id] = totales(lineas.filter((l) => l.garantia_id === g.id)); });
     const q = txt.trim().toLowerCase();
-    const visibles = lista.filter((g) => (filtro === "abiertas" ? !est(g.estado).fin : filtro === "cerradas" ? est(g.estado).fin : true))
+    const visibles0 = lista.filter((g) => (filtro === "abiertas" ? !est(g.estado).fin : filtro === "cerradas" ? est(g.estado).fin : true))
       .filter((g) => !q || [g.numero, g.fabricante, g.descripcion, g.reclamacion_no, vehLinea(g.vehiculo), g.vehiculo && g.vehiculo.bastidor, g.cliente && nombreCli(g.cliente)].join(" ").toLowerCase().includes(q));
+    const visibles = ordenar(visibles0, orden, ORDEN_G(tot));
     const cuenta = (xs) => lista.filter((g) => xs.includes(g.estado)).length;
     const kpis = [
       [cuenta(["consulta", "esperando_info", "analisis"]), "Consulta y análisis", "ambar"],
@@ -170,12 +184,13 @@
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: "10px" } }, kpis.map(([n, l, c]) => h("div", { key: l, style: { background: T.surface, border: `1px solid ${n ? CH[c].bd : T.border}`, borderRadius: "12px", padding: "10px 14px", minWidth: "150px" } },
         h("div", { style: { fontSize: "22px", fontWeight: 800, color: n ? CH[c].fg : T.inkFaint } }, n), h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, l)))),
       h(Seg, { T, opts: [["abiertas", "Abiertas"], ["cerradas", "Cerradas"], ["todas", "Todas"]], value: filtro, onChange: setFiltro }),
+      h(AvisoOrden, { T, orden, setOrden, nombres: NOMBRES_G }),
       error ? h("div", { style: { color: T.danger, fontSize: "13px" } }, error) : null,
       cargando ? h("div", { style: { color: T.inkFaint, fontSize: "13px" } }, "Cargando…")
         : !visibles.length ? h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft } }, lista.length ? "Ningún expediente con ese filtro." : "Todavía no hay expedientes.")
         : h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", overflowX: "auto" } },
           h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "1040px" } },
-            h("thead", null, h("tr", null, ["Nº", "Vehículo", "Cliente", "Clave", "Fabricante · nº gestión", "Estado", "Horas", "Piezas", "Entrada"].map((x) => h("th", { key: x, style: th }, x)))),
+            h("thead", null, h("tr", null, [["Nº", "numero"], ["Vehículo", "vehiculo"], ["Cliente", "cliente"], ["Clave"], ["Fabricante · nº gestión", "fabricante"], ["Estado", "estado"], ["Horas", "horas"], ["Piezas"], ["Entrada", "entrada"]].map(([x, k]) => h(ThOrd, { key: x, T, th, label: x, k, orden, setOrden })))),
             h("tbody", null, visibles.map((g) => { const t = tot[g.id], s = est(g.estado), av = aviso(g, t);
               return h("tr", { key: g.id, "data-g-fila": g.numero, onClick: () => setAbierta(g.id), style: { cursor: "pointer" } },
                 h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, whiteSpace: "nowrap" } }, g.numero, g.tipo === "chasis" ? h("div", null, h(Chip, { c: "gris" }, "Chasis")) : null),
