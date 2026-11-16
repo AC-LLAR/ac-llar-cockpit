@@ -78,6 +78,7 @@
       if (k === "estado") return { quitado: "quitado de la lista", desmontar: "marcado para desmontar", desmontado: "desmontado", activo: "vuelve a la lista" }[v.a] || `estado ${v.a}`;
       if (k === "montado_at") return v.a ? "montado" : "desmarcado como montado";
       if (k === "mecanicos" || k === "desmontado_por") return `${CAMPOS[k]}: ${(v.a || []).join(", ") || "—"}`;
+      if (k === "vehiculo" && U.difVeh) { const t = U.difVeh(v.de, v.a); if (t) return "Vehículo · " + t; }
       if (k === "pieza") return `Pieza: ${(PIEZA.find((p) => p[0] === v.a) || ["", v.a])[1]}`;
       const f = (x) => (x == null || x === "" ? "—" : typeof x === "object" ? vehTxt(x) : /_at$/.test(k) ? fFechaHora(x) : k === "fecha_entrega" || k === "fecha_senal" ? fFecha(x) : String(x));
       return `${CAMPOS[k] || k}: ${f(v.de)} → ${f(v.a)}`;

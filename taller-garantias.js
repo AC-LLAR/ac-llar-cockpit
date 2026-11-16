@@ -90,6 +90,7 @@
       if (k === "anulada") return v.a ? "anulado" : "reactivado";
       if (k === "repuesto_recibido_at") return v.a ? "pieza recibida / repuesta" : "desmarcada como recibida";
       if (k === "cobertura") return `Cobertura: ${(COBERTURA.find((x) => x[0] === v.de) || ["", "—"])[1]} → ${(COBERTURA.find((x) => x[0] === v.a) || ["", "—"])[1]}`;
+      if (k === "vehiculo" && U.difVeh) { const t = U.difVeh(v.de, v.a); if (t) return "Vehículo · " + t; }
       const f = (x) => (x == null || x === "" ? "—" : typeof x === "object" ? vehLinea(x) : /_at$/.test(k) ? fFechaHora(x) : String(x));
       return `${CAMPOS[k] || k}: ${f(v.de)} → ${f(v.a)}`;
     });

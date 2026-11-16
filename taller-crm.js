@@ -108,7 +108,22 @@
   const normMat = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   const asVeh = (v) => (typeof v === "string" ? { modelo: v } : { ...(v || {}) });
   const vehTxt = (v) => { const x = asVeh(v); return [x.modelo, x.matricula ? normMat(x.matricula) : null].filter(Boolean).join(" · "); };
-  const vehDeBC = (p) => ({ modelo: p.descripcion || "(sin descripción)", matricula: p.serie || "", bastidor: p.alias && normMat(p.alias) !== normMat(p.descripcion) ? p.alias : "", bc_ps: p.no });
+  // Bastidor desde la "Descripción alias" de BC, aunque venga con el modelo delante (igual que bastidor_de_alias en Supabase)
+  const bastidorDeAlias = (alias, desc) => {
+    const lim = (x) => x.replace(/^[\s\-–—:·/]+|[\s\-–—:·/]+$/g, "");
+    let a = String(alias || "").trim().toUpperCase(); const d = String(desc || "").trim().toUpperCase();
+    if (!a || normMat(a) === normMat(d)) return "";
+    const m = a.match(/(?:^|[^A-Z0-9])([A-HJ-NPR-Z0-9]{17})(?:$|[^A-Z0-9])/); if (m) return m[1];
+    if (d && a.startsWith(d)) a = a.slice(d.length);
+    return lim(lim(a).replace(/^BAST(IDOR)?\.?\s*/, ""));
+  };
+  const vehDeBC = (p) => ({ modelo: p.descripcion || "(sin descripción)", matricula: p.serie || "", bastidor: bastidorDeAlias(p.alias, p.descripcion), bc_ps: p.no });
+  // Qué ha cambiado entre dos versiones del mismo vehículo (para el historial)
+  const difVeh = (de, a) => { const x = asVeh(de), y = asVeh(a), p = [];
+    if (String(x.modelo || "").trim() !== String(y.modelo || "").trim()) p.push(`Modelo: ${x.modelo || "—"} → ${y.modelo || "—"}`);
+    if (normMat(x.matricula) !== normMat(y.matricula)) p.push(`Matrícula: ${normMat(x.matricula) || "—"} → ${normMat(y.matricula) || "—"}`);
+    if (normMat(x.bastidor) !== normMat(y.bastidor)) p.push(`Bastidor: ${normMat(x.bastidor) || "—"} → ${normMat(y.bastidor) || "—"}`);
+    return p.join(" · "); };
   const mismoVeh = (a, b) => { const x = asVeh(a), y = asVeh(b); if (x.bc_ps && y.bc_ps) return x.bc_ps === y.bc_ps; const mx = normMat(x.matricula), my = normMat(y.matricula); if (mx || my) return mx === my; return String(x.modelo || "").trim().toLowerCase() === String(y.modelo || "").trim().toLowerCase(); };
   async function enviarABC(clienteId, forzar, accion) {
     const { data, error } = await sb().functions.invoke("crm-alta-bc", { body: { cliente_id: clienteId, forzar: !!forzar, accion } });
@@ -217,14 +232,15 @@
         const de = (Array.isArray(v.de) ? v.de : []).map(asVeh), a = (Array.isArray(v.a) ? v.a : []).map(asVeh);
         const add = a.filter((x) => !de.some((y) => mismoVeh(x, y))), del = de.filter((x) => !a.some((y) => mismoVeh(x, y)));
         const bc = a.filter((x) => x.bc_ps && de.some((y) => mismoVeh(x, y) && !y.bc_ps));
-        return [add.length ? "Vehículo añadido: " + add.map(vehTxt).join(", ") : "", del.length ? "Vehículo quitado de la ficha: " + del.map(vehTxt).join(", ") : "", bc.length ? "Vehículo en BC: " + bc.map((x) => `${vehTxt(x)} (${x.bc_ps})`).join(", ") : ""].filter(Boolean).join(" · ") || "Vehículos actualizados";
+        const cam = a.map((x) => { const y = de.find((z) => mismoVeh(x, z)); const t = y ? difVeh(y, x) : ""; return t ? `Vehículo ${x.modelo || ""}${x.bc_ps ? " (" + x.bc_ps + ")" : ""}: ${t}` : ""; }).filter(Boolean);
+        return [...cam, add.length ? "Vehículo añadido: " + add.map(vehTxt).join(", ") : "", del.length ? "Vehículo quitado de la ficha: " + del.map(vehTxt).join(", ") : "", bc.length ? "Vehículo en BC: " + bc.map((x) => `${vehTxt(x)} (${x.bc_ps})`).join(", ") : ""].filter(Boolean).join(" · ") || "Vehículos actualizados";
       }
       const f = (x) => (x == null || x === "" ? "—" : k === "tipo" ? lblTipos(x) : k === "canal" ? lbl(CANALES, x) : typeof x === "boolean" ? (x ? "sí" : "no") : /_at$|fecha_limite/.test(k) ? fFechaHora(x) : Array.isArray(x) ? x.join(", ") : String(x));
       return `${CAMPOS[k] || k}: ${f(v.de)} → ${f(v.a)}`;
     });
     return partes.join(" · ") || ev.tipo;
   }
-  const quien = (email) => { const e = String(email || ""); if (!e || e === "sistema") return "Sistema"; const r = RESPONSABLES.find((x) => e.startsWith(sinAcentos(x).toLowerCase())); return r || e.split("@")[0]; };
+  const quien = (email) => { const e = String(email || ""); if (!e || e === "sistema") return "Sistema"; if (e === "bc@business-central") return "Business Central"; const r = RESPONSABLES.find((x) => e.startsWith(sinAcentos(x).toLowerCase())); return r || e.split("@")[0]; };
   const Historial = ({ T, eventos }) => h("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "9px", fontSize: "13px" } },
     eventos.length ? eventos.map((ev) => h("li", { key: ev.id, style: { display: "grid", gridTemplateColumns: "84px 1fr", gap: "8px" } },
       h("span", { style: { color: T.inkSoft } }, fFechaHora(ev.at)), h("span", null, h("b", null, quien(ev.autor)), " · ", textoEvento(ev))))
@@ -1193,5 +1209,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
