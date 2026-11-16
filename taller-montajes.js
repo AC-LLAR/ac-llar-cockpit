@@ -8,7 +8,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, nombreCli, normMat,
-    buscarClientes, ResultadoCliente, qSafe, pad, Bitacora, ChipCli, irA, yo, fLarga } = U;
+    buscarClientes, ResultadoCliente, qSafe, pad, Bitacora, ChipCli, ChipNueva, irA, yo, fLarga } = U;
   const { useState, useEffect, useRef } = React;
 
   const MECANICOS = ["Ali", "Carlos", "Hugo", "Sebastián", "Agente externo"];
@@ -121,7 +121,7 @@
     const Tarjeta = (m) => { const xs = ex(m), p = progreso(xs), av = avisos(m, xs);
       return h("button", { key: m.id, "data-vn-card": m.numero, onClick: () => setAbierto(m.id), style: { textAlign: "left", cursor: "pointer", background: T.surface, border: `1px solid ${av.some((a) => a.c === "rojo") ? CH.rojo.bd : T.border}`, borderRadius: "12px", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px", fontFamily: "inherit", color: T.ink } },
         h("div", { style: { display: "flex", justifyContent: "space-between", gap: "6px" } }, h("b", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" } }, m.numero), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, m.comercial || "")),
-        h("div", { style: { fontWeight: 800, fontSize: "14px" } }, (m.vehiculo || {}).modelo || "—"),
+        h("div", { style: { fontWeight: 800, fontSize: "14px" } }, (m.vehiculo || {}).modelo || "—", ChipNueva ? h(ChipNueva, { x: m }) : null),
         h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, m.cliente ? nombreCli(m.cliente) : "—", (m.vehiculo || {}).bastidor ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, " · …" + normMat(m.vehiculo.bastidor).slice(-6)) : null),
         m.estado === "en_montaje" || m.estado === "pagado" || p.total ? h(Barra, { T, p }) : null,
         h("div", { style: { fontSize: "12px", color: T.inkSoft } }, m.fecha_entrega ? `Entrega ${fFecha(m.fecha_entrega)}` : "Sin fecha de entrega", m.mecanico ? ` · ${m.mecanico}` : ""),

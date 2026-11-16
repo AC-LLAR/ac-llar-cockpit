@@ -305,6 +305,9 @@
     if (up.error) throw up.error;
     return { gid, caso: up.data };
   }
+  // Etiqueta NUEVA durante las primeras 24 h, con quién la cargó
+  const esNueva = (x) => !!(x && x.created_at && Date.now() - new Date(x.created_at) < 864e5);
+  const ChipNueva = ({ x }) => (esNueva(x) ? h("span", { "data-nueva": "1", style: { marginLeft: "6px" } }, h(Chip, { c: "azul", title: `Cargada ${fFechaHora(x.created_at)}`, style: { background: "#2F5BFF", borderColor: "#2F5BFF", color: "#fff" } }, `NUEVA${x.created_by ? " · " + quien(x.created_by) : ""}`)) : null);
   const ChipCli = ({ c }) => (c && c.tipo_cliente ? h(Chip, { c: c.tipo_cliente === "propio" ? "verde" : "gris", style: { marginLeft: "6px" } }, c.tipo_cliente === "propio" ? "Propio" : "Externo") : null);
 
   // =====================================================================
@@ -355,6 +358,8 @@
 
     const abiertos = casos.filter((c) => !est(c.estado).fin);
     const me = yo();
+    // Consultas cargadas por otra persona en las últimas 24 h (las mías no me avisan)
+    const nuevasOtros = casos.filter((c) => esNueva(c) && c.created_by && quien(c.created_by) !== me).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     const ordVence = ordPlazo;
     const pel = (c) => (plazo(c) || {}).pel;
     const listas = {
@@ -395,6 +400,9 @@
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center" } },
         h(Buscador, { T, onCliente: (id) => setClienteId(id), onBC: (bc) => setNueva({ bc }), onCaso: (id) => setCasoId(id) }),
         h("button", { "data-crm-nueva": "1", onClick: () => setNueva({}), style: { ...btn(T, "p"), height: "46px", padding: "0 20px", fontSize: "15px" } }, "+ Nueva consulta")),
+      nuevasOtros.length ? h("div", { "data-crm-nuevas": "1", style: { background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: "12px", padding: "10px 12px", display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", fontSize: "13.5px" } },
+        h("b", { style: { color: "#2F5BFF" } }, `🆕 ${nuevasOtros.length} consulta${nuevasOtros.length > 1 ? "s" : ""} nueva${nuevasOtros.length > 1 ? "s" : ""} de ${[...new Set(nuevasOtros.map((c) => quien(c.created_by)))].join(" y ")} en las últimas 24 h:`),
+        nuevasOtros.map((c) => h("button", { key: c.id, "data-nueva-caso": c.id, onClick: () => setCasoId(c.id), style: { ...btn(T, "s"), background: T.surface } }, `${nombreCli(c.cliente)} · ${lblTipos(c.tipo)} · ${fFechaHora(c.created_at)}`))) : null,
       h("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px", borderBottom: `2px solid ${T.border}` } },
         tabBtn("metoca", me ? "Mis tareas" : "Pendientes", listas.metoca.length, nVencidos ? "rojo" : "azul"),
         tabBtn("espera", "Esperando al cliente", listas.espera.length, nRecordar ? "ambar" : "gris"),
@@ -554,7 +562,7 @@
           return h("tr", { key: c.id, "data-crm-caso": c.id, onClick: () => onOpen(c.id), draggable: !!(arrastrable && !s.gar), title: arrastrable && !s.gar ? "Clic para abrir · arrastra a otra pestaña para moverlo" : undefined,
             onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
             h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : s.fin && (c.cerrado_at || c.estado_at) ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.cerrado_at || c.estado_at)) : h("span", { style: { color: T.inkFaint } }, "—")),
-            h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
+            h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h(ChipNueva, { x: c }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: { ...td, maxWidth: "200px" } }, h(CeldaClave, { T, valor: c.clave, tabla: "crm_casos", id: c.id })),
             h("td", { style: td }, lblTipos(c.tipo)),
             h("td", { style: td }, h(Chip, { c: s.c }, s.l), s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
@@ -578,7 +586,7 @@
         return h("section", { key: f, style: { background: T.bgAlt, borderRadius: "14px", padding: "10px", display: "flex", flexDirection: "column", gap: "8px", minHeight: "200px" } },
           h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft, padding: "4px 2px" } }, h("span", null, nombre), h(Chip, null, xs.length)),
           xs.map((c) => { const v = chipPlazo(plazo(c)), s = est(c.estado); return h("button", { key: c.id, "data-crm-card": c.id, onClick: () => onOpen(c.id), draggable: true, title: "Clic para abrir · arrastra a una pestaña para moverlo", onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
-            h("b", null, nombreCli(c.cliente)), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lblTipos(c.tipo)].filter(Boolean).join(" · ")),
+            h("span", null, h("b", null, nombreCli(c.cliente)), h(ChipNueva, { x: c })), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lblTipos(c.tipo)].filter(Boolean).join(" · ")),
             h("span", null, h(Chip, { c: s.c }, s.l)), v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
       })));
   }
@@ -1270,5 +1278,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
