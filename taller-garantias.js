@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -138,7 +138,7 @@
     const [cargando, setCargando] = useState(true); const [error, setError] = useState("");
     const [filtro, setFiltro] = useState("abiertas"); const [txt, setTxt] = useState("");
     const [abierta, setAbierta] = useState(() => { try { const x = localStorage.getItem("acllar_garantia_abrir"); if (x) localStorage.removeItem("acllar_garantia_abrir"); return x || null; } catch (e) { return null; } });
-    const [nuevo, setNuevo] = useState(false); const [nueva, setNueva] = useState(false);
+    const [nuevo, setNuevo] = useState(false); const [nueva, setNueva] = useState(false); const [fichaId, setFichaId] = useState(null);
     useEffect(() => { const f = (e) => { if (!e || e.detail !== "garantias") return; try { const x = localStorage.getItem("acllar_garantia_abrir"); if (x) { localStorage.removeItem("acllar_garantia_abrir"); setAbierta(x); } } catch (y) {} };
       window.addEventListener("acllar-taller-tab", f); return () => window.removeEventListener("acllar-taller-tab", f); }, []);
     const rol = window.acllarCloud && window.acllarCloud.rol ? window.acllarCloud.rol() : null;
@@ -193,10 +193,10 @@
           h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "1040px" } },
             h("thead", null, h("tr", null, [["Nº", "numero"], ["Vehículo", "vehiculo"], ["Cliente", "cliente"], ["Clave"], ["Fabricante · nº gestión", "fabricante"], ["Estado", "estado"], ["Horas", "horas"], ["Piezas"], ["Entrada", "entrada"]].map(([x, k]) => h(ThOrd, { key: x, T, th, label: x, k, orden, setOrden })))),
             h("tbody", null, visibles.map((g) => { const t = tot[g.id], s = est(g.estado), av = aviso(g, t);
-              return h("tr", { key: g.id, "data-g-fila": g.numero, onClick: () => setAbierta(g.id), style: { cursor: "pointer" } },
-                h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, whiteSpace: "nowrap" } }, g.numero, g.tipo === "chasis" ? h("div", null, h(Chip, { c: "gris" }, "Chasis")) : null),
+              return h("tr", { key: g.id, "data-g-fila": g.numero, className: "acl-fila" + (esNueva(g) ? " acl-es-nueva" : ""), onClick: () => setAbierta(g.id), style: { cursor: "pointer" } },
+                h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, whiteSpace: "nowrap" } }, esNueva(g) ? h("div", { style: { fontFamily: "inherit" } }, h(ChipNueva, { x: g })) : null, g.numero, g.tipo === "chasis" ? h("div", null, h(Chip, { c: "gris" }, "Chasis")) : null),
                 h("td", { style: td }, h("b", null, vehLinea(g.vehiculo)), g.vehiculo && g.vehiculo.bastidor ? h("div", { style: { fontSize: "12px", color: T.inkSoft, fontFamily: "'JetBrains Mono', monospace" } }, g.vehiculo.bastidor) : null),
-                h("td", { style: td }, esCli(g) ? h(React.Fragment, null, nombreCli(g.cliente), h(ChipCli, { c: g.cliente }), h(ChipNueva, { x: g })) : h(React.Fragment, null, h(Chip, { c: "gris" }, "Flota alquiler"), h(ChipNueva, { x: g }))),
+                h("td", { style: td }, esCli(g) ? h(React.Fragment, null, h(NombreLink, { c: g.cliente, onCliente: setFichaId }), h(ChipCli, { c: g.cliente })) : h(Chip, { c: "gris" }, "Flota alquiler")),
                 h("td", { style: { ...td, maxWidth: "200px" } }, g.caso ? h(CeldaClave, { T, valor: g.caso.clave, tabla: "crm_casos", id: g.caso.id }) : h(CeldaClave, { T, valor: g.clave, tabla: "garantias", id: g.id })),
                 h("td", { style: td }, g.fabricante || "—", g.reclamacion_no ? h("div", { style: { fontSize: "12px", fontFamily: "'JetBrains Mono', monospace", color: T.inkSoft } }, g.reclamacion_no) : null),
                 h("td", { style: td }, h(Chip, { c: s.c }, s.l), av ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: av.c }, av.t)) : null),
@@ -206,7 +206,8 @@
             })))),
       nueva ? h(NuevaConsulta, { T, F, inicial: { tipo: "garantia" }, onClose: () => setNueva(false), onCreated: (c, gid) => { setNueva(false); cargar(); if (gid) setAbierta(gid); } }) : null,
       nuevo ? h(NuevoExpediente, { T, F, flota, onClose: () => setNuevo(false), onCreated: (g) => { setNuevo(false); cargar(); setAbierta(g.id); } }) : null,
-      abierta ? h(Expediente, { T, F, id: abierta, onClose: () => { setAbierta(null); cargar(); }, onChanged: cargar }) : null);
+      abierta ? h(Expediente, { T, F, id: abierta, onClose: () => { setAbierta(null); cargar(); }, onChanged: cargar }) : null,
+      fichaId ? h(FichaCliente, { T, F, id: fichaId, onClose: () => setFichaId(null), onChanged: cargar }) : null);
   }
 
   // ---------- crear expediente (también se usa desde Casos) ----------
@@ -602,5 +603,6 @@
   }
 
   window.AcllarGarantias = GarantiasView;
+  window.AcllarGarantias.FichaCliente = FichaCliente;
   window.AcllarGarantias._test = { EST, totales, aviso, textoEventoG, MSG };
 })();

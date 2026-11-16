@@ -8,7 +8,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, nombreCli, normMat,
-    buscarClientes, ResultadoCliente, qSafe, pad, Bitacora, ChipCli, ChipNueva, irA, yo, fLarga } = U;
+    buscarClientes, ResultadoCliente, qSafe, pad, Bitacora, ChipCli, ChipNueva, NombreLink, esNueva, irA, yo, fLarga } = U;
   const { useState, useEffect, useRef } = React;
 
   const MECANICOS = ["Ali", "Carlos", "Hugo", "Sebastián", "Agente externo"];
@@ -97,7 +97,7 @@
     const [cargando, setCargando] = useState(true); const [error, setError] = useState("");
     const [vista, setVista] = useState("curso"); const [txt, setTxt] = useState("");
     const [abierto, setAbierto] = useState(() => { try { const x = localStorage.getItem("acllar_montaje_abrir"); if (x) localStorage.removeItem("acllar_montaje_abrir"); return x || null; } catch (e) { return null; } });
-    const [nuevo, setNuevo] = useState(false);
+    const [nuevo, setNuevo] = useState(false); const [fichaId, setFichaId] = useState(null);
     useEffect(() => { const f = (e) => { if (!e || e.detail !== "montajes") return; try { const x = localStorage.getItem("acllar_montaje_abrir"); if (x) { localStorage.removeItem("acllar_montaje_abrir"); setAbierto(x); } } catch (y) {} };
       window.addEventListener("acllar-taller-tab", f); return () => window.removeEventListener("acllar-taller-tab", f); }, []);
     const rol = window.acllarCloud && window.acllarCloud.rol ? window.acllarCloud.rol() : null;
@@ -119,10 +119,11 @@
     const enCurso = filtrados.filter((m) => !est(m.estado).fin);
     const col = (k) => enCurso.filter((m) => (k === "comp" ? m.estado.startsWith("comp_") : m.estado === k)).sort((a, b) => String(a.fecha_entrega || "9999").localeCompare(String(b.fecha_entrega || "9999")));
     const Tarjeta = (m) => { const xs = ex(m), p = progreso(xs), av = avisos(m, xs);
-      return h("button", { key: m.id, "data-vn-card": m.numero, onClick: () => setAbierto(m.id), style: { textAlign: "left", cursor: "pointer", background: T.surface, border: `1px solid ${av.some((a) => a.c === "rojo") ? CH.rojo.bd : T.border}`, borderRadius: "12px", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px", fontFamily: "inherit", color: T.ink } },
+      return h("div", { key: m.id, "data-vn-card": m.numero, role: "button", tabIndex: 0, className: "acl-tarjeta" + (esNueva(m) ? " acl-es-nueva" : ""), onClick: () => setAbierto(m.id), onKeyDown: (e) => { if (e.key === "Enter") setAbierto(m.id); }, style: { textAlign: "left", cursor: "pointer", background: T.surface, border: `1px solid ${av.some((a) => a.c === "rojo") ? CH.rojo.bd : T.border}`, borderRadius: "12px", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px", fontFamily: "inherit", color: T.ink } },
+        esNueva(m) ? h("div", null, h(ChipNueva, { x: m, borde: 12 })) : null,
         h("div", { style: { display: "flex", justifyContent: "space-between", gap: "6px" } }, h("b", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" } }, m.numero), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, m.comercial || "")),
-        h("div", { style: { fontWeight: 800, fontSize: "14px" } }, (m.vehiculo || {}).modelo || "—", ChipNueva ? h(ChipNueva, { x: m }) : null),
-        h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, m.cliente ? nombreCli(m.cliente) : "—", (m.vehiculo || {}).bastidor ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, " · …" + normMat(m.vehiculo.bastidor).slice(-6)) : null),
+        h("div", { style: { fontWeight: 800, fontSize: "14px" } }, (m.vehiculo || {}).modelo || "—"),
+        h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, m.cliente ? h(NombreLink, { c: m.cliente, onCliente: setFichaId }) : "—", (m.vehiculo || {}).bastidor ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, " · …" + normMat(m.vehiculo.bastidor).slice(-6)) : null),
         m.estado === "en_montaje" || m.estado === "pagado" || p.total ? h(Barra, { T, p }) : null,
         h("div", { style: { fontSize: "12px", color: T.inkSoft } }, m.fecha_entrega ? `Entrega ${fFecha(m.fecha_entrega)}` : "Sin fecha de entrega", m.mecanico ? ` · ${m.mecanico}` : ""),
         av.length ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "4px" } }, av.map((a, i) => h(Chip, { key: i, c: a.c }, a.t))) : null); };
@@ -143,11 +144,12 @@
         : !cerrados.length ? h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft } }, vista === "entregados" ? "Todavía no hay vehículos entregados." : "No hay ventas canceladas.")
         : h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", overflowX: "auto" } }, h("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: "800px" } },
           h("thead", null, h("tr", null, ["Nº", "Vehículo", "Cliente", "Comercial", vista === "entregados" ? "Entregado" : "Motivo"].map((x) => h("th", { key: x, style: th }, x)))),
-          h("tbody", null, cerrados.map((m) => h("tr", { key: m.id, onClick: () => setAbierto(m.id), style: { cursor: "pointer" } },
-            h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 } }, m.numero), h("td", { style: td }, vehTxt(m.vehiculo)), h("td", { style: td }, m.cliente ? nombreCli(m.cliente) : "—"),
+          h("tbody", null, cerrados.map((m) => h("tr", { key: m.id, className: "acl-fila", onClick: () => setAbierto(m.id), style: { cursor: "pointer" } },
+            h("td", { style: { ...td, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 } }, m.numero), h("td", { style: td }, vehTxt(m.vehiculo)), h("td", { style: td }, m.cliente ? h(NombreLink, { c: m.cliente, onCliente: setFichaId }) : "—"),
             h("td", { style: td }, m.comercial || "—"), h("td", { style: td }, vista === "entregados" ? fFecha(m.entregado_at) : m.motivo_cierre || "—")))))),
       nuevo ? h(NuevoVN, { T, F, onClose: () => setNuevo(false), onCreated: (m) => { setNuevo(false); cargar(); setAbierto(m.id); } }) : null,
-      abierto ? h(Expediente, { T, F, id: abierto, onClose: () => { setAbierto(null); cargar(); }, onChanged: cargar }) : null);
+      abierto ? h(Expediente, { T, F, id: abierto, onClose: () => { setAbierto(null); cargar(); }, onChanged: cargar }) : null,
+      fichaId && window.AcllarGarantias && window.AcllarGarantias.FichaCliente ? h(window.AcllarGarantias.FichaCliente, { T, F, id: fichaId, onClose: () => setFichaId(null), onChanged: cargar }) : null);
   }
 
   // ---------- alta ----------

@@ -307,7 +307,24 @@
   }
   // Etiqueta NUEVA durante las primeras 24 h, con quién la cargó
   const esNueva = (x) => !!(x && x.created_at && Date.now() - new Date(x.created_at) < 864e5);
-  const ChipNueva = ({ x }) => (esNueva(x) ? h("span", { "data-nueva": "1", style: { marginLeft: "6px" } }, h(Chip, { c: "azul", title: `Cargada ${fFechaHora(x.created_at)}`, style: { background: "#2F5BFF", borderColor: "#2F5BFF", color: "#fff" } }, `NUEVA${x.created_by ? " · " + quien(x.created_by) : ""}`)) : null);
+  // Solapa roja en la punta izquierda de la fila o tarjeta (sale de su borde)
+  const ChipNueva = ({ x, borde }) => (esNueva(x) ? h("div", { "data-nueva": "1", title: `Cargada el ${fFechaHora(x.created_at)}`, className: "acl-solapa", style: { marginLeft: `-${borde || 12}px` } },
+    `NUEVA${x.created_by ? " · " + quien(x.created_by) : ""}`) : null);
+  // Estilos compartidos: fila/tarjeta resaltada al pasar el ratón, nombre del cliente como enlace y solapa NUEVA
+  (function () { try { if (document.getElementById("acl-estilos-taller")) return; const st = document.createElement("style"); st.id = "acl-estilos-taller";
+    st.textContent = ".acl-fila{transition:background .12s}.acl-fila:hover{outline:2px solid #2F5BFF;outline-offset:-2px;background:rgba(47,91,255,.035)!important}"
+      + ".acl-tarjeta{transition:border-color .12s,box-shadow .12s}.acl-tarjeta:hover{border-color:#2F5BFF!important;box-shadow:0 0 0 2px rgba(47,91,255,.28),0 6px 16px rgba(15,27,46,.10)}"
+      + ".acl-link{cursor:pointer;font-weight:800;border-radius:3px}.acl-link:hover,.acl-link:focus-visible{color:#2F5BFF;text-decoration:underline;text-underline-offset:3px;outline:none}"
+      + ".acl-solapa{display:inline-block;background:#D92D20;color:#fff;font-weight:800;font-size:11px;letter-spacing:.04em;padding:3px 9px 3px 10px;border-radius:0 7px 7px 0;margin-bottom:6px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.18)}"
+      + "tr.acl-es-nueva>td:first-child{box-shadow:inset 4px 0 0 #D92D20}.acl-tarjeta.acl-es-nueva{border-left:4px solid #D92D20!important}";
+    document.head.appendChild(st); } catch (e) {} })();
+  // Nombre del cliente: siempre enlace a su ficha (no abre el caso de la fila)
+  const NombreLink = ({ c, onCliente, children }) => {
+    const id = c && c.id; const txt = children || nombreCli(c);
+    if (!id || !onCliente) return h("b", null, txt);
+    const ir = (e) => { e.stopPropagation(); e.preventDefault(); onCliente(id); };
+    return h("span", { role: "link", tabIndex: 0, className: "acl-link", "data-cli-link": id, title: "Abrir la ficha del cliente", onClick: ir, onMouseDown: (e) => e.stopPropagation(), onKeyDown: (e) => { if (e.key === "Enter") ir(e); }, draggable: false }, txt);
+  };
   const ChipCli = ({ c }) => (c && c.tipo_cliente ? h(Chip, { c: c.tipo_cliente === "propio" ? "verde" : "gris", style: { marginLeft: "6px" } }, c.tipo_cliente === "propio" ? "Propio" : "Externo") : null);
 
   // =====================================================================
@@ -421,7 +438,7 @@
           h("button", { "data-crm-sync": "1", onClick: syncAhora, disabled: sincronizando, title: "Traer ya los cambios de BC sin esperar a los 10 minutos", style: btn(T, "s") }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC"))),
       error ? h("div", { style: { color: T.danger, fontSize: "13px" } }, error) : null,
       cargando ? h("div", { style: { color: T.inkFaint, fontSize: "13px" } }, "Cargando…")
-        : vista === "tablero" ? h(React.Fragment, null, h(AvisoOrden, { T, orden, setOrden, nombres: NOMBRES_CASOS }), h(Tablero, { T, casos: ordenar(abiertos, orden, ORDEN_CASOS), onOpen: setCasoId }))
+        : vista === "tablero" ? h(React.Fragment, null, h(AvisoOrden, { T, orden, setOrden, nombres: NOMBRES_CASOS }), h(Tablero, { T, casos: ordenar(abiertos, orden, ORDEN_CASOS), onOpen: setCasoId, onCliente: setClienteId }))
         : h(React.Fragment, null, h(AvisoOrden, { T, orden, setOrden, nombres: NOMBRES_CASOS }),
           vista === "todos" ? h("div", null, h(Seg, { T, opts: [["abiertos", "Abiertos"], ["garantias", "En Garantías"], ["todos", "Todos"]], value: filtroTodos, onChange: setFiltroTodos })) : null,
           vista === "espera" ? h(React.Fragment, null,
@@ -429,9 +446,9 @@
               const xs = listas.espera.filter((c) => pel(c) === k);
               if (!xs.length && !vac) return null;
               return h("div", { key: k, style: { display: "flex", flexDirection: "column", gap: "8px" } }, h("div", { style: { fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft } }, `${tit} (${xs.length})`),
-                h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, vacio: vac, arrastrable: true, orden, setOrden }));
+                h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, onCliente: setClienteId, vacio: vac, arrastrable: true, orden, setOrden }));
             }))
-          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, arrastrable: true, orden, setOrden, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "cerrados" ? "Aún no hay casos terminados." : vista === "descartados" ? "No hay casos descartados." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
+          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, onCliente: setClienteId, arrastrable: true, orden, setOrden, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "cerrados" ? "Aún no hay casos terminados." : vista === "descartados" ? "No hay casos descartados." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
       mover ? h(MoverDialog, { T, F, ...mover, onClose: () => setMover(null), onSaved: (c) => { actualizarCaso(c); setMover(null); } }) : null,
       casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, vinculados, sugerencia: sugerencia(casoAbierto), syncAhora, sincronizando, onRefresh: cargar, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
       clienteId ? h(ClientePanel, { T, F, id: clienteId, casos, bcServ, onClose: () => setClienteId(null), onCaso: (id) => { setClienteId(null); setCasoId(id); }, onNueva: (cliente) => { setClienteId(null); setNueva({ cliente }); }, onChanged: cargar }) : null,
@@ -614,7 +631,7 @@
   };
   const NOMBRES_CASOS = { plazo: ["vencimiento (lo más urgente primero)", "vencimiento (lo menos urgente primero)"], entrada: ["antigüedad (lo más antiguo primero)", "antigüedad (lo más reciente primero)"],
     cliente: ["cliente (A-Z)", "cliente (Z-A)"], tipo: ["tipo de trabajo (A-Z)", "tipo de trabajo (Z-A)"], estado: ["estado (en el orden del recorrido)", "estado (al revés)"], accion: ["próxima acción (A-Z)", "próxima acción (Z-A)"] };
-  function Lista({ T, casos: casos0, bcServ, sugerencia, onOpen, vacio, arrastrable, orden, setOrden }) {
+  function Lista({ T, casos: casos0, bcServ, sugerencia, onOpen, onCliente, vacio, arrastrable, orden, setOrden }) {
     const casos = ordenar(casos0, orden, ORDEN_CASOS);
     if (!casos.length) return h("div", { style: { background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "28px", textAlign: "center", color: T.inkSoft, fontSize: "14px" } }, vacio);
     const th = { fontSize: "11px", letterSpacing: ".08em", textTransform: "uppercase", color: T.inkSoft, fontWeight: 700, padding: "10px 12px", textAlign: "left", borderBottom: `1.5px solid ${T.border}` };
@@ -625,11 +642,11 @@
         h("tbody", null, casos.map((c) => {
           const pz = plazo(c), v = chipPlazo(pz), s = est(c.estado);
           const doc = docBC(bcServ, c);
-          return h("tr", { key: c.id, "data-crm-caso": c.id, onClick: () => onOpen(c.id), draggable: !!(arrastrable && !s.gar), title: arrastrable && !s.gar ? "Clic para abrir · arrastra a otra pestaña para moverlo" : undefined,
+          return h("tr", { key: c.id, "data-crm-caso": c.id, className: "acl-fila" + (esNueva(c) ? " acl-es-nueva" : ""), onClick: () => onOpen(c.id), draggable: !!(arrastrable && !s.gar), title: arrastrable && !s.gar ? "Clic para abrir · arrastra a otra pestaña para moverlo" : undefined,
             onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { cursor: "pointer", background: v && v.c === "rojo" ? "rgba(220,38,38,.04)" : "transparent" } },
-            h("td", { style: { ...td, whiteSpace: "nowrap" } }, v ? h(Chip, { c: v.c }, v.t) : s.fin && (c.cerrado_at || c.estado_at) ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.cerrado_at || c.estado_at)) : h("span", { style: { color: T.inkFaint } }, "—")),
+            h("td", { style: { ...td, whiteSpace: "nowrap" } }, h(ChipNueva, { x: c }), esNueva(c) ? h("br") : null, v ? h(Chip, { c: v.c }, v.t) : s.fin && (c.cerrado_at || c.estado_at) ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.cerrado_at || c.estado_at)) : h("span", { style: { color: T.inkFaint } }, "—")),
             h("td", { style: { ...td, whiteSpace: "nowrap", color: T.inkSoft, fontSize: "12.5px" } }, fFecha(c.created_at)),
-            h("td", { style: td }, h("b", null, nombreCli(c.cliente)), h(ChipCli, { c: c.cliente }), h(ChipNueva, { x: c }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
+            h("td", { style: td }, h(NombreLink, { c: c.cliente, onCliente }), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: { ...td, maxWidth: "200px" } }, h(CeldaClave, { T, valor: c.clave, tabla: "crm_casos", id: c.id })),
             h("td", { style: td }, lblTipos(c.tipo)),
             h("td", { style: td }, h(Chip, { c: s.c }, s.l), s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
@@ -646,14 +663,14 @@
   };
 
   // ---------- tablero ----------
-  function Tablero({ T, casos, onOpen }) {
+  function Tablero({ T, casos, onOpen, onCliente }) {
     return h("div", { style: { overflowX: "auto" } }, h("div", { style: { display: "grid", gridTemplateColumns: "repeat(5, minmax(180px, 1fr))", gap: "12px", minWidth: "920px" } },
       FASES.map(([f, nombre]) => {
         const xs = casos.filter((c) => est(c.estado).f === f);
         return h("section", { key: f, style: { background: T.bgAlt, borderRadius: "14px", padding: "10px", display: "flex", flexDirection: "column", gap: "8px", minHeight: "200px" } },
           h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft, padding: "4px 2px" } }, h("span", null, nombre), h(Chip, null, xs.length)),
-          xs.map((c) => { const v = chipPlazo(plazo(c)), s = est(c.estado); return h("button", { key: c.id, "data-crm-card": c.id, onClick: () => onOpen(c.id), draggable: true, title: "Clic para abrir · arrastra a una pestaña para moverlo", onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
-            h("span", null, h("b", null, nombreCli(c.cliente)), h(ChipNueva, { x: c })), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lblTipos(c.tipo)].filter(Boolean).join(" · ")),
+          xs.map((c) => { const v = chipPlazo(plazo(c)), s = est(c.estado); return h("div", { key: c.id, "data-crm-card": c.id, role: "button", tabIndex: 0, className: "acl-tarjeta" + (esNueva(c) ? " acl-es-nueva" : ""), onClick: () => onOpen(c.id), onKeyDown: (e) => { if (e.key === "Enter") onOpen(c.id); }, draggable: true, title: "Clic para abrir · arrastra a una pestaña para moverlo", onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
+            esNueva(c) ? h("div", null, h(ChipNueva, { x: c, borde: 11 })) : null, h("span", null, h(NombreLink, { c: c.cliente, onCliente })), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lblTipos(c.tipo)].filter(Boolean).join(" · ")),
             h("span", null, h(Chip, { c: s.c }, s.l)), v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
       })));
   }
@@ -1345,5 +1362,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
