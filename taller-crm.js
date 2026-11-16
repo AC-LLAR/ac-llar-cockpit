@@ -376,8 +376,6 @@
 
     const abiertos = casos.filter((c) => !est(c.estado).fin);
     const me = yo();
-    // Consultas cargadas por otra persona en las últimas 24 h (las mías no me avisan)
-    const nuevasOtros = casos.filter((c) => esNueva(c) && c.created_by && quien(c.created_by) !== me).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     const ordVence = ordPlazo;
     const pel = (c) => (plazo(c) || {}).pel;
     const listas = {
@@ -418,9 +416,6 @@
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center" } },
         h(Buscador, { T, onCliente: (id) => setClienteId(id), onBC: (bc) => setNueva({ bc }), onCaso: (id) => setCasoId(id) }),
         h("button", { "data-crm-nueva": "1", onClick: () => setNueva({}), style: { ...btn(T, "p"), height: "46px", padding: "0 20px", fontSize: "15px" } }, "+ Nueva consulta")),
-      nuevasOtros.length ? h("div", { "data-crm-nuevas": "1", style: { background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: "12px", padding: "10px 12px", display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", fontSize: "13.5px" } },
-        h("b", { style: { color: "#2F5BFF" } }, `🆕 ${nuevasOtros.length} consulta${nuevasOtros.length > 1 ? "s" : ""} nueva${nuevasOtros.length > 1 ? "s" : ""} de ${[...new Set(nuevasOtros.map((c) => quien(c.created_by)))].join(" y ")} en las últimas 24 h:`),
-        nuevasOtros.map((c) => h("button", { key: c.id, "data-nueva-caso": c.id, onClick: () => setCasoId(c.id), style: { ...btn(T, "s"), background: T.surface } }, `${nombreCli(c.cliente)} · ${lblTipos(c.tipo)} · ${fFechaHora(c.created_at)}`))) : null,
       h(CitasHoy, { T, recargar: casos }),
       h("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px", borderBottom: `2px solid ${T.border}` } },
         tabBtn("metoca", me ? "Mis tareas" : "Pendientes", listas.metoca.length, nVencidos ? "rojo" : "azul"),
