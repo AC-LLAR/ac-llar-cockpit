@@ -682,6 +682,23 @@
     } catch (e) { return file; }
   }
   // Zona para soltar fotos arrastradas desde el ordenador (envuelve el bloque de fotos)
+  // Visor de fotos a pantalla completa: flechas ‹ ›, teclas ← → y Esc, o deslizar el dedo en el móvil
+  function VisorFotos({ T, lista, actual, onCambiar, onClose, urlDe, pie, acciones }) {
+    const n = lista.length, i = Math.max(0, lista.findIndex((f) => f.id === actual.id)), f = lista[i] || actual;
+    const ir = (d) => { if (n > 1) onCambiar(lista[(i + d + n) % n]); };
+    useEffect(() => { const k = (e) => { if (e.key === "ArrowRight") ir(1); else if (e.key === "ArrowLeft") ir(-1); else if (e.key === "Escape") onClose(); };
+      window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); });
+    const x0 = useRef(null);
+    const flecha = (d) => n > 1 ? h("button", { "data-visor": d > 0 ? "sig" : "ant", "aria-label": d > 0 ? "Foto siguiente" : "Foto anterior", onClick: (e) => { e.stopPropagation(); ir(d); },
+      style: { position: "absolute", top: "50%", [d > 0 ? "right" : "left"]: "14px", transform: "translateY(-50%)", width: "54px", height: "54px", borderRadius: "50%", border: "none", background: "rgba(255,255,255,.2)", color: "#fff", fontSize: "34px", lineHeight: "50px", cursor: "pointer" } }, d > 0 ? "›" : "‹") : null;
+    return h("div", { role: "dialog", "aria-label": "Foto", "data-visor-fotos": "1", onClick: onClose,
+      onTouchStart: (e) => { x0.current = e.touches[0].clientX; }, onTouchEnd: (e) => { if (x0.current == null) return; const dx = e.changedTouches[0].clientX - x0.current; x0.current = null; if (Math.abs(dx) > 50) ir(dx < 0 ? 1 : -1); },
+      style: { position: "fixed", inset: 0, zIndex: 1300, background: "rgba(0,0,0,.88)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", padding: "20px 80px" } },
+      flecha(-1), flecha(1),
+      urlDe(f) ? h("img", { key: f.id, src: urlDe(f), alt: "", onClick: (e) => { e.stopPropagation(); ir(1); }, style: { maxWidth: "100%", maxHeight: "78vh", borderRadius: "8px", cursor: n > 1 ? "pointer" : "default" } }) : h("div", { style: { color: "#fff" } }, "Cargando…"),
+      h("div", { style: { color: "#fff", fontSize: "13px", textAlign: "center" } }, n > 1 ? h("b", { "data-visor-cuenta": "1", style: { marginRight: "8px" } }, `${i + 1} / ${n}`) : null, pie ? pie(f) : ""),
+      acciones ? h("div", { onClick: (e) => e.stopPropagation(), style: { display: "flex", gap: "8px" } }, acciones(f)) : null);
+  }
   function ZonaFotos({ T, onFiles, disabled, onAviso, children }) {
     const [sobre, setSobre] = useState(false); const n = useRef(0);
     const conArchivos = (e) => Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes("Files");
@@ -736,10 +753,9 @@
         h("button", { "data-caso-fotos-add": "1", disabled: trab, onClick: () => ref.current && ref.current.click(), style: btn(T, "s") }, "📷 Añadir fotos"),
         h("input", { ref, type: "file", accept: "image/*", multiple: true, style: { display: "none" }, onChange: (e) => { subir(e.target.files); e.target.value = ""; } })),
       msg ? h("div", { style: { marginTop: "6px", fontSize: "12.5px", color: /^No se/.test(msg) ? T.danger : T.ok } }, msg) : null,
-      ver ? h("div", { role: "dialog", "aria-label": "Foto", onClick: () => setVer(null), style: { position: "fixed", inset: 0, zIndex: 1300, background: "rgba(0,0,0,.85)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "12px", padding: "20px" } },
-        urls[ver.path] ? h("img", { src: urls[ver.path], alt: "", style: { maxWidth: "100%", maxHeight: "80vh", borderRadius: "8px" } }) : null,
-        h("div", { style: { color: "#fff", fontSize: "13px" } }, `${lbl(ETQ_FOTO, ver.etiqueta)} · ${fFechaHora(ver.created_at)}${ver.created_by ? " · " + ver.created_by : ""}`),
-        h("div", { onClick: (e) => e.stopPropagation(), style: { display: "flex", gap: "8px" } }, h("a", { href: urls[ver.path], target: "_blank", rel: "noopener", style: { ...btn(T), textDecoration: "none" } }, "Abrir original"), h("button", { onClick: () => quitar(ver), style: { ...btn(T), color: T.danger } }, "Quitar del caso"))) : null));
+      ver ? h(VisorFotos, { T, lista: fotos, actual: ver, onCambiar: setVer, onClose: () => setVer(null), urlDe: (f) => urls[f.path],
+        pie: (f) => `${lbl(ETQ_FOTO, f.etiqueta)} · ${fFechaHora(f.created_at)}${f.created_by ? " · " + quien(f.created_by) : ""}`,
+        acciones: (f) => [h("a", { key: "o", href: urls[f.path], target: "_blank", rel: "noopener", style: { ...btn(T), textDecoration: "none" } }, "Abrir original"), h("button", { key: "q", onClick: () => quitar(f), style: { ...btn(T), color: T.danger } }, "Quitar del caso")] }) : null));
   }
 
   // ---------- ficha del caso ----------
@@ -1247,7 +1263,7 @@
     const [veh, setVeh] = useState({ modelo: "", matricula: "", bastidor: "" });
     const [vehSel, setVehSel] = useState(null); // índice de un vehículo ya existente
     const [vehBC, setVehBC] = useState([]);
-    const [k, setK] = useState({ canal: "telefono", tipo: inicial.tipo || "reparacion", consulta: "", proxima_accion: "Responder al cliente", responsable: me, fecha_limite: toLocalInput(manana.toISOString()) });
+    const [k, setK] = useState({ canal: "telefono", tipo: inicial.tipo || "reparacion", consulta: "", proxima_accion: "Responder al cliente", responsable: "", fecha_limite: toLocalInput(manana.toISOString()) });
     const [err, setErr] = useState(""); const [guardando, setGuardando] = useState(false);
     const [tipoCli, setTipoCli] = useState(inicial.cliente && inicial.cliente.tipo_cliente ? inicial.cliente.tipo_cliente : "");
     useEffect(() => { if (sel && sel.tipo === "crm" && sel.c.tipo_cliente) setTipoCli(sel.c.tipo_cliente); }, [sel]);
@@ -1357,5 +1373,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { VisorFotos, NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();

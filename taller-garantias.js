@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, VisorFotos, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -364,7 +364,7 @@
       setTrab(true); setMsg("");
       const manana = new Date(Date.now() + 864e5); manana.setHours(13, 0, 0, 0);
       const ins = await sb().from("crm_casos").insert({ cliente_id: g.cliente_id, vehiculo: vehTxt(g.vehiculo) || null, canal: "otro", tipo: "reparacion", estado: "presupuesto_por_hacer",
-        consulta: `Fuera de garantía (${g.numero}):\n` + (noCubre.length ? noCubre.map((p) => "- " + p.descripcion).join("\n") : g.descripcion || ""), proxima_accion: "Hacer presupuesto de lo no cubierto por la garantía", responsable: yo() || null, fecha_limite: manana.toISOString() }).select("id").single();
+        consulta: `Fuera de garantía (${g.numero}):\n` + (noCubre.length ? noCubre.map((p) => "- " + p.descripcion).join("\n") : g.descripcion || ""), proxima_accion: "Hacer presupuesto de lo no cubierto por la garantía", responsable: null, fecha_limite: manana.toISOString() }).select("id").single();
       if (ins.error) { setTrab(false); setMsg("No se pudo crear el caso: " + ins.error.message); return; }
       await upd({ presupuesto_caso_id: ins.data.id }, "Caso de presupuesto creado en Casos.");
       await anotar("nota", `Creado caso de presupuesto en Casos por lo que no cubre la garantía.`);
@@ -390,7 +390,7 @@
           if (r.error) throw r.error;
         } else {
           const r = await sb().from("crm_casos").insert({ cliente_id: g.cliente_id, vehiculo: vehTxt(g.vehiculo) || null, canal: "otro", tipo: tipos.join(","), estado: "pendiente_respuesta",
-            consulta: g.descripcion || `Devuelta desde la garantía ${g.numero}`, responsable: yo() || null }).select("id").single();
+            consulta: g.descripcion || `Devuelta desde la garantía ${g.numero}`, responsable: null }).select("id").single();
           if (r.error) throw r.error;
           casoId = r.data.id; await sb().from("garantias").update({ caso_id: casoId }).eq("id", g.id);
         }
@@ -510,10 +510,9 @@
           h("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "9px", fontSize: "13px" } },
             ev.map((e) => h("li", { key: e.id, style: { display: "grid", gridTemplateColumns: "84px 1fr", gap: "8px" } }, h("span", { style: { color: T.inkSoft } }, fFechaHora(e.at)), h("span", null, h("b", null, quien(e.autor)), " · ", textoEventoG(e))))))),
       verFicha && g.cliente_id ? h(FichaCliente, { T, F, id: g.cliente_id, onClose: () => setVerFicha(false), onChanged: cargar }) : null,
-      verFoto ? h("div", { role: "dialog", "aria-label": "Foto", onClick: () => setVerFoto(null), style: { position: "fixed", inset: 0, zIndex: 1300, background: "rgba(0,0,0,.85)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", padding: "20px" } },
-        h("img", { src: urls[verFoto.path], alt: verFoto.etiqueta || "foto", style: { maxWidth: "100%", maxHeight: "82vh", borderRadius: "8px" } }),
-        h("div", { style: { color: "#fff", fontSize: "13px" } }, `${(ETIQUETAS.find((x) => x[0] === verFoto.etiqueta) || ["", "Foto"])[1]} · ${fLarga(verFoto.created_at)} · ${quien(verFoto.created_by)}`),
-        h("div", { onClick: (e) => e.stopPropagation(), style: { display: "flex", gap: "8px" } }, h("a", { href: urls[verFoto.path], target: "_blank", rel: "noopener", style: { ...btn(T), textDecoration: "none" } }, "Abrir original"), h("button", { onClick: () => anularFoto(verFoto), style: { ...btn(T), color: T.danger } }, "Quitar del expediente"))) : null);
+      verFoto ? h(VisorFotos, { T, lista: fotos.filter((f) => !f.linea_id), actual: verFoto, onCambiar: setVerFoto, onClose: () => setVerFoto(null), urlDe: (f) => urls[f.path],
+        pie: (f) => `${(ETIQUETAS.find((x) => x[0] === f.etiqueta) || ["", "Foto"])[1]} · ${fLarga(f.created_at)} · ${quien(f.created_by)}`,
+        acciones: (f) => [h("a", { key: "o", href: urls[f.path], target: "_blank", rel: "noopener", style: { ...btn(T), textDecoration: "none" } }, "Abrir original"), h("button", { key: "q", onClick: () => anularFoto(f), style: { ...btn(T), color: T.danger } }, "Quitar del expediente")] }) : null);
   }
 
   const Fotos = ({ T, fotos, urls, onVer }) => fotos.length ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", margin: "6px 0" } }, fotos.map((f) => h("button", { key: f.id, onClick: () => onVer(f), title: f.etiqueta, style: { border: `1px solid ${T.border}`, borderRadius: "8px", padding: 0, background: T.bg, cursor: "pointer", position: "relative", width: "92px", height: "92px", overflow: "hidden" } },
