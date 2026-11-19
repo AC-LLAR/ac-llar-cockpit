@@ -508,6 +508,16 @@
     if (x.kind === "garantia") return ((window.AcllarGarantias && window.AcllarGarantias._test.EST[x.estado]) || { l: x.estado }).l;
     return ((window.AcllarMontajes && window.AcllarMontajes._test.EST[x.estado]) || { l: x.estado }).l; } catch (e) { return x.estado; } };
   const abrirAbierto = (x) => (x.kind === "caso" ? irA("clientes", { acllar_crm_abrir_caso: x.id }) : x.kind === "garantia" ? irA("garantias", { acllar_garantia_abrir: x.id }) : irA("montajes", { acllar_montaje_abrir: x.id }));
+  // ---- Botón "Actualizar desde BC": trae ya los cambios de BC (clientes, vehículos, ofertas y pedidos) sin esperar a los 10 minutos
+  function BotonSyncBC({ T, onDone, texto, small }) {
+    const [st, setSt] = useState(""); // "" | "trab" | "ok" | "err"
+    const ir = async (e) => { if (e) { e.preventDefault(); e.stopPropagation(); } setSt("trab");
+      try { const r = await enviarABC(null, false, "sync"); if (r && r.error) throw new Error(r.error); setSt("ok"); } catch (x) { setSt("err"); }
+      try { onDone && (await onDone()); } catch (x) {} };
+    return h("button", { type: "button", "data-sync-bc": "1", onClick: ir, disabled: st === "trab", title: "Traer ya de Business Central los clientes y vehículos nuevos o cambiados, sin esperar a los 10 minutos",
+      style: { ...btn(T, "s"), fontSize: small ? "12px" : "13px", padding: small ? "3px 9px" : undefined, color: st === "err" ? T.danger : st === "ok" ? T.ok : undefined } },
+      st === "trab" ? "Actualizando desde BC…" : st === "ok" ? "✓ Actualizado desde BC" : st === "err" ? "No se pudo actualizar: reintentar" : texto || "↻ Actualizar desde BC");
+  }
   // ---- Citas de hoy y de mañana (casos y garantías). De momento las citas se siguen apuntando también en Calendar.
   const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
   function CitasHoy({ T, recargar }) {
@@ -1208,7 +1218,7 @@
                   h(Field, { key: k, T, label: l, style: k === "direccion" ? { gridColumn: "1 / -1" } : null }, h("input", { value: d[k] || "", onChange: set(k), style: I }))),
                 h(Field, { T, label: "Notas", style: { gridColumn: "1 / -1" } }, h("textarea", { rows: 2, value: d.notas || "", onChange: set("notas"), style: { ...I, resize: "vertical" } }))),
               h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "10px", flexWrap: "wrap" } }, h("button", { "data-crm-guardar-cli": "1", onClick: guardar, style: btn(T, "p") }, c.bc_no ? "Guardar datos (también en BC)" : "Guardar datos"), msg ? h("span", { style: { fontSize: "12.5px", color: /^No se|no lo aceptó/.test(msg) ? T.danger : T.ok } }, msg) : null)),
-            h(Box, { T }, h(Lbl, { T }, "Vehículos"),
+            h(Box, { T }, h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } }, h(Lbl, { T }, "Vehículos"), c && c.bc_no ? h(BotonSyncBC, { T, small: true, onDone: cargar }) : null),
               vehiculos.length ? vehiculos.map((v, i) => h("div", { key: i, "data-crm-veh": i, style: { padding: "7px 0", borderTop: i ? `1px solid ${T.border}` : "none", fontSize: "13.5px" } },
                 h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
                   h("span", null, h("b", null, v.modelo || "(sin modelo)"), v.matricula ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12.5px", marginLeft: "8px" } }, normMat(v.matricula)) : null),
@@ -1269,11 +1279,9 @@
     useEffect(() => { if (sel && sel.tipo === "crm" && sel.c.tipo_cliente) setTipoCli(sel.c.tipo_cliente); }, [sel]);
     const t = useRef(null);
     useEffect(() => { clearTimeout(t.current); if (sel || qSafe(q).length < 2) { setRes([]); return; } t.current = setTimeout(async () => { try { setRes(await buscarClientes(q)); } catch (e) {} }, 300); }, [q, sel]);
-    useEffect(() => {
-      setVehSel(null); setVehBC([]);
-      const no = sel ? (sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) : null;
-      if (no) sb().from("bc_productos_servicio").select("*").eq("cliente_no", no).eq("activo", true).then((r) => setVehBC(r.data || []));
-    }, [sel]);
+    const noBC = sel ? (sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) : null;
+    const cargarVehBC = async () => { if (!noBC) return; const r = await sb().from("bc_productos_servicio").select("*").eq("cliente_no", noBC).eq("activo", true); setVehBC(r.data || []); };
+    useEffect(() => { setVehSel(null); setVehBC([]); cargarVehBC(); }, [sel]);
     // Aviso de duplicados: lo que ya hay abierto de este cliente o de este vehículo
     const [abCli, setAbCli] = useState([]); const [abVeh, setAbVeh] = useState([]);
     useEffect(() => { let vivo = true; setAbCli([]);
@@ -1338,6 +1346,8 @@
               h("div", { style: { fontSize: "11px", fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: T.inkSoft, background: T.bg, padding: "6px 12px" } }, `Clientes que coinciden · ${res.length}`),
               res.map((r) => h(ResultadoCliente, { key: r.k, T, r, cta: "Usar", onPick: (x) => setSel(x) }))) : null,
             (res.abiertos || []).length ? h(YaAbiertos, { T, items: res.abiertos, titulo: "⚠ Abierto con este vehículo: revísalo antes de cargar otra consulta", onOpen: abrirDesdeAqui }) : null,
+            qSafe(q).length >= 2 ? h("div", { style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "12.5px", color: T.inkSoft, marginTop: "-4px" } }, "¿Lo acabas de dar de alta en BC y no aparece?",
+              h(BotonSyncBC, { T, small: true, onDone: async () => { try { setRes(await buscarClientes(q)); } catch (e) {} } })) : null,
             h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-6px" } }, "¿No aparece? Rellena sus datos y se crea como cliente nuevo. El alta en BC se hace después desde su ficha, con un botón."),
             h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" } },
               [["nombre", "Nombre"], ["apellidos", "Apellidos"], ["telefono", "Teléfono"], ["email", "Email"]].map(([f, l]) => h(Field, { key: f, T, label: l }, h("input", { value: cli[f], onChange: setC(f), style: I }))),
@@ -1348,7 +1358,8 @@
                 h(Field, { T, label: "Provincia" }, h("input", { value: cli.provincia, onChange: setC("provincia"), style: I })),
                 h(Field, { T, label: "C.P." }, h("input", { value: cli.cp, onChange: setC("cp"), style: I }))))),
         h("div", { "data-crm-nueva-tipocli": "1" }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo de cliente"), h(Seg, { T, opts: TIPOS_CLI, value: tipoCli, onChange: setTipoCli })),
-        h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Vehículo"),
+        h("div", null, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" } }, "Vehículo",
+            noBC ? h("span", { style: { fontWeight: 600, display: "inline-flex", gap: "6px", alignItems: "center" } }, "¿Falta alguno que está en BC?", h(BotonSyncBC, { T, small: true, onDone: cargarVehBC })) : null),
           vehExistentes.length ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" } },
             vehExistentes.map((v, i) => h("button", { key: i, type: "button", onClick: () => setVehSel(vehSel === i ? null : i), style: { ...btn(T, "s"), background: vehSel === i ? T.ink : T.surface, color: vehSel === i ? T.bg : T.ink } }, vehTxt(v) || v.modelo)),
             h("button", { type: "button", onClick: () => setVehSel(null), style: { ...btn(T, "s"), borderStyle: "dashed", background: vehSel == null ? T.bgAlt : T.surface } }, "Otro vehículo")) : null,
