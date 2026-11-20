@@ -78,7 +78,7 @@
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
   const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["retirar", "Para retirar"]];
   const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "retirar"];
-  const CAMPOS = { clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
+  const CAMPOS = { standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
     garantia_100: "100 % garantía", senal_importe: "Importe señal", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
     piezas_previstas: "Llegada de piezas", cita_at: "Cita", cerrado_at: "Cerrado", motivo_cierre: "Motivo de cierre", archivado: "Archivado", rama: "Rama", vehiculo: "Vehículo",
@@ -156,12 +156,15 @@
     garantia_parcial: { p: "nos", a: "Avisar al cliente de qué cubre", h: 24 },
     cliente_avisado_cobertura: { p: "nos", a: "Pedir piezas o señal", h: 48 },
   };
-  const PELOTA = { nos: "Nosotros", cli: "Cliente", prov: "Proveedor / fabricante", cita: "Cita" };
+  const PELOTA = { nos: "Nosotros", cli: "Cliente", prov: "Proveedor / fabricante", cita: "Cita", standby: "Nadie (en standby)" };
+  // Standby: caso enfriado que no debe aparecer en las tareas. Se pasa y se reactiva a mano; el paso no cambia.
+  const enStandby = (c) => !!(c && c.standby_at && !est(c.estado).fin);
   const finDia = (d) => { const x = new Date(d); x.setHours(23, 59, 0, 0); return x; };
   function plazo(c) {
     if (!c || est(c.estado).fin) return null;
+    if (enStandby(c)) return { pel: "standby", accion: c.standby_motivo ? `En standby · ${c.standby_motivo}` : "En standby", limite: null, nivel: "standby", standby: new Date(c.standby_at), desde: new Date(c.standby_at) };
     const P = PL[c.estado] || { p: "nos", a: "Seguir con el caso", h: 48 };
-    const now = new Date(), ini = new Date(c.estado_at || c.created_at);
+    const now = new Date(), e0 = new Date(c.estado_at || c.created_at), pd = c.plazo_desde ? new Date(c.plazo_desde) : null, ini = pd && pd > e0 ? pd : e0;
     let pel = P.p, accion = P.a, limite;
     if (c.estado === "piezas_recibidas" && c.cita_at && new Date(c.cita_at) > now) { pel = "cita"; accion = "Que venga a la cita (cita ya dada)"; }
     if (pel === "cita") {
@@ -184,13 +187,14 @@
   function chipPlazo(pz) {
     if (!pz) return null;
     const now = Date.now();
+    if (pz.nivel === "standby") return { c: "gris", t: `⏸ Standby desde ${fFecha(pz.standby.toISOString())}` };
     if (pz.nivel === "pospuesto") return { c: "gris", t: `Pospuesto hasta ${fFecha(pz.pospuesto.toISOString())}` };
     if (pz.esCita) return pz.nivel === "hoy" ? { c: "ambar", t: `Cita hoy ${pad(pz.limite.getHours())}:${pad(pz.limite.getMinutes())}` } : pz.nivel === "vencido" ? { c: "rojo", t: "Cita pasada" } : { c: "gris", t: `Cita ${diaHora(pz.limite)}` };
     if (pz.nivel === "vencido") return { c: "rojo", t: pz.pel === "nos" ? `Vencido hace ${durTxt(now - pz.limite)}` : `${pz.accion} · ${durTxt(now - pz.desde)}` };
     if (pz.nivel === "hoy") return { c: "ambar", t: `Hoy ${pad(pz.limite.getHours())}:${pad(pz.limite.getMinutes())}` };
     return { c: "gris", t: pz.pel === "nos" ? `Quedan ${durTxt(pz.limite - now)}` : `Esperando ${durTxt(now - pz.desde)}` };
   }
-  const ordPlazo = (a, b) => { const r = { vencido: 0, hoy: 1, ok: 2, pospuesto: 3 }; const x = plazo(a), y = plazo(b); if (!x || !y) return (x ? 0 : 1) - (y ? 0 : 1); return (r[x.nivel] - r[y.nivel]) || (x.limite - y.limite); };
+  const ordPlazo = (a, b) => { const r = { vencido: 0, hoy: 1, ok: 2, pospuesto: 3, standby: 4 }; const x = plazo(a), y = plazo(b); if (!x || !y) return (x ? 0 : 1) - (y ? 0 : 1); return (r[x.nivel] - r[y.nivel]) || (x.limite - y.limite); };
 
   // ---------- piezas visuales ----------
   const Chip = ({ c = "gris", children, title, style }) => { const k = CH[c] || CH.gris; return h("span", { title, style: { display: "inline-block", fontWeight: 700, fontSize: "11.5px", borderRadius: "7px", padding: "2px 8px", border: `1px solid ${k.bd}`, background: k.bg, color: k.fg, whiteSpace: "nowrap", lineHeight: 1.45, ...style } }, children); };
@@ -374,7 +378,8 @@
     if (sinAcceso) return h("div", { style: { background: T.surface, border: `1px dashed ${T.border}`, borderRadius: "14px", padding: "36px", textAlign: "center", color: T.inkSoft, fontSize: "14px" } },
       h("div", { style: { fontWeight: 800, fontSize: "18px", color: T.ink, marginBottom: "6px" } }, "Casos de taller"), "Tu cuenta no tiene acceso a los casos de taller. Pídeselo a Sebastián.");
 
-    const abiertos = casos.filter((c) => !est(c.estado).fin);
+    const abiertosTodos = casos.filter((c) => !est(c.estado).fin);
+    const abiertos = abiertosTodos.filter((c) => !enStandby(c)); // los de standby no agobian: solo en su pestaña
     const me = yo();
     const ordVence = ordPlazo;
     const pel = (c) => (plazo(c) || {}).pel;
@@ -384,7 +389,8 @@
       prov: abiertos.filter((c) => pel(c) === "prov").sort(ordPlazo),
       cerrados: casos.filter((c) => c.estado === "retirado" || c.estado === "concluido").sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
       descartados: casos.filter((c) => ["descartado", "cerrado", "rechazado", "sin_respuesta"].includes(c.estado)).sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
-      todos: (filtroTodos === "abiertos" ? abiertos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => c.estado === "retirado" || c.estado === "concluido") : casos).slice().sort(ordVence),
+      standby: casos.filter(enStandby).sort((a, b) => String(b.standby_at).localeCompare(String(a.standby_at))),
+      todos: (filtroTodos === "abiertos" ? abiertosTodos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => c.estado === "retirado" || c.estado === "concluido") : casos).slice().sort(ordVence),
     };
     const nVencidos = listas.metoca.filter((c) => plazo(c).nivel === "vencido").length;
     const nRecordar = listas.espera.filter((c) => plazo(c).nivel === "vencido").length;
@@ -403,7 +409,7 @@
       return null;
     };
 
-    const DESTINOS = ["metoca", "espera", "prov", "cerrados", "descartados"];
+    const DESTINOS = ["metoca", "espera", "prov", "standby", "cerrados", "descartados"];
     const soltar = (id) => DESTINOS.includes(id) ? {
       onDragOver: (e) => { if (e.dataTransfer.types.includes("text/caso")) { e.preventDefault(); if (sobre !== id) setSobre(id); } },
       onDragLeave: () => setSobre(null),
@@ -421,6 +427,7 @@
         tabBtn("metoca", me ? "Mis tareas" : "Pendientes", listas.metoca.length, nVencidos ? "rojo" : "azul"),
         tabBtn("espera", "Esperando al cliente", listas.espera.length, nRecordar ? "ambar" : "gris"),
         tabBtn("prov", "Esperando piezas / proveedor", listas.prov.length, nReclamar ? "ambar" : "gris"),
+        tabBtn("standby", "⏸ Standby", listas.standby.length, "gris"),
         tabBtn("tablero", "Tablero", null),
         tabBtn("cerrados", "Cerrados", listas.cerrados.length, "gris"),
         tabBtn("descartados", "Descartados", listas.descartados.length, "gris"),
@@ -440,10 +447,12 @@
             [["cli", "Esperando al cliente", "Nadie espera respuesta del cliente."], ["cita", "Con cita dada", null]].map(([k, tit, vac]) => {
               const xs = listas.espera.filter((c) => pel(c) === k);
               if (!xs.length && !vac) return null;
+              const frios = k === "cli" ? xs.filter((c) => { const pz = plazo(c); return pz && Date.now() - pz.desde > 7 * 864e5; }).length : 0;
               return h("div", { key: k, style: { display: "flex", flexDirection: "column", gap: "8px" } }, h("div", { style: { fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft } }, `${tit} (${xs.length})`),
+                frios ? h("div", { "data-crm-frios": "1", style: { fontSize: "12.5px", color: T.inkSoft } }, `${frios} llevan más de una semana sin responder. Si se han enfriado, arrástralos a «⏸ Standby» (o desde su ficha) para que no te agobien.`) : null,
                 h(Lista, { T, F, casos: xs, bcServ, sugerencia, onOpen: setCasoId, onCliente: setClienteId, vacio: vac, arrastrable: true, orden, setOrden }));
             }))
-          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, onCliente: setClienteId, arrastrable: true, orden, setOrden, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "cerrados" ? "Aún no hay casos terminados." : vista === "descartados" ? "No hay casos descartados." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
+          : h(Lista, { T, F, casos: listas[vista] || [], bcServ, sugerencia, onOpen: setCasoId, onCliente: setClienteId, arrastrable: true, orden, setOrden, vacio: vista === "metoca" ? "Nada te toca ahora. Todo al día." : vista === "standby" ? "No hay casos en standby. Para enfriar uno: arrástralo aquí o, en su ficha, «⏸ Pasar a standby…»." : vista === "cerrados" ? "Aún no hay casos terminados." : vista === "descartados" ? "No hay casos descartados." : vista === "prov" ? "No hay casos esperando piezas ni respuesta de proveedores." : "No hay casos." })),
       mover ? h(MoverDialog, { T, F, ...mover, onClose: () => setMover(null), onSaved: (c) => { actualizarCaso(c); setMover(null); } }) : null,
       casoAbierto ? h(CasoPanel, { T, F, caso: casoAbierto, bcServ, vinculados, sugerencia: sugerencia(casoAbierto), syncAhora, sincronizando, onRefresh: cargar, onClose: () => setCasoId(null), onSaved: actualizarCaso, onCliente: (id) => { setCasoId(null); setClienteId(id); } }) : null,
       clienteId ? h(ClientePanel, { T, F, id: clienteId, casos, bcServ, onClose: () => setClienteId(null), onCaso: (id) => { setClienteId(null); setCasoId(id); }, onNueva: (cliente) => { setClienteId(null); setNueva({ cliente }); }, onChanged: cargar }) : null,
@@ -805,23 +814,34 @@
 
   // ---------- ficha del caso ----------
   // Mover un caso soltándolo sobre una pestaña: se propone el paso más lógico de esa pestaña y se confirma.
-  const TAB_NOMBRE = { metoca: "Mis tareas", espera: "Esperando al cliente", prov: "Esperando piezas / proveedor", cerrados: "Cerrados", descartados: "Descartados" };
+  const TAB_NOMBRE = { metoca: "Mis tareas", espera: "Esperando al cliente", prov: "Esperando piezas / proveedor", standby: "Standby", cerrados: "Cerrados", descartados: "Descartados" };
+  async function ponerStandby(caso, motivo) {
+    await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto: `⏸ Pasado a standby (estaba en "${est(caso.estado).l}")` + (motivo ? ` · ${motivo}` : ""), caso_id: caso.id, cliente_id: caso.cliente_id });
+    return await sb().from("crm_casos").update({ standby_at: new Date().toISOString(), standby_motivo: motivo || null, recordar_at: null }).eq("id", caso.id).select("*, cliente:crm_clientes(*)").single();
+  }
+  async function reactivarStandby(caso, nota) {
+    await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto: `▶ Reactivado (estuvo en standby desde ${fFecha(caso.standby_at)}); vuelve a "${est(caso.estado).l}" y el plazo empieza de nuevo` + (nota ? ` · ${nota}` : ""), caso_id: caso.id, cliente_id: caso.cliente_id });
+    return await sb().from("crm_casos").update({ standby_at: null, standby_motivo: null, plazo_desde: new Date().toISOString(), recordar_at: null }).eq("id", caso.id).select("*, cliente:crm_clientes(*)").single();
+  }
   const SUGERIDO = {
     espera: { pendiente_respuesta: "respondida", respondida: "respondida", presupuesto_por_hacer: "presupuesto_enviado", presupuesto_hecho: "presupuesto_enviado", aceptado: "senal_solicitada", contabilidad_avisada: "senal_solicitada", piezas_pedidas: "avisado_retirar", piezas_recibidas: "avisado_retirar" },
     metoca: { respondida: "presupuesto_por_hacer", presupuesto_enviado: "aceptado", senal_solicitada: "comprobante_recibido", cliente_avisado_piezas: "piezas_recibidas", avisado_retirar: "piezas_recibidas" },
   };
   async function moverCaso(caso, to, nota, extra) {
     await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "nota" }, texto: `Movido a "${est(to).l}" (desde ${est(caso.estado).l})` + (nota ? ` · ${nota}` : ""), caso_id: caso.id, cliente_id: caso.cliente_id });
-    const p = { estado: to, recordar_at: null, ...(extra || {}) };
+    const p = { estado: to, recordar_at: null, standby_at: null, standby_motivo: null, ...(extra || {}) };
     if (est(caso.estado).fin && !est(to).fin) { p.cerrado_at = null; p.motivo_cierre = null; }
+    if (to === caso.estado) p.plazo_desde = new Date().toISOString(); // mismo paso (p. ej. reactivar un standby): el plazo empieza de nuevo
     if (est(to).fin && !p.cerrado_at) p.cerrado_at = new Date().toISOString();
     return await sb().from("crm_casos").update(p).eq("id", caso.id).select("*, cliente:crm_clientes(*)").single();
   }
   function MoverDialog({ T, F, caso, tab, onClose, onSaved }) {
     const pelotas = { metoca: ["nos"], espera: ["cli", "cita"], prov: ["prov"] }[tab];
-    const opciones = tab === "cerrados" ? ["concluido", "retirado"] : pelotas ? PASOS_MANUALES.filter((k) => pelotas.includes((PL[k] || {}).p) && k !== caso.estado) : [];
+    // Un caso en standby puede reactivarse en su mismo paso (o en otro de esa pestaña)
+    const opciones = tab === "cerrados" ? ["concluido", "retirado"] : pelotas ? PASOS_MANUALES.filter((k) => pelotas.includes((PL[k] || {}).p) && (k !== caso.estado || enStandby(caso))) : [];
+    const sug0 = enStandby(caso) && opciones.includes(caso.estado) ? caso.estado : null;
     const sug = (SUGERIDO[tab] || {})[caso.estado];
-    const [to, setTo] = useState(opciones.includes(sug) ? sug : opciones[0] || "");
+    const [to, setTo] = useState(sug0 || (opciones.includes(sug) ? sug : opciones[0] || ""));
     const [nota, setNota] = useState(""); const [cita, setCita] = useState(toLocalInput(caso.cita_at));
     const [trab, setTrab] = useState(false); const [err, setErr] = useState("");
     const I = inp(T);
@@ -831,11 +851,12 @@
       h("div", { style: { position: "relative", width: "min(560px, 100%)", background: T.surface, borderRadius: "16px", border: `1px solid ${T.border}`, padding: "20px", display: "flex", flexDirection: "column", gap: "12px", fontFamily: F.body, color: T.ink } },
         h("div", { style: { fontFamily: F.display, fontSize: "20px", fontWeight: 800 } }, `Mover a ${TAB_NOMBRE[tab]}`),
         h("div", { style: { fontSize: "13.5px", color: T.inkSoft } }, h("b", { style: { color: T.ink } }, nombreCli(caso.cliente)), ` · ${caso.vehiculo || lblTipos(caso.tipo)} · ahora en "${est(caso.estado).l}"`),
-        tab === "descartados" ? h(CierreBox, { T, que: "caso", guardando: trab, onCancel: onClose, onConfirm: (modo, mot, n) => ir(modo === "descartar" ? "descartado" : "cerrado", `${mot}: ${n}`, { motivo_cierre: `${mot}: ${n}` }) })
+        tab === "standby" ? h(StandbyBox, { T, guardando: trab, onCancel: onClose, onConfirm: async (mot) => { setTrab(true); setErr(""); const { data, error } = await ponerStandby(caso, mot); setTrab(false); if (error) { setErr("No se pudo: " + error.message); return; } onSaved(data); } })
+        : tab === "descartados" ? h(CierreBox, { T, que: "caso", guardando: trab, onCancel: onClose, onConfirm: (modo, mot, n) => ir(modo === "descartar" ? "descartado" : "cerrado", `${mot}: ${n}`, { motivo_cierre: `${mot}: ${n}` }) })
           : !opciones.length ? h("div", { style: { fontSize: "13px" } }, "No hay ningún paso de esa pestaña al que llevarlo.")
           : h(React.Fragment, null,
             tab === "cerrados" ? h("div", { style: { fontSize: "13.5px" } }, "Se marcará como ", h("b", null, "Retirado"), " (trabajo terminado y entregado).")
-              : h(Field, { T, label: "¿En qué paso queda?" }, h("select", { "data-mover-destino": "1", value: to, onChange: (e) => setTo(e.target.value), style: I }, opciones.map((k) => h("option", { key: k, value: k }, `${E[k].l} — ${(PL[k] || {}).a || ""}`)))),
+              : h(Field, { T, label: "¿En qué paso queda?" }, h("select", { "data-mover-destino": "1", value: to, onChange: (e) => setTo(e.target.value), style: I }, opciones.map((k) => h("option", { key: k, value: k }, `${k === caso.estado ? "Reactivar en el mismo paso: " : ""}${E[k].l} — ${(PL[k] || {}).a || ""}`)))),
             to === "cita_asignada" ? h(Field, { T, label: "Fecha y hora de la cita" }, h("input", { type: "datetime-local", value: cita || "", onChange: (e) => setCita(e.target.value), style: I })) : null,
             h(Field, { T, label: "Nota (opcional)" }, h("textarea", { rows: 2, "data-mover-nota": "1", value: nota, onChange: (e) => setNota(e.target.value), style: { ...I, resize: "vertical" } })),
             h("div", { style: { display: "flex", gap: "8px", justifyContent: "flex-end" } }, h("button", { onClick: onClose, style: btn(T) }, "Cancelar"),
@@ -863,6 +884,20 @@
         h("button", { "data-paso-ok": "1", disabled: !to || guardando || (necesitaCita && !cita), onClick: () => onConfirm(to, nota.trim(), necesitaCita ? fromLocalInput(cita) : null), style: btn(T, "p") }, "Cambiar de paso"),
         h("button", { onClick: onCancel, style: btn(T) }, "Cancelar")),
       h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "El plazo vuelve a empezar desde ahora y el cambio queda anotado en la bitácora."));
+  }
+  // Pasar a standby: motivo rápido (opcional) + nota
+  const MOTIVOS_STANDBY = ["No responde", "Se lo está pensando", "Lo quiere más adelante", "Otro"];
+  function StandbyBox({ T, onConfirm, onCancel, guardando }) {
+    const [m, setM] = useState("No responde"); const [nota, setNota] = useState("");
+    const I = inp(T);
+    return h("div", { "data-standby-box": "1", style: { background: T.bg, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px", display: "flex", flexDirection: "column", gap: "10px" } },
+      h("div", { style: { fontWeight: 800, fontSize: "14px" } }, "⏸ Pasar a standby"),
+      h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, "Sale de Mis tareas y de Esperando al cliente, sin avisos. Se queda en la pestaña Standby y se reactiva cuando quieras, en el mismo paso."),
+      h(Seg, { T, opts: MOTIVOS_STANDBY.map((x) => [x, x]), value: m, onChange: setM }),
+      h(Field, { T, label: "Nota (opcional)" }, h("textarea", { rows: 2, "data-standby-nota": "1", value: nota, onChange: (e) => setNota(e.target.value), style: { ...I, resize: "vertical" } })),
+      h("div", { style: { display: "flex", gap: "8px" } },
+        h("button", { "data-standby-ok": "1", disabled: guardando, onClick: () => onConfirm([m, nota.trim()].filter(Boolean).join(": ")), style: btn(T, "p") }, "⏸ Pasar a standby"),
+        h("button", { onClick: onCancel, style: btn(T) }, "Cancelar")));
   }
   // Descartar o cerrar sin completar: motivo rápido + nota final obligatoria (queda también en la bitácora)
   const MOTIVOS = {
@@ -924,7 +959,7 @@
     const [pend, setPend] = useState(null); // paso que necesita un dato (cita)
     const [citaTmp, setCitaTmp] = useState("");
     const [pasando, setPasando] = useState(false);
-    const [cerrando, setCerrando] = useState(false); const [cambiando, setCambiando] = useState(false);
+    const [cerrando, setCerrando] = useState(false); const [cambiando, setCambiando] = useState(false); const [standbyAbierto, setStandbyAbierto] = useState(false);
     const [d, setD] = useState({});
     useEffect(() => { setD({ proxima_accion: caso.proxima_accion || "", responsable: caso.responsable || "", fecha_limite: toLocalInput(caso.fecha_limite), oferta_bc: caso.oferta_bc || "", pedido_bc: caso.pedido_bc || "", senal_importe: caso.senal_importe ?? "",
       garantia_fabricante: caso.garantia_fabricante || "", garantia_reclamacion: caso.garantia_reclamacion || "", garantia_cubre: caso.garantia_cubre || "", garantia_no_cubre: caso.garantia_no_cubre || "", piezas_previstas: caso.piezas_previstas || "", cita_at: toLocalInput(caso.cita_at), vehiculo: caso.vehiculo || "", tipo: caso.tipo || "", canal: caso.canal || "", consulta: caso.consulta || "" }); }, [caso.id, caso.updated_at]);
@@ -933,6 +968,7 @@
 
     const guardar = async (patch, texto) => {
       setGuardando(true); setMsg("");
+      if (caso.standby_at && patch.estado && patch.estado !== caso.estado) patch = { ...patch, standby_at: null, standby_motivo: null }; // si avanza de paso, sale del standby
       const p = {}; Object.keys(patch).forEach((k) => { p[k] = patch[k] === NOW ? new Date().toISOString() : patch[k]; });
       const { data, error } = await sb().from("crm_casos").update(p).eq("id", caso.id).select("*, cliente:crm_clientes(*)").single();
       setGuardando(false);
@@ -1028,6 +1064,9 @@
           s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("div", { "data-crm-motivo": "1", style: { fontSize: "13px", background: T.bg, borderRadius: "8px", padding: "8px 10px", flex: "1 1 100%", whiteSpace: "pre-wrap" } }, h("b", null, "Motivo del cierre: "), caso.motivo_cierre) : null, cambiando ? h("div", { style: { flex: "1 1 100%" } }, h(CambioPaso, { T, caso, guardando, onConfirm: cambiarPaso, onCancel: () => setCambiando(false) }))
               : h("button", { "data-crm-reabrir": "1", onClick: () => setCambiando(true), disabled: guardando, style: btn(T) }, "Reabrir en un paso…"))
             : h("div", { style: { marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" } },
+              enStandby(caso) ? h("div", { "data-crm-en-standby": "1", style: { background: T.bg, border: `1px dashed ${T.borderHi}`, borderRadius: "10px", padding: "10px 12px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", fontSize: "13.5px" } },
+                h("span", { style: { flex: "1 1 260px" } }, h("b", null, `⏸ En standby desde ${fFecha(caso.standby_at)}`), caso.standby_motivo ? ` · ${caso.standby_motivo}` : "", h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "No aparece en las tareas ni da avisos. Al reactivarlo vuelve a este mismo paso con el plazo desde cero.")),
+                h("button", { "data-crm-reactivar": "1", disabled: guardando, onClick: async () => { setGuardando(true); const { data, error } = await reactivarStandby(caso); setGuardando(false); if (error) { setMsg("No se pudo: " + error.message); return; } onSaved(data); setMsg("Reactivado: vuelve a sus tareas con el plazo desde cero."); }, style: btn(T, "p") }, "▶ Reactivar")) : null,
               h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, "Siguiente paso"),
               caso.estado === "comprobante_recibido" ? h("button", { onClick: avisarAna, disabled: guardando, style: btn(T, "wa") }, "💬 Avisar a Ana por WhatsApp") : null,
               s.sig.map((x, i) => h("button", { key: i, "data-crm-paso": x.to, disabled: guardando, onClick: () => paso(x), style: { ...btn(T, i === 0 && caso.estado !== "comprobante_recibido" ? "p" : undefined), textAlign: "left" } }, "→ " + x.l)),
@@ -1036,7 +1075,10 @@
                 h("button", { disabled: !citaTmp || guardando, onClick: () => paso(pend), style: btn(T, "p") }, "Confirmar cita"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
               cambiando ? h(CambioPaso, { T, caso, guardando, onConfirm: cambiarPaso, onCancel: () => setCambiando(false) })
                 : cerrando ? h(CierreBox, { T, que: "caso", guardando, onConfirm: cerrar, onCancel: () => setCerrando(false) })
+                : standbyAbierto ? h(StandbyBox, { T, guardando, onCancel: () => setStandbyAbierto(false), onConfirm: async (mot) => { setGuardando(true); const { data, error } = await ponerStandby(caso, mot); setGuardando(false);
+                    if (error) { setMsg("No se pudo: " + error.message); return; } setStandbyAbierto(false); onSaved(data); setMsg("Pasado a standby. Está en la pestaña ⏸ Standby."); } })
                 : h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px" } },
+                  enStandby(caso) ? null : h("button", { "data-crm-standby": "1", onClick: () => setStandbyAbierto(true), style: { ...btn(T, "s"), color: T.inkSoft } }, "⏸ Pasar a standby…"),
                   h("button", { "data-crm-cambiar-paso": "1", onClick: () => setCambiando(true), style: { ...btn(T, "s"), color: T.inkSoft } }, "↺ Cambiar de paso (atrás o adelante)…"),
                   h("button", { "data-crm-descartar": "1", onClick: () => setCerrando(true), style: { ...btn(T, "s"), color: T.inkSoft } }, "✕ Descartar o cerrar sin completar…"))),
           msg ? h("div", { style: { marginTop: "8px", fontSize: "12.5px", color: /^No se|no lo aceptó/.test(msg) ? T.danger : T.ok } }, msg) : null),
@@ -1045,7 +1087,7 @@
         h(CasoFotos, { T, caso }),
         h(Bitacora, { T, caso_id: caso.id, cliente_id: caso.cliente_id, recargar: caso.updated_at }),
 
-        s.gar || s.fin ? null : h(PlazoBox, { T, caso, guardar, guardando }),
+        s.gar || s.fin || enStandby(caso) ? null : h(PlazoBox, { T, caso, guardar, guardando }),
 
         h(Box, { T }, h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h(Lbl, { T }, "Business Central"),
             enBC ? h("button", { onClick: syncAhora, disabled: sincronizando, style: { ...btn(T, "s"), marginBottom: "8px" } }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC") : null),
