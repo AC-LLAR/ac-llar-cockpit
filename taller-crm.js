@@ -508,6 +508,41 @@
     if (x.kind === "garantia") return ((window.AcllarGarantias && window.AcllarGarantias._test.EST[x.estado]) || { l: x.estado }).l;
     return ((window.AcllarMontajes && window.AcllarMontajes._test.EST[x.estado]) || { l: x.estado }).l; } catch (e) { return x.estado; } };
   const abrirAbierto = (x) => (x.kind === "caso" ? irA("clientes", { acllar_crm_abrir_caso: x.id }) : x.kind === "garantia" ? irA("garantias", { acllar_garantia_abrir: x.id }) : irA("montajes", { acllar_montaje_abrir: x.id }));
+  // ---- Vincular a mano una oferta o un pedido de servicio pegando su nº (p. ej. hecha a nombre de CLIENTES VARIOS)
+  function VincularDocBC({ T, caso, guardar, guardando, onCaso }) {
+    const [txt, setTxt] = useState(""); const [info, setInfo] = useState(null); const [busy, setBusy] = useState(false);
+    const I = inp(T);
+    const comprobar = async () => {
+      const no = norm(txt).replace(/\s+/g, ""); if (!no) return; setBusy(true); setInfo(null);
+      try {
+        const [r, o] = await Promise.all([
+          sb().from("bc_servicio").select("*").ilike("no", no).limit(2),
+          sb().from("crm_casos").select("id,estado,cliente:crm_clientes(nombre,apellidos)").or(`oferta_bc.eq.${no},pedido_bc.eq.${no}`).limit(5)]);
+        const doc = (r.data || [])[0] || null;
+        setInfo({ no: doc ? doc.no : no, doc, tipo: doc ? doc.tipo : /^P/i.test(no) ? "pedido" : "oferta", otros: (o.data || []).filter((x) => x.id !== caso.id) });
+      } catch (e) { setInfo({ no, doc: null, tipo: /^P/i.test(no) ? "pedido" : "oferta", otros: [] }); }
+      setBusy(false);
+    };
+    const vincular = async () => {
+      const p = info.tipo === "pedido" ? { pedido_bc: info.no } : { oferta_bc: info.no };
+      if (info.tipo === "oferta" && caso.estado === "presupuesto_por_hacer") p.estado = "presupuesto_hecho";
+      const titular = info.doc && info.doc.cliente_nombre ? ` (en BC a nombre de ${info.doc.cliente_nombre})` : "";
+      if (await guardar(p, `${info.tipo === "pedido" ? "Pedido" : "Oferta"} ${info.no} vinculado a mano${titular}.` + (p.estado ? " Estado: Presupuesto hecho." : ""))) { setTxt(""); setInfo(null); }
+    };
+    const yaTiene = info && (info.tipo === "pedido" ? caso.pedido_bc : caso.oferta_bc);
+    return h("div", { "data-crm-vincular-manual": "1", style: { borderTop: `1px solid ${T.border}`, marginTop: "8px", paddingTop: "8px", display: "flex", flexDirection: "column", gap: "6px" } },
+      h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "¿La oferta o el pedido está a nombre de otro cliente en BC (p. ej. CLIENTES VARIOS)? Pega su nº:"),
+      h("div", { style: { display: "flex", gap: "6px" } },
+        h("input", { value: txt, onChange: (e) => { setTxt(e.target.value); setInfo(null); }, onKeyDown: (e) => { if (e.key === "Enter") comprobar(); }, "aria-label": "Nº de oferta o pedido de BC", placeholder: "p. ej. OFSER26-0215",
+          style: { ...I, flex: 1, padding: "6px 8px", fontFamily: "'JetBrains Mono', monospace", fontSize: "13px" } }),
+        h("button", { "data-crm-vincular-buscar": "1", onClick: comprobar, disabled: busy || !txt.trim(), style: btn(T, "s") }, busy ? "Buscando…" : "Buscar en BC")),
+      info ? h("div", { "data-crm-vincular-info": "1", style: { background: info.doc ? CH.azul.bg : CH.ambar.bg, border: `1px solid ${info.doc ? CH.azul.bd : CH.ambar.bd}`, borderRadius: "10px", padding: "8px 10px", fontSize: "13px", display: "flex", flexDirection: "column", gap: "6px" } },
+        info.doc ? h("div", null, h("b", null, `${info.tipo === "pedido" ? "Pedido" : "Oferta"} ${info.doc.no}`), ` · a nombre de `, h("b", null, info.doc.cliente_nombre || info.doc.cliente_no || "—"), ` · ${eur(info.doc.importe_iva)} IVA incl.`, info.doc.activo === false ? " · ya no está abierta en BC" : "")
+          : h("div", null, `No encuentro ${info.no} en BC. Si la acabas de crear, pulsa “Actualizar desde BC” arriba y vuelve a buscar. Puedes vincularla igualmente como ${info.tipo}.`),
+        info.otros.length ? h("div", { style: { color: CH.rojo.fg } }, "⚠ Ya está vinculada a otro caso: ", info.otros.map((x) => h("span", { key: x.id, role: "link", className: "acl-link", onClick: () => onCaso && onCaso(x.id), style: { marginRight: "8px" } }, nombreCli(x.cliente) || "caso"))) : null,
+        yaTiene ? h("div", { style: { color: T.inkSoft } }, `Este caso ya tiene ${info.tipo === "pedido" ? "el pedido" : "la oferta"} ${yaTiene}: se sustituye.`) : null,
+        h("div", null, h("button", { "data-crm-vincular-ok": "1", onClick: vincular, disabled: guardando, style: btn(T, "p") }, `Vincular ${info.tipo === "pedido" ? "este pedido" : "esta oferta"} al caso`))) : null);
+  }
   // ---- Botón "Actualizar desde BC": trae ya los cambios de BC (clientes, vehículos, ofertas y pedidos) sin esperar a los 10 minutos
   function BotonSyncBC({ T, onDone, texto, small }) {
     const [st, setSt] = useState(""); // "" | "trab" | "ok" | "err"
@@ -971,7 +1006,9 @@
     const I = inp(T);
     const docBox = (titulo, campo, doc) => h("div", { style: { padding: "6px 0", borderTop: `1px solid ${T.border}` } },
       h(Row, { T, k: titulo }, h("input", { value: d[campo] || "", onChange: set(campo), placeholder: "nº en BC", style: { ...I, width: "150px", padding: "5px 8px", fontFamily: "'JetBrains Mono', monospace", fontSize: "13px", textAlign: "right" } })),
-      doc ? h(React.Fragment, null, h(Row, { T, k: "Estado en BC" }, doc.activo ? (doc.estado_lanzamiento && doc.tipo === "pedido" ? `${doc.estado || "—"} · ${doc.estado_lanzamiento}` : doc.estado || "—") : h(Chip, null, "Ya no está en BC (convertido o registrado)")),
+      doc ? h(React.Fragment, null,
+        doc.cliente_no && (!caso.cliente || doc.cliente_no !== caso.cliente.bc_no) ? h(Row, { T, k: "A nombre de (en BC)" }, h(Chip, { c: "ambar" }, doc.cliente_nombre || doc.cliente_no)) : null,
+        h(Row, { T, k: "Estado en BC" }, doc.activo ? (doc.estado_lanzamiento && doc.tipo === "pedido" ? `${doc.estado || "—"} · ${doc.estado_lanzamiento}` : doc.estado || "—") : h(Chip, null, "Ya no está en BC (convertido o registrado)")),
         h(Row, { T, k: "Importe" }, `${eur(doc.importe)} · `, h("b", null, `${eur(doc.importe_iva)} IVA incl.`)))
         : caso[campo] ? h("div", { style: { fontSize: "12px", color: T.warn, textAlign: "right" } }, "No encontrado en BC (se sincroniza cada 10 min)") : null);
 
@@ -1018,7 +1055,9 @@
                 : h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } },
                   altaMsg && altaMsg.dup ? h("button", { onClick: () => onCliente(caso.cliente_id), style: btn(T, "p") }, "Revisar en la ficha del cliente") : h("button", { "data-crm-alta-caso": "1", onClick: altaDesdeCaso, style: btn(T, "p") }, "Dar de alta en BC"),
                   h("button", { "data-crm-ya-en-bc": "1", onClick: () => onCliente(caso.cliente_id), style: btn(T) }, "Ya existe en BC: vincular"),
-                  altaMsg && altaMsg.txt ? h("span", { style: { fontSize: "12.5px", color: altaMsg.err || altaMsg.dup ? T.danger : T.ok } }, altaMsg.txt) : null))
+                  altaMsg && altaMsg.txt ? h("span", { style: { fontSize: "12.5px", color: altaMsg.err || altaMsg.dup ? T.danger : T.ok } }, altaMsg.txt) : null,
+                  caso.oferta_bc || caso.pedido_bc ? h("div", { style: { width: "100%" } }, caso.oferta_bc ? docBox("Oferta de servicio", "oferta_bc", oferta) : null, caso.pedido_bc ? docBox("Pedido de servicio", "pedido_bc", pedido) : null) : null,
+                  h("div", { style: { width: "100%" } }, h(VincularDocBC, { T, caso, guardar, guardando, onCaso: (id) => abrirAbierto({ kind: "caso", id }) }))))
             : h(React.Fragment, null,
               sugerencia ? h("div", { "data-crm-sugerencia": "1", style: { background: CH.azul.bg, border: `1px solid ${CH.azul.bd}`, borderRadius: "10px", padding: "10px 12px", fontSize: "13px", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
                 h("span", null, `Hay ${sugerencia.tipo === "oferta" ? "una oferta nueva" : "un pedido nuevo"} en BC de este cliente: `, h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, sugerencia.doc.no), ` · ${eur(sugerencia.doc.importe_iva)}. ¿Es de este caso?`),
@@ -1026,7 +1065,8 @@
               docBox("Oferta de servicio", "oferta_bc", oferta), docBox("Pedido de servicio", "pedido_bc", pedido),
               docsOtros.length ? h("div", { style: { marginTop: "8px" } }, h("div", { style: { fontSize: "12px", color: T.inkSoft, marginBottom: "4px" } }, "Otros documentos abiertos de este cliente en BC · clic para vincular"),
                 h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, docsOtros.map((x) => h("button", { key: x.tipo + x.no, "data-crm-vincular": x.no, disabled: guardando, onClick: () => vincular(x), style: btn(T, "s") }, `${x.tipo === "oferta" ? "Oferta" : "Pedido"} ${x.no} · ${eur(x.importe_iva)}`))))
-                : !caso.oferta_bc && !caso.pedido_bc && !sugerencia ? h("div", { style: { fontSize: "12.5px", color: T.inkFaint, marginTop: "6px" } }, "Aún no hay ofertas ni pedidos abiertos de este cliente en BC. Cuando la crees en BC aparecerá aquí (o pulsa “Actualizar desde BC”).") : null),
+                : !caso.oferta_bc && !caso.pedido_bc && !sugerencia ? h("div", { style: { fontSize: "12.5px", color: T.inkFaint, marginTop: "6px" } }, "Aún no hay ofertas ni pedidos abiertos de este cliente en BC. Cuando la crees en BC aparecerá aquí (o pulsa “Actualizar desde BC”).") : null,
+              h(VincularDocBC, { T, caso, guardar, guardando, onCaso: (id) => abrirAbierto({ kind: "caso", id }) })),
           verGar ? h("label", { style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "13px", marginTop: "6px" } }, h("input", { type: "checkbox", checked: !!caso.garantia_100, onChange: (e) => guardar({ garantia_100: e.target.checked }) }), "100 % garantía (sin pedido de servicio)") : null),
 
         verSenal ? h(Box, { T }, h(Lbl, { T }, "Señal 50 %"),
