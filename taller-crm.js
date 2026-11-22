@@ -45,13 +45,16 @@
       { to: "senal_solicitada", l: "A · Piezas sin stock: pedir señal 50 %", set: { rama: "A" } },
       { to: "cita_asignada", l: "B · Piezas en stock: dar cita", set: { rama: "B" } },
       { to: "cita_asignada", l: "C · Sin piezas: dar cita", set: { rama: "C" } },
-      { to: "avisado_retirar", l: "Solo piezas en stock: avisar para retirar", set: { rama: "B" } }] },
+      { to: "avisado_retirar", l: "Solo piezas en stock: avisar para retirar", set: { rama: "B" } },
+      { to: "pieza_enviada", l: "📦 Solo piezas en stock: enviar al cliente", set: { rama: "B" }, envio: true }] },
     senal_solicitada: { l: "Señal solicitada", f: "piezas", c: "ambar", sig: [{ to: "comprobante_recibido", l: "Comprobante recibido", set: { senal_comprobante_at: NOW } }] },
     comprobante_recibido: { l: "Comprobante recibido", f: "piezas", c: "ambar", sig: [{ to: "contabilidad_avisada", l: "Contabilidad avisada (sin WhatsApp)", set: { senal_aviso_at: NOW } }] },
     contabilidad_avisada: { l: "Contabilidad avisada", f: "piezas", c: "azul", sig: [{ to: "piezas_pedidas", l: "Piezas pedidas" }] },
     piezas_pedidas: { l: "Piezas pedidas", f: "piezas", c: "azul", sig: [{ to: "cliente_avisado_piezas", l: "Cliente avisado: piezas pedidas" }] },
     cliente_avisado_piezas: { l: "Cliente avisado (piezas pedidas)", f: "piezas", c: "azul", sig: [{ to: "piezas_recibidas", l: "Piezas recibidas" }] },
-    piezas_recibidas: { l: "Piezas recibidas", f: "piezas", c: "verde", sig: [{ to: "cita_asignada", l: "Dar cita" }, { to: "avisado_retirar", l: "Solo piezas: avisar para retirar" }] },
+    piezas_recibidas: { l: "Piezas recibidas", f: "piezas", c: "verde", sig: [{ to: "cita_asignada", l: "Dar cita" }, { to: "avisado_retirar", l: "Solo piezas: avisar para retirar" }, { to: "pieza_enviada", l: "📦 Solo piezas: enviar al cliente", envio: true }] },
+    pieza_enviada: { l: "Enviada al cliente", f: "retirar", c: "azul", sig: [{ to: "recibida_cliente", l: "Le ha llegado: cerrar caso" }] },
+    recibida_cliente: { l: "Recibida por el cliente", f: "cerrado", c: "gris", fin: true },
     garantia_analisis: { l: "Garantía · en análisis", f: "piezas", c: "violeta", sig: [
       { to: "garantia_solicitada", l: "Viable: solicitada al fabricante", set: { garantia_ultimo_contacto: NOW } },
       { to: "presupuesto_por_hacer", l: "No viable: pasar a presupuesto" }, { to: "cerrado", l: "No viable: cerrar" }] },
@@ -76,9 +79,9 @@
     en_garantias: { l: "En Garantías", f: "cerrado", c: "violeta", fin: true, gar: true },
   };
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
-  const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["retirar", "Para retirar"]];
+  const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["retirar", "Para retirar o enviado"]];
   const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "retirar"];
-  const CAMPOS = { standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
+  const CAMPOS = { envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviado", standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
     garantia_100: "100 % garantía", senal_importe: "Importe señal", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
     piezas_previstas: "Llegada de piezas", cita_at: "Cita", cerrado_at: "Cerrado", motivo_cierre: "Motivo de cierre", archivado: "Archivado", rama: "Rama", vehiculo: "Vehículo",
@@ -150,6 +153,7 @@
     piezas_recibidas: { p: "nos", a: "Avisar al cliente o dar cita", h: 48 },
     cita_asignada: { p: "cita", a: "Que venga a la cita" },
     avisado_retirar: { p: "cli", a: "Que venga a recogerlo", h: 48, v: "Recordar que lo recoja" },
+    pieza_enviada: { p: "cli", a: "Que le llegue el envío", h: 168, v: "¿Le llegó el envío?" },
     garantia_analisis: { p: "nos", a: "Analizar la garantía", h: 72 },
     garantia_solicitada: { p: "prov", a: "Esperar al fabricante", h: 168, v: "Reclamar al fabricante" },
     garantia_seguimiento: { p: "prov", a: "Esperar al fabricante", h: 168, v: "Reclamar al fabricante" },
@@ -387,7 +391,7 @@
       metoca: abiertos.filter((c) => pel(c) === "nos" && (!me || c.responsable === me || !c.responsable)).sort(ordPlazo),
       espera: abiertos.filter((c) => ["cli", "cita"].includes(pel(c))).sort(ordPlazo),
       prov: abiertos.filter((c) => pel(c) === "prov").sort(ordPlazo),
-      cerrados: casos.filter((c) => c.estado === "retirado" || c.estado === "concluido").sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
+      cerrados: casos.filter((c) => ["retirado", "concluido", "recibida_cliente"].includes(c.estado)).sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
       descartados: casos.filter((c) => ["descartado", "cerrado", "rechazado", "sin_respuesta"].includes(c.estado)).sort((a, b) => String(b.cerrado_at || b.estado_at || "").localeCompare(String(a.cerrado_at || a.estado_at || ""))),
       standby: casos.filter(enStandby).sort((a, b) => String(b.standby_at).localeCompare(String(a.standby_at))),
       todos: (filtroTodos === "abiertos" ? abiertosTodos : filtroTodos === "garantias" ? casos.filter((c) => c.estado === "en_garantias") : filtroTodos === "cerrados" ? casos.filter((c) => c.estado === "retirado" || c.estado === "concluido") : casos).slice().sort(ordVence),
@@ -504,7 +508,7 @@
     try { const r = await sb().rpc("buscar_vehiculo", { q }); if (r.error) throw r.error; return { vehiculos: (r.data && r.data.vehiculos) || [], abiertos: (r.data && r.data.abiertos) || [] }; }
     catch (e) { return { vehiculos: [], abiertos: [] }; }
   }
-  const FIN_CASO = ["retirado", "concluido", "rechazado", "sin_respuesta", "cerrado", "descartado", "en_garantias"];
+  const FIN_CASO = ["retirado", "concluido", "recibida_cliente", "rechazado", "sin_respuesta", "cerrado", "descartado", "en_garantias"];
   async function abiertosDeCliente(clienteId) {
     const [a, b] = await Promise.all([
       sb().from("crm_casos").select("id,estado,cliente_id,vehiculo,created_at,created_by,consulta").eq("cliente_id", clienteId).eq("archivado", false).not("estado", "in", `(${FIN_CASO.join(",")})`).limit(20),
@@ -517,6 +521,46 @@
     if (x.kind === "garantia") return ((window.AcllarGarantias && window.AcllarGarantias._test.EST[x.estado]) || { l: x.estado }).l;
     return ((window.AcllarMontajes && window.AcllarMontajes._test.EST[x.estado]) || { l: x.estado }).l; } catch (e) { return x.estado; } };
   const abrirAbierto = (x) => (x.kind === "caso" ? irA("clientes", { acllar_crm_abrir_caso: x.id }) : x.kind === "garantia" ? irA("garantias", { acllar_garantia_abrir: x.id }) : irA("montajes", { acllar_montaje_abrir: x.id }));
+  // ---- Envío de piezas al cliente (sin cita): agencia, nº de seguimiento y dirección. Lo usan Casos y Garantías.
+  const AGENCIAS = ["SEUR", "MRW", "Correos Express", "Correos", "GLS", "Nacex", "DHL", "Otra"];
+  const dirCliente = (c) => { if (!c) return ""; const l2 = [c.cp, c.ciudad].filter(Boolean).join(" "); return [[c.nombre, c.apellidos].filter(Boolean).join(" "), c.direccion, [l2, c.provincia && c.provincia !== c.ciudad ? `(${c.provincia})` : ""].filter(Boolean).join(" "), c.telefono ? "Tel. " + c.telefono : ""].filter(Boolean).join("\n"); };
+  function EnvioBox({ T, cliente, inicial, cobro, onConfirm, onCancel, guardando }) {
+    const ini = inicial || {};
+    const [ag, setAg] = useState(ini.envio_agencia && !AGENCIAS.includes(ini.envio_agencia) ? "Otra" : ini.envio_agencia || "");
+    const [otra, setOtra] = useState(ini.envio_agencia && !AGENCIAS.includes(ini.envio_agencia) ? ini.envio_agencia : "");
+    const [seg, setSeg] = useState(ini.envio_seguimiento || ""); const [dir, setDir] = useState(ini.envio_direccion || dirCliente(cliente));
+    const I = inp(T);
+    return h("div", { "data-envio-box": "1", style: { background: T.bg, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px", display: "flex", flexDirection: "column", gap: "10px" } },
+      h("div", { style: { fontWeight: 800, fontSize: "14px" } }, "📦 Pieza enviada al cliente"),
+      cobro ? h("div", { "data-envio-cobro": "1", style: { fontSize: "12.5px", background: CH.ambar.bg, border: `1px solid ${CH.ambar.bd}`, color: CH.ambar.fg, borderRadius: "8px", padding: "6px 10px" } }, "Recuerda: envíala solo si ya está cobrada.") : null,
+      h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: "8px" } },
+        h(Field, { T, label: "Agencia (opcional)" }, h("select", { "aria-label": "Agencia", value: ag, onChange: (e) => setAg(e.target.value), style: I }, h("option", { value: "" }, "—"), AGENCIAS.map((a) => h("option", { key: a, value: a }, a)))),
+        h(Field, { T, label: "Nº de seguimiento (opcional)" }, h("input", { "aria-label": "Nº de seguimiento", value: seg, onChange: (e) => setSeg(e.target.value), style: { ...I, fontFamily: "'JetBrains Mono', monospace" } }))),
+      ag === "Otra" ? h(Field, { T, label: "¿Qué agencia?" }, h("input", { "aria-label": "Otra agencia", value: otra, onChange: (e) => setOtra(e.target.value), style: I })) : null,
+      h(Field, { T, label: "Dirección de envío (sale de la ficha del cliente; cámbiala si es otra)" }, h("textarea", { rows: 4, "aria-label": "Dirección de envío", value: dir, onChange: (e) => setDir(e.target.value), style: { ...I, resize: "vertical" } })),
+      h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
+        h("button", { "data-envio-ok": "1", disabled: guardando, onClick: () => onConfirm({ envio_agencia: (ag === "Otra" ? otra.trim() : ag) || null, envio_seguimiento: seg.trim() || null, envio_direccion: dir.trim() || null, enviado_at: new Date().toISOString() }), style: btn(T, "p") }, "Marcar como enviada"),
+        h("button", { type: "button", onClick: () => { try { navigator.clipboard.writeText(dir); } catch (e) {} }, style: btn(T, "s") }, "Copiar dirección"),
+        h("button", { onClick: onCancel, style: btn(T) }, "Cancelar")));
+  }
+  const msgEnvio = (nombre, que, x) => `Hola ${String(nombre || "").trim().split(/\s+/)[0] || ""}, te hemos enviado ${que}${x.envio_agencia ? " por " + x.envio_agencia : ""}.` +
+    (x.envio_seguimiento ? ` Nº de seguimiento: ${x.envio_seguimiento}.` : "") + (x.envio_direccion ? `\n\nDirección de entrega:\n${x.envio_direccion}` : "") + "\n\nCualquier duda, dinos. Taller AC·LLAR.";
+  // Datos del envío + avisar al cliente por WhatsApp o email (queda en la bitácora con el texto)
+  function EnvioInfo({ T, x, cliente, que, onAnotar, onEditar }) {
+    if (!x.enviado_at) return null;
+    const texto = msgEnvio(cliente && cliente.nombre, que, x);
+    const abrir = async (canal) => {
+      if (canal === "wa") { const tel = telWa(cliente && cliente.telefono); if (!tel) { alert("El cliente no tiene teléfono en su ficha."); return; } window.open(`https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, "_blank", "noopener"); }
+      else { if (!cliente || !cliente.email) { alert("El cliente no tiene email en su ficha."); return; } window.open(`mailto:${cliente.email}?subject=${encodeURIComponent("Te hemos enviado tu pieza · AC·LLAR")}&body=${encodeURIComponent(texto)}`, "_blank"); }
+      onAnotar && (await onAnotar(`Le avisé del envío por ${canal === "wa" ? "WhatsApp" : "email"}:\n${texto}`));
+    };
+    return h("div", { "data-envio-info": "1", style: { background: CH.azul.bg, border: `1px solid ${CH.azul.bd}`, borderRadius: "10px", padding: "10px 12px", fontSize: "13px", display: "flex", flexDirection: "column", gap: "6px" } },
+      h("div", null, h("b", null, `📦 Enviada el ${fFecha(x.enviado_at)}`), x.envio_agencia ? ` · ${x.envio_agencia}` : "", x.envio_seguimiento ? h(React.Fragment, null, " · nº ", h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, x.envio_seguimiento)) : ""),
+      x.envio_direccion ? h("div", { style: { whiteSpace: "pre-wrap", color: T.inkSoft } }, x.envio_direccion) : null,
+      h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
+        h("button", { "data-envio-wa": "1", onClick: () => abrir("wa"), style: btn(T, "wa") }, "💬 Avisar por WhatsApp"), h("button", { "data-envio-email": "1", onClick: () => abrir("email"), style: btn(T) }, "✉ Avisar por email"),
+        onEditar ? h("button", { onClick: onEditar, style: { ...btn(T, "s"), color: T.inkSoft } }, "Corregir datos del envío") : null));
+  }
   // ---- Vincular a mano una oferta o un pedido de servicio pegando su nº (p. ej. hecha a nombre de CLIENTES VARIOS)
   function VincularDocBC({ T, caso, guardar, guardando, onCaso }) {
     const [txt, setTxt] = useState(""); const [info, setInfo] = useState(null); const [busy, setBusy] = useState(false);
@@ -838,7 +882,7 @@
   function MoverDialog({ T, F, caso, tab, onClose, onSaved }) {
     const pelotas = { metoca: ["nos"], espera: ["cli", "cita"], prov: ["prov"] }[tab];
     // Un caso en standby puede reactivarse en su mismo paso (o en otro de esa pestaña)
-    const opciones = tab === "cerrados" ? ["concluido", "retirado"] : pelotas ? PASOS_MANUALES.filter((k) => pelotas.includes((PL[k] || {}).p) && (k !== caso.estado || enStandby(caso))) : [];
+    const opciones = tab === "cerrados" ? ["concluido", "retirado", "recibida_cliente"] : pelotas ? PASOS_MANUALES.filter((k) => pelotas.includes((PL[k] || {}).p) && (k !== caso.estado || enStandby(caso))) : [];
     const sug0 = enStandby(caso) && opciones.includes(caso.estado) ? caso.estado : null;
     const sug = (SUGERIDO[tab] || {})[caso.estado];
     const [to, setTo] = useState(sug0 || (opciones.includes(sug) ? sug : opciones[0] || ""));
@@ -959,7 +1003,7 @@
     const [pend, setPend] = useState(null); // paso que necesita un dato (cita)
     const [citaTmp, setCitaTmp] = useState("");
     const [pasando, setPasando] = useState(false);
-    const [cerrando, setCerrando] = useState(false); const [cambiando, setCambiando] = useState(false); const [standbyAbierto, setStandbyAbierto] = useState(false);
+    const [cerrando, setCerrando] = useState(false); const [cambiando, setCambiando] = useState(false); const [standbyAbierto, setStandbyAbierto] = useState(false); const [envioPend, setEnvioPend] = useState(null);
     const [d, setD] = useState({});
     useEffect(() => { setD({ proxima_accion: caso.proxima_accion || "", responsable: caso.responsable || "", fecha_limite: toLocalInput(caso.fecha_limite), oferta_bc: caso.oferta_bc || "", pedido_bc: caso.pedido_bc || "", senal_importe: caso.senal_importe ?? "",
       garantia_fabricante: caso.garantia_fabricante || "", garantia_reclamacion: caso.garantia_reclamacion || "", garantia_cubre: caso.garantia_cubre || "", garantia_no_cubre: caso.garantia_no_cubre || "", piezas_previstas: caso.piezas_previstas || "", cita_at: toLocalInput(caso.cita_at), vehiculo: caso.vehiculo || "", tipo: caso.tipo || "", canal: caso.canal || "", consulta: caso.consulta || "" }); }, [caso.id, caso.updated_at]);
@@ -984,6 +1028,7 @@
     const paso = async (s) => {
       if (s.to === "en_garantias") return pasar();
       if (s.to === "cita_asignada" && !pend) { setPend(s); setCitaTmp(d.cita_at || ""); return; }
+      if (s.envio) { setEnvioPend(s); return; } // pide agencia, nº de seguimiento y dirección
       const patch = { estado: s.to, recordar_at: null, ...(s.set || {}) };
       if (est(s.to).fin) patch.cerrado_at = NOW;
       if (s.to === "cita_asignada") patch.cita_at = fromLocalInput(citaTmp);
@@ -1061,7 +1106,7 @@
           s.gar ? null : h("div", { style: { display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: "4px", fontSize: "10.5px", fontWeight: 700, textAlign: "center" } },
             RECORRIDO.map((f, i) => { const done = s.f === "cerrado" || i < fi, cur = i === fi; return h("div", { key: f, style: { borderRadius: "6px", padding: "6px 2px", background: cur ? T.rust : done ? CH.verde.bg : T.bgAlt, color: cur ? "#fff" : done ? CH.verde.fg : T.inkSoft } }, ["Consulta", "Presup.", "Piezas", "Cita", "Retirar"][i]); })),
           h("div", { style: { marginTop: "12px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Estado actual"), h(Chip, { c: s.c, style: { fontSize: "13px" } }, s.l), chipPlazo(plazo(caso)) ? h(Chip, { c: chipPlazo(plazo(caso)).c }, chipPlazo(plazo(caso)).t) : null),
-          s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.motivo_cierre ? h("div", { "data-crm-motivo": "1", style: { fontSize: "13px", background: T.bg, borderRadius: "8px", padding: "8px 10px", flex: "1 1 100%", whiteSpace: "pre-wrap" } }, h("b", null, "Motivo del cierre: "), caso.motivo_cierre) : null, cambiando ? h("div", { style: { flex: "1 1 100%" } }, h(CambioPaso, { T, caso, guardando, onConfirm: cambiarPaso, onCancel: () => setCambiando(false) }))
+          s.gar ? null : s.fin ? h("div", { style: { marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" } }, caso.estado === "recibida_cliente" && caso.enviado_at ? h("div", { style: { width: "100%" } }, h(EnvioInfo, { T, x: caso, cliente: caso.cliente, que: "la pieza que nos pediste" })) : null, caso.motivo_cierre ? h("div", { "data-crm-motivo": "1", style: { fontSize: "13px", background: T.bg, borderRadius: "8px", padding: "8px 10px", flex: "1 1 100%", whiteSpace: "pre-wrap" } }, h("b", null, "Motivo del cierre: "), caso.motivo_cierre) : null, cambiando ? h("div", { style: { flex: "1 1 100%" } }, h(CambioPaso, { T, caso, guardando, onConfirm: cambiarPaso, onCancel: () => setCambiando(false) }))
               : h("button", { "data-crm-reabrir": "1", onClick: () => setCambiando(true), disabled: guardando, style: btn(T) }, "Reabrir en un paso…"))
             : h("div", { style: { marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" } },
               enStandby(caso) ? h("div", { "data-crm-en-standby": "1", style: { background: T.bg, border: `1px dashed ${T.borderHi}`, borderRadius: "10px", padding: "10px 12px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", fontSize: "13.5px" } },
@@ -1073,6 +1118,12 @@
               pend ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px" } },
                 h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })),
                 h("button", { disabled: !citaTmp || guardando, onClick: () => paso(pend), style: btn(T, "p") }, "Confirmar cita"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
+              envioPend ? h(EnvioBox, { T, cliente: caso.cliente, inicial: envioPend.editar ? caso : null, cobro: !envioPend.editar, guardando, onCancel: () => setEnvioPend(null),
+                onConfirm: async (datos) => { const p = envioPend.editar ? { ...datos, enviado_at: caso.enviado_at || datos.enviado_at } : { estado: envioPend.to, recordar_at: null, ...(envioPend.set || {}), ...datos };
+                  if (await guardar(p, envioPend.editar ? "Datos del envío corregidos." : "Marcada como enviada. Avisa al cliente con los botones de abajo.")) setEnvioPend(null); } }) : null,
+              ["pieza_enviada", "recibida_cliente"].includes(caso.estado) && caso.enviado_at && !envioPend ? h(EnvioInfo, { T, x: caso, cliente: caso.cliente, que: "la pieza que nos pediste",
+                onAnotar: async (texto) => { await sb().from("crm_eventos").insert({ tipo: "bitacora", detalle: { clase: "respondi" }, texto, caso_id: caso.id, cliente_id: caso.cliente_id }); onSaved({ ...caso }); },
+                onEditar: () => setEnvioPend({ editar: true }) }) : null,
               cambiando ? h(CambioPaso, { T, caso, guardando, onConfirm: cambiarPaso, onCancel: () => setCambiando(false) })
                 : cerrando ? h(CierreBox, { T, que: "caso", guardando, onConfirm: cerrar, onCancel: () => setCerrando(false) })
                 : standbyAbierto ? h(StandbyBox, { T, guardando, onCancel: () => setStandbyAbierto(false), onConfirm: async (mot) => { setGuardando(true); const { data, error } = await ponerStandby(caso, mot); setGuardando(false);
@@ -1466,5 +1517,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { VisorFotos, NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { EnvioBox, EnvioInfo, VisorFotos, NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();

@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, VisorFotos, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, VisorFotos, EnvioBox, EnvioInfo, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -32,8 +32,10 @@
       { to: "aprobada", l: "Aprobada", set: { resultado: "aprobada", resolucion_at: NOW } },
       { to: "parcial", l: "Aprobada parcial", set: { resultado: "parcial", resolucion_at: NOW } },
       { to: "rechazada", l: "Rechazada", set: { resultado: "rechazada", resolucion_at: NOW } }] },
-    aprobada: { l: "Aprobada · dar cita", c: "verde", f: 3, sig: [{ to: "cita_asignada", l: "Dar cita (cuando estén las piezas)", cita: true }] },
-    parcial: { l: "Aprobada parcial · dar cita", c: "violeta", f: 3, sig: [{ to: "cita_asignada", l: "Dar cita (cuando estén las piezas)", cita: true }, { to: "cerrada", l: "No se repara: cerrar" }] },
+    aprobada: { l: "Aprobada · dar cita", c: "verde", f: 3, sig: [{ to: "cita_asignada", l: "Dar cita (cuando estén las piezas)", cita: true }, { to: "envio_pendiente", l: "📦 Enviar la pieza al cliente (sin cita)", cli: true }] },
+    parcial: { l: "Aprobada parcial · dar cita", c: "violeta", f: 3, sig: [{ to: "cita_asignada", l: "Dar cita (cuando estén las piezas)", cita: true }, { to: "envio_pendiente", l: "📦 Enviar la pieza al cliente (sin cita)", cli: true }, { to: "cerrada", l: "No se repara: cerrar" }] },
+    envio_pendiente: { l: "Envío · esperando la pieza", c: "azul", f: 3, sig: [{ to: "enviada", l: "📦 Pieza enviada al cliente", envio: true }, { to: "cita_asignada", l: "Al final viene al taller: dar cita", cita: true }] },
+    enviada: { l: "Enviada al cliente", c: "verde", f: 3, sig: [{ to: "cerrada", l: "Le ha llegado: cerrar expediente" }] },
     rechazada: { l: "Rechazada por el fabricante", c: "rojo", f: 2, sig: [{ to: "cerrada", l: "Cerrar expediente" }] },
     cita_asignada: { l: "Cita asignada", c: "verde", f: 3, sig: [{ to: "cerrada", l: "Reparación terminada: cerrar expediente" }, { to: "cita_asignada", l: "Cambiar la cita", cita: true }] },
     abierta: { l: "Abierta", c: "ambar", chasis: true, sig: [{ to: "cita_pedida", l: "Cita pedida en el concesionario" }, { to: "cerrada", l: "Cerrar" }] },
@@ -43,8 +45,8 @@
     descartada: { l: "Descartada", c: "gris", fin: true, f: 4, sig: [] },
   };
   const est = (k) => EST[k] || { l: k || "—", c: "gris", sig: [] };
-  const FASES = ["Consulta", "Análisis y respuesta", "Fabricante", "Cita", "Cerrado"];
-  const CAMPOS = { estado: "Estado", fabricante: "Fabricante", descripcion: "Descripción", reclamacion_no: "Nº de gestión del fabricante", motivo_cierre: "Motivo del cierre", resultado: "Resultado", concesionario: "Concesionario", cita_at: "Cita",
+  const FASES = ["Consulta", "Análisis y respuesta", "Fabricante", "Cita o envío", "Cerrado"];
+  const CAMPOS = { envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviada", estado: "Estado", fabricante: "Fabricante", descripcion: "Descripción", reclamacion_no: "Nº de gestión del fabricante", motivo_cierre: "Motivo del cierre", resultado: "Resultado", concesionario: "Concesionario", cita_at: "Cita",
     notas: "Notas", vehiculo: "Vehículo", tramitada_at: "Tramitada", resolucion_at: "Resolución", horas: "Horas", horas_aprobadas: "Horas aprobadas", mecanico: "Mecánico", fecha: "Fecha",
     referencia: "Referencia", cantidad: "Cantidad", origen_pieza: "Origen", repuesto_recibido_at: "Recibida / repuesta", anulada: "Anulada", fecha_entrada: "Entrada", archivado: "Archivado",
     cobertura: "Cobertura", info_pedida_at: "Información pedida", cliente_informado_at: "Cliente informado", presupuesto_caso_id: "Presupuesto en Casos", tipo: "Tipo", caso_id: "Caso" };
@@ -69,7 +71,9 @@
     if (e === "esperando_info" && hEst > 120) return { t: `Cliente sin enviar info ${d} d`, c: "rojo" };
     if (e === "analisis" && hEst > 72) return { t: esCli(g) && !g.cliente_informado_at ? `Sin responder al cliente ${d} d` : `Sin tramitar ${d} d`, c: "rojo" };
     if (e === "tramitada" && hEst > 168) return { t: `Fabricante ${d} d sin respuesta`, c: "ambar" };
-    if ((e === "aprobada" || e === "parcial") && hEst > 72) return { t: `Sin cita ${d} d`, c: "rojo" };
+    if ((e === "aprobada" || e === "parcial") && hEst > 72) return { t: `Sin cita ni envío ${d} d`, c: "rojo" };
+    if (e === "envio_pendiente" && hEst > 360) return { t: `Pieza sin llegar ${d} d: reclamar`, c: "ambar" };
+    if (e === "enviada" && hEst > 168) return { t: `¿Le llegó la pieza? ${d} d`, c: "ambar" };
     if (e === "cita_asignada" && g.cita_at) {
       const hc = (new Date(g.cita_at) - Date.now()) / 36e5;
       if (t && t.pendFab && hc < 72) return { t: `Faltan ${t.pendFab} pieza${t.pendFab > 1 ? "s" : ""} para la cita`, c: "rojo" };
@@ -171,6 +175,7 @@
       [cuenta(["tramitada"]), "Esperando al fabricante", "azul"],
       [cuenta(["aprobada", "parcial"]), "Por dar cita", "ambar"],
       [cuenta(["cita_asignada"]), "Con cita", "verde"],
+      [cuenta(["envio_pendiente", "enviada"]), "Envío de piezas", "azul"],
     ];
     const th = { fontSize: "11px", letterSpacing: ".08em", textTransform: "uppercase", color: T.inkSoft, fontWeight: 700, padding: "10px 12px", textAlign: "left", borderBottom: `1.5px solid ${T.border}` };
     const td = { padding: "11px 12px", borderBottom: `1px solid ${T.border}`, verticalAlign: "top", fontSize: "13.5px" };
@@ -272,7 +277,7 @@
     const [g, setG] = useState(null); const [ls, setLs] = useState([]); const [fotos, setFotos] = useState([]); const [urls, setUrls] = useState({}); const [ev, setEv] = useState([]);
     const [d, setD] = useState({}); const [msg, setMsg] = useState(""); const [trab, setTrab] = useState(false);
     const [nuevoProb, setNuevoProb] = useState(""); const [nuevoH, setNuevoH] = useState(""); const [verFoto, setVerFoto] = useState(null); const [etG, setEtG] = useState("");
-    const [pend, setPend] = useState(null); const [citaTmp, setCitaTmp] = useState(""); const [codTmp, setCodTmp] = useState("");
+    const [pend, setPend] = useState(null); const [citaTmp, setCitaTmp] = useState(""); const [codTmp, setCodTmp] = useState(""); const [envioPend, setEnvioPend] = useState(null);
     const [cerrando, setCerrando] = useState(false);
     const [devolviendo, setDevolviendo] = useState(false); const [devMot, setDevMot] = useState(""); const [devTipo, setDevTipo] = useState(""); const [devuelta, setDevuelta] = useState(null);
     const [verFicha, setVerFicha] = useState(false); const [bitKey, setBitKey] = useState(0); const [alta, setAlta] = useState("");
@@ -305,6 +310,7 @@
       if (texto) setMsg(texto); await cargar(); onChanged && onChanged(); return true;
     };
     const paso = async (x) => {
+      if (x.envio) { setEnvioPend(x); return; } // pide agencia, nº de seguimiento y dirección
       if ((x.cita || x.codigo) && (!pend || pend.to !== x.to)) { setPend(x); setCitaTmp(d.cita_at || ""); return; }
       const patch = { estado: x.to, ...(x.set || {}) };
       if (x.cita) { if (!citaTmp) { setMsg("Pon la fecha y hora de la cita."); return; } patch.cita_at = fromLocalInput(citaTmp); }
@@ -433,6 +439,12 @@
               pend.codigo ? h(Field, { T, label: "Nº de gestión que da el fabricante", style: { flex: 1 } }, h("input", { "data-g-codigo": "1", value: codTmp, onChange: (e) => setCodTmp(e.target.value), placeholder: "p. ej. RT-2026-0554", style: { ...I, fontFamily: "'JetBrains Mono', monospace" } })) : null,
               pend.cita ? h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", "data-g-cita": "1", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })) : null,
               h("button", { "data-g-confirmar": "1", disabled: trab || (pend.cita && !citaTmp), onClick: () => paso(pend), style: btn(T, "p") }, pend.codigo && !codTmp.trim() ? "Confirmar sin nº (lo pongo luego)" : "Confirmar"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
+            envioPend ? h(EnvioBox, { T, cliente: cli, inicial: envioPend.editar ? g : null, guardando: trab, onCancel: () => setEnvioPend(null),
+              onConfirm: async (datos) => { const p = envioPend.editar ? { ...datos, enviado_at: g.enviado_at || datos.enviado_at } : { estado: envioPend.to, ...(envioPend.set || {}), ...datos };
+                if (await upd(p, envioPend.editar ? "Datos del envío corregidos." : "Marcada como enviada. Avisa al cliente con los botones de abajo.")) setEnvioPend(null); } }) : null,
+            g.estado === "envio_pendiente" ? h("div", { style: { fontSize: "12.5px", color: T.inkSoft } }, "El cliente la instala él: cuando llegue la pieza, márcala como enviada.") : null,
+            ["enviada", "cerrada"].includes(g.estado) && g.enviado_at && !envioPend ? h(EnvioInfo, { T, x: g, cliente: cli, que: `la pieza de tu ${vehCorto(g.vehiculo)} (garantía ${g.numero})`,
+              onAnotar: async (texto) => { await anotar("respondi", texto); await cargar(); }, onEditar: g.estado === "enviada" ? () => setEnvioPend({ editar: true }) : null }) : null,
             pend && pend.codigo ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "El seguimiento de la tramitación se lleva en la web del fabricante. Aquí solo queda la fecha y su nº de gestión.") : null,
             pend && pend.cita ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, "Pon una fecha en la que sepas que las piezas ya habrán llegado.") : null,
             cerrando ? h(CierreBox, { T, que: "expediente", guardando: trab, onConfirm: cerrarSin, onCancel: () => setCerrando(false) })
