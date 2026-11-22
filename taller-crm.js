@@ -314,6 +314,8 @@
     return { gid, caso: up.data };
   }
   // Etiqueta NUEVA durante las primeras 24 h, con quién la cargó
+  // Nºs de gestión del fabricante de una garantía (puede haber varios; reclamacion_no es el primero)
+  const numsGestion = (g) => [...new Set([g && g.reclamacion_no, ...((g && g.reclamaciones) || [])].map((x) => String(x || "").trim()).filter(Boolean))];
   const esNueva = (x) => !!(x && x.created_at && Date.now() - new Date(x.created_at) < 864e5);
   // Solapa roja en la punta izquierda de la fila o tarjeta (sale de su borde)
   const ChipNueva = ({ x, borde }) => (esNueva(x) ? h("div", { "data-nueva": "1", title: `Cargada el ${fFechaHora(x.created_at)}`, className: "acl-solapa", style: { marginLeft: `-${borde || 12}px` } },
@@ -984,14 +986,14 @@
   // Expediente(s) de la pestaña Garantías ligados a este caso
   function ExpedientesCaso({ T, caso, onPasar, pasando }) {
     const [lista, setLista] = useState(null);
-    useEffect(() => { let vivo = true; sb().from("garantias").select("id,numero,estado,fabricante,reclamacion_no").eq("caso_id", caso.id).order("created_at").then((r) => { if (vivo) setLista(r.data || []); }); return () => { vivo = false; }; }, [caso.id, caso.updated_at]);
+    useEffect(() => { let vivo = true; sb().from("garantias").select("id,numero,estado,fabricante,reclamacion_no,reclamaciones").eq("caso_id", caso.id).order("created_at").then((r) => { if (vivo) setLista(r.data || []); }); return () => { vivo = false; }; }, [caso.id, caso.updated_at]);
     if (lista == null) return null;
     if (!lista.length && !tieneGar(caso.tipo) && caso.estado !== "en_garantias") return null;
     return h(Box, { T, tone: "violeta" }, h(Lbl, { T }, "Garantía"),
       h("div", { "data-crm-expedientes": "1" },
         lista.length ? h(React.Fragment, null,
           h("div", { style: { fontSize: "13px", marginBottom: "8px" } }, "Este caso se gestiona en la pestaña Garantías: análisis, tramitación con el fabricante, piezas, cita y reparación."),
-          lista.map((g) => h("button", { key: g.id, onClick: () => abrirExpediente(g.id), style: { ...btn(T, "p"), marginRight: "6px", marginBottom: "6px" } }, `Abrir expediente ${g.numero}${g.fabricante ? " · " + g.fabricante : ""}${g.reclamacion_no ? " · " + g.reclamacion_no : ""} →`)))
+          lista.map((g) => h("button", { key: g.id, onClick: () => abrirExpediente(g.id), style: { ...btn(T, "p"), marginRight: "6px", marginBottom: "6px" } }, `Abrir expediente ${g.numero}${g.fabricante ? " · " + g.fabricante : ""}${numsGestion(g).length ? " · " + numsGestion(g).join(", ") : ""} →`)))
           : h(React.Fragment, null, h("div", { style: { fontSize: "13px", marginBottom: "8px" } }, "Es un caso de garantía. Pásalo a Garantías para llevar allí su expediente."),
             h("button", { "data-crm-crear-exp": "1", onClick: onPasar, disabled: pasando, style: { ...btn(T, "p"), width: "100%" } }, pasando ? "Pasando…" : "Pasar a Garantías →"))));
   }
@@ -1089,7 +1091,7 @@
       h(Row, { T, k: titulo }, h("input", { value: d[campo] || "", onChange: set(campo), placeholder: "nº en BC", style: { ...I, width: "150px", padding: "5px 8px", fontFamily: "'JetBrains Mono', monospace", fontSize: "13px", textAlign: "right" } })),
       doc ? h(React.Fragment, null,
         doc.cliente_no && (!caso.cliente || doc.cliente_no !== caso.cliente.bc_no) ? h(Row, { T, k: "A nombre de (en BC)" }, h(Chip, { c: "ambar" }, doc.cliente_nombre || doc.cliente_no)) : null,
-        h(Row, { T, k: "Estado en BC" }, doc.activo ? (doc.estado_lanzamiento && doc.tipo === "pedido" ? `${doc.estado || "—"} · ${doc.estado_lanzamiento}` : doc.estado || "—") : h(Chip, null, "Ya no está en BC (convertido o registrado)")),
+        h(Row, { T, k: "Estado en BC" }, doc.activo ? (doc.estado_lanzamiento && doc.tipo === "pedido" ? `${doc.estado || "—"} · ${doc.estado_lanzamiento}` : doc.estado || "—") : (doc.tipo === "oferta" && caso.pedido_bc ? h(Chip, { c: "verde" }, `Convertida en el pedido ${caso.pedido_bc}`) : h(Chip, null, "Ya no está en BC (convertido o registrado)"))),
         h(Row, { T, k: "Importe" }, `${eur(doc.importe)} · `, h("b", null, `${eur(doc.importe_iva)} IVA incl.`)))
         : caso[campo] ? h("div", { style: { fontSize: "12px", color: T.warn, textAlign: "right" } }, "No encontrado en BC (se sincroniza cada 10 min)") : null);
 
@@ -1238,7 +1240,7 @@
     const [psBC, setPsBC] = useState([]); const [gars, setGars] = useState([]);
     const cargar = async () => {
       const { data } = await sb().from("crm_clientes").select("*").eq("id", id).maybeSingle(); setC(data);
-      sb().from("garantias").select("id,numero,estado,fabricante,reclamacion_no,vehiculo,created_at").eq("cliente_id", id).order("created_at", { ascending: false }).then((r) => setGars(r.data || []));
+      sb().from("garantias").select("id,numero,estado,fabricante,reclamacion_no,reclamaciones,vehiculo,created_at").eq("cliente_id", id).order("created_at", { ascending: false }).then((r) => setGars(r.data || []));
       if (data) setD({ nombre: data.nombre || "", apellidos: data.apellidos || "", telefono: data.telefono || "", email: data.email || "", nif: data.nif || "", direccion: data.direccion || "", cp: data.cp || "", ciudad: data.ciudad || "", provincia: data.provincia || "", notas: data.notas || "" });
       const e = await sb().from("crm_eventos").select("*").eq("cliente_id", id).order("at", { ascending: false }).limit(30); setEv(e.data || []);
       if (data && data.bc_no) { const ps = await sb().from("bc_productos_servicio").select("*").eq("cliente_no", data.bc_no).eq("activo", true); setPsBC(ps.data || []); } else setPsBC([]);
@@ -1381,7 +1383,7 @@
                 : h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Sin casos abiertos.")),
             gars.length ? h(Box, { T, tone: "violeta" }, h(Lbl, { T }, `Garantías (${gars.length})`),
               gars.map((g) => h("button", { key: g.id, onClick: () => abrirExpediente(g.id), style: { display: "flex", width: "100%", justifyContent: "space-between", gap: "8px", alignItems: "center", padding: "8px 0", border: "none", borderTop: `1px solid ${T.border}`, background: "transparent", cursor: "pointer", fontFamily: "inherit", color: T.ink, textAlign: "left" } },
-                h("span", null, h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.numero), " ", g.fabricante || "", h("div", { style: { fontSize: "12px", color: T.inkSoft } }, `${fFecha(g.created_at)} · ${vehTxt(g.vehiculo) || "—"}${g.reclamacion_no ? " · código " + g.reclamacion_no : ""}`)),
+                h("span", null, h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.numero), " ", g.fabricante || "", h("div", { style: { fontSize: "12px", color: T.inkSoft } }, `${fFecha(g.created_at)} · ${vehTxt(g.vehiculo) || "—"}${numsGestion(g).length ? " · nº " + numsGestion(g).join(", ") : ""}`)),
                 h("span", { style: { fontSize: "12px", fontWeight: 800, color: T.rust } }, "abrir →")))) : null,
             h(Box, { T }, h(Lbl, { T }, "En Business Central"),
               !c.bc_no ? h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Aún no está en BC.")
@@ -1517,5 +1519,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { EnvioBox, EnvioInfo, VisorFotos, NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { numsGestion, EnvioBox, EnvioInfo, VisorFotos, NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();

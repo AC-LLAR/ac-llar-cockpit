@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, VisorFotos, EnvioBox, EnvioInfo, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, VisorFotos, EnvioBox, EnvioInfo, numsGestion, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -46,7 +46,7 @@
   };
   const est = (k) => EST[k] || { l: k || "—", c: "gris", sig: [] };
   const FASES = ["Consulta", "Análisis y respuesta", "Fabricante", "Cita o envío", "Cerrado"];
-  const CAMPOS = { envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviada", estado: "Estado", fabricante: "Fabricante", descripcion: "Descripción", reclamacion_no: "Nº de gestión del fabricante", motivo_cierre: "Motivo del cierre", resultado: "Resultado", concesionario: "Concesionario", cita_at: "Cita",
+  const CAMPOS = { reclamaciones: "Nºs de gestión del fabricante", envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviada", estado: "Estado", fabricante: "Fabricante", descripcion: "Descripción", reclamacion_no: "Nº de gestión del fabricante", motivo_cierre: "Motivo del cierre", resultado: "Resultado", concesionario: "Concesionario", cita_at: "Cita",
     notas: "Notas", vehiculo: "Vehículo", tramitada_at: "Tramitada", resolucion_at: "Resolución", horas: "Horas", horas_aprobadas: "Horas aprobadas", mecanico: "Mecánico", fecha: "Fecha",
     referencia: "Referencia", cantidad: "Cantidad", origen_pieza: "Origen", repuesto_recibido_at: "Recibida / repuesta", anulada: "Anulada", fecha_entrada: "Entrada", archivado: "Archivado",
     cobertura: "Cobertura", info_pedida_at: "Información pedida", cliente_informado_at: "Cliente informado", presupuesto_caso_id: "Presupuesto en Casos", tipo: "Tipo", caso_id: "Caso" };
@@ -95,10 +95,30 @@
       if (k === "repuesto_recibido_at") return v.a ? "pieza recibida / repuesta" : "desmarcada como recibida";
       if (k === "cobertura") return `Cobertura: ${(COBERTURA.find((x) => x[0] === v.de) || ["", "—"])[1]} → ${(COBERTURA.find((x) => x[0] === v.a) || ["", "—"])[1]}`;
       if (k === "vehiculo" && U.difVeh) { const t = U.difVeh(v.de, v.a); if (t) return "Vehículo · " + t; }
+      if (k === "reclamaciones") { const de = v.de || [], a = v.a || []; const mas = a.filter((x) => !de.includes(x)), menos = de.filter((x) => !a.includes(x));
+        return [mas.length ? `Nº de gestión añadido: ${mas.join(", ")}` : "", menos.length ? `Nº de gestión quitado: ${menos.join(", ")}` : ""].filter(Boolean).join(" · ") || "Nºs de gestión"; }
+      if (k === "reclamacion_no" && d.reclamaciones) return null;
       const f = (x) => (x == null || x === "" ? "—" : typeof x === "object" ? vehLinea(x) : /_at$/.test(k) ? fFechaHora(x) : String(x));
       return `${CAMPOS[k] || k}: ${f(v.de)} → ${f(v.a)}`;
     });
-    return pref + (partes.join(" · ") || "cambio");
+    return pref + (partes.filter(Boolean).join(" · ") || "cambio");
+  }
+  // Nºs de gestión del fabricante: puede haber varios (garantías tramitadas por separado). Se añaden y se quitan; queda en el historial.
+  function NumsGestion({ T, g, upd, trab, chasis, siempre }) {
+    const nums = numsGestion(g); const [abierto, setAbierto] = useState(false); const [n, setN] = useState("");
+    const guardar = async (nl, txt) => upd({ reclamaciones: nl, reclamacion_no: nl[0] || null }, txt);
+    const add = async () => { const x = n.trim(); if (!x) return; if (nums.includes(x)) { setN(""); setAbierto(false); return; } if (await guardar([...nums, x], "Nº de gestión añadido.")) { setN(""); setAbierto(false); } };
+    const quitar = (x) => { if (window.confirm(`¿Quitar el nº de gestión ${x}? Queda en el historial.`)) guardar(nums.filter((y) => y !== x), "Nº de gestión quitado."); };
+    const mono = { fontFamily: "'JetBrains Mono', monospace" };
+    return h("span", { "data-g-nums": "1", style: { display: "inline-flex", gap: "6px", flexWrap: "wrap", alignItems: "center" } },
+      nums.map((x) => h(Chip, { key: x, c: "violeta" }, chasis ? "Ref. " : "Nº de gestión ", h("span", { style: mono }, x),
+        h("button", { "data-g-num-quitar": x, onClick: () => quitar(x), disabled: trab, title: "Quitar este nº", style: { border: "none", background: "transparent", cursor: "pointer", color: "inherit", fontWeight: 800, marginLeft: "4px", padding: 0 } }, "×"))),
+      abierto ? h("span", { style: { display: "inline-flex", gap: "4px" } },
+        h("input", { "data-g-num-nuevo": "1", autoFocus: true, value: n, onChange: (e) => setN(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAbierto(false); }, placeholder: "nº del fabricante",
+          style: { ...inp(T), width: "170px", padding: "3px 8px", fontSize: "12.5px", ...mono } }),
+        h("button", { "data-g-num-ok": "1", onClick: add, disabled: trab || !n.trim(), style: { ...btn(T, "p"), padding: "3px 10px", fontSize: "12px" } }, "Añadir"),
+        h("button", { onClick: () => { setAbierto(false); setN(""); }, style: { ...btn(T, "s"), padding: "3px 8px", fontSize: "12px" } }, "×"))
+        : nums.length || siempre ? h("button", { "data-g-num-add": "1", onClick: () => setAbierto(true), style: { ...btn(T, "s"), padding: "2px 9px", fontSize: "12px" } }, nums.length ? "＋ otro nº" : "＋ Añadir nº") : null);
   }
   async function comprimir(file) {
     try {
@@ -167,7 +187,7 @@
     const tot = {}; lista.forEach((g) => { tot[g.id] = totales(lineas.filter((l) => l.garantia_id === g.id)); });
     const q = txt.trim().toLowerCase();
     const visibles0 = lista.filter((g) => (filtro === "abiertas" ? !est(g.estado).fin : filtro === "cerradas" ? est(g.estado).fin : true))
-      .filter((g) => !q || [g.numero, g.fabricante, g.descripcion, g.reclamacion_no, vehLinea(g.vehiculo), g.vehiculo && g.vehiculo.bastidor, g.cliente && nombreCli(g.cliente)].join(" ").toLowerCase().includes(q));
+      .filter((g) => !q || [g.numero, g.fabricante, g.descripcion, numsGestion(g).join(" "), vehLinea(g.vehiculo), g.vehiculo && g.vehiculo.bastidor, g.cliente && nombreCli(g.cliente)].join(" ").toLowerCase().includes(q));
     const visibles = ordenar(visibles0, orden, ORDEN_G(tot));
     const cuenta = (xs) => lista.filter((g) => xs.includes(g.estado)).length;
     const kpis = [
@@ -203,7 +223,7 @@
                 h("td", { style: td }, h("b", null, vehLinea(g.vehiculo)), g.vehiculo && g.vehiculo.bastidor ? h("div", { style: { fontSize: "12px", color: T.inkSoft, fontFamily: "'JetBrains Mono', monospace" } }, g.vehiculo.bastidor) : null),
                 h("td", { style: td }, esCli(g) ? h(React.Fragment, null, h(NombreLink, { c: g.cliente, onCliente: setFichaId }), h(ChipCli, { c: g.cliente })) : h(Chip, { c: "gris" }, "Flota alquiler")),
                 h("td", { style: { ...td, maxWidth: "200px" } }, g.caso ? h(CeldaClave, { T, valor: g.caso.clave, tabla: "crm_casos", id: g.caso.id }) : h(CeldaClave, { T, valor: g.clave, tabla: "garantias", id: g.id })),
-                h("td", { style: td }, g.fabricante || "—", g.reclamacion_no ? h("div", { style: { fontSize: "12px", fontFamily: "'JetBrains Mono', monospace", color: T.inkSoft } }, g.reclamacion_no) : null),
+                h("td", { style: td }, g.fabricante || "—", numsGestion(g).map((n) => h("div", { key: n, style: { fontSize: "12px", fontFamily: "'JetBrains Mono', monospace", color: T.inkSoft } }, n))),
                 h("td", { style: td }, h(Chip, { c: s.c }, s.l), av ? h("div", { style: { marginTop: "4px" } }, h(Chip, { c: av.c }, av.t)) : null),
                 h("td", { style: { ...td, fontWeight: 700, whiteSpace: "nowrap" } }, fmtH(t.horas)),
                 h("td", { style: td }, t.lineasPieza ? `${t.piezas} (${t.lineasPieza - t.pendFab}/${t.lineasPieza} recibidas)` : "—"),
@@ -314,7 +334,7 @@
       if ((x.cita || x.codigo) && (!pend || pend.to !== x.to)) { setPend(x); setCitaTmp(d.cita_at || ""); return; }
       const patch = { estado: x.to, ...(x.set || {}) };
       if (x.cita) { if (!citaTmp) { setMsg("Pon la fecha y hora de la cita."); return; } patch.cita_at = fromLocalInput(citaTmp); }
-      if (x.codigo && codTmp.trim()) patch.reclamacion_no = codTmp.trim();
+      if (x.codigo && codTmp.trim()) { const nl = [...new Set([...numsGestion(g), codTmp.trim()])]; patch.reclamaciones = nl; patch.reclamacion_no = nl[0]; }
       if (await upd(patch)) { if (x.propia) await anotar("nota", "Garantía cubierta por AC·LLAR: no se tramita con el fabricante."); setPend(null); }
     };
     // Abre WhatsApp o el correo con el mensaje, lo anota en la bitácora y avanza el estado
@@ -340,7 +360,7 @@
     const guardarDatos = () => {
       const v = { ...(g.vehiculo || {}), modelo: d.modelo.trim(), matricula: normMat(d.matricula), bastidor: normMat(d.bastidor) };
       const p = {};
-      [["fabricante", d.fabricante], ["descripcion", d.descripcion], ["reclamacion_no", d.reclamacion_no], ["concesionario", d.concesionario], ["notas", d.notas]].forEach(([k, x]) => { const y = String(x || "").trim() || null; if (y !== (g[k] || null)) p[k] = y; });
+      [["fabricante", d.fabricante], ["descripcion", d.descripcion], ["concesionario", d.concesionario], ["notas", d.notas]].forEach(([k, x]) => { const y = String(x || "").trim() || null; if (y !== (g[k] || null)) p[k] = y; });
       const cita = fromLocalInput(d.cita_at); if ((cita ? Math.floor(new Date(cita) / 6e4) : null) !== (g.cita_at ? Math.floor(new Date(g.cita_at) / 6e4) : null)) p.cita_at = cita;
       if (JSON.stringify(v) !== JSON.stringify(g.vehiculo || {})) p.vehiculo = v;
       if (d.tipo !== g.tipo) { p.tipo = d.tipo; p.estado = d.tipo === "chasis" ? "abierta" : esCli(g) ? "consulta" : "analisis"; }
@@ -415,7 +435,7 @@
           h("div", { style: { display: "flex", gap: "8px", alignItems: "center" } }, h("button", { "data-g-resumen": "1", onClick: resumen, style: btn(T) }, "Resumen para el fabricante"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×"))),
         h("div", { style: { fontFamily: F.display, fontSize: "24px", fontWeight: 800 } }, h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.numero), " · ", vehLinea(g.vehiculo)),
         h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", fontSize: "13.5px", color: T.inkSoft } },
-          g.reclamacion_no ? h(Chip, { c: "violeta" }, "Nº de gestión ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.reclamacion_no)) : g.resultado === "propia" ? h(Chip, { c: "verde" }, "Garantía de AC·LLAR · sin fabricante") : !chasis && s.f >= 2 && !s.fin ? h(Chip, { c: "rojo" }, "Falta el nº de gestión del fabricante") : null,
+          numsGestion(g).length ? h(NumsGestion, { T, g, upd, trab, chasis }) : g.resultado === "propia" ? h(Chip, { c: "verde" }, "Garantía de AC·LLAR · sin fabricante") : !chasis && s.f >= 2 && !s.fin ? h(Chip, { c: "rojo" }, "Falta el nº de gestión del fabricante") : null,
           g.vehiculo && g.vehiculo.bastidor ? h("span", null, "Bastidor ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.vehiculo.bastidor)) : null,
           h("span", null, `Entrada ${fFecha(g.fecha_entrada || g.created_at)}`), g.cita_at ? h("span", null, `· Cita ${fLarga(g.cita_at)}`) : null),
         g.caso_id ? h("button", { onClick: () => irA("clientes", { acllar_crm_abrir_caso: g.caso_id }), style: { ...btn(T, "s"), alignSelf: "flex-start" } }, "Ver el caso de entrada en Casos →") : null),
@@ -507,7 +527,7 @@
           h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
             h("div", { style: { gridColumn: "1 / -1" } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Tipo"), h(Seg, { T, opts: [["garantia", "Garantía (vivienda)"], ["chasis", "Gestión de chasis"]], value: d.tipo, onChange: (v) => setD((x) => ({ ...x, tipo: v, fabricante: v === "chasis" ? "Ford" : "Benimar" })) })),
             h(Field, { T, label: "Fabricante" }, h("select", { value: d.fabricante, onChange: (e) => setD((x) => ({ ...x, fabricante: e.target.value })), style: I }, h("option", { value: "" }, "—"), (d.tipo === "chasis" ? FAB_CHASIS : FAB_GARANTIA).map(([k, l]) => h("option", { key: k, value: k }, l)))),
-            h(Field, { T, label: chasis ? "Nº de expediente / referencia" : "Nº de gestión del fabricante" }, h("input", { "data-g-cod-datos": "1", value: d.reclamacion_no, onChange: (e) => setD((x) => ({ ...x, reclamacion_no: e.target.value })), style: { ...I, fontFamily: "'JetBrains Mono', monospace" } })),
+            h("div", { style: { gridColumn: "1 / -1" } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, chasis ? "Nºs de expediente / referencia" : "Nºs de gestión del fabricante (puede haber varios)"), h(NumsGestion, { T, g, upd, trab, chasis, siempre: true })),
             chasis ? h(Field, { T, label: "Concesionario / taller oficial" }, h("input", { value: d.concesionario, onChange: (e) => setD((x) => ({ ...x, concesionario: e.target.value })), style: I })) : null,
             h(Field, { T, label: "Cita" }, h("input", { type: "datetime-local", value: d.cita_at || "", onChange: (e) => setD((x) => ({ ...x, cita_at: e.target.value })), style: I })),
             h(Field, { T, label: "Modelo" }, h("input", { value: d.modelo, onChange: (e) => setD((x) => ({ ...x, modelo: e.target.value })), style: I })),
@@ -601,7 +621,7 @@
       section{break-inside:avoid}.bar{margin-bottom:12px}@media print{.bar{display:none}}</style></head><body>
       <div class="bar"><button onclick="print()">Imprimir / guardar PDF</button></div>
       <h1>${esc(g.numero)} · ${g.tipo === "chasis" ? "Gestión de chasis" : "Reclamación de garantía"} · ${esc(g.fabricante || "")}</h1>
-      <div class="meta"><div><b>Nº de gestión</b> <span class="m">${esc(g.reclamacion_no || "—")}</span></div><div><b>Entrada</b> ${esc(fFecha(g.fecha_entrada || g.created_at))}</div>
+      <div class="meta"><div><b>Nº de gestión</b> <span class="m">${esc(numsGestion(g).join(" · ") || "—")}</span></div><div><b>Entrada</b> ${esc(fFecha(g.fecha_entrada || g.created_at))}</div>
       <div><b>Vehículo</b> ${esc(v.modelo || "")}</div><div><b>Matrícula</b> <span class="m">${esc(v.matricula || "")}</span></div>
       <div><b>Bastidor</b> <span class="m">${esc(v.bastidor || "")}</span></div><div><b>${g.origen === "flota" ? "Flota" : "Cliente"}</b> ${esc(g.origen === "flota" ? v.ac || "" : nombreCli(g.cliente))}</div></div>
       ${g.descripcion ? `<p>${esc(g.descripcion)}</p>` : ""}
