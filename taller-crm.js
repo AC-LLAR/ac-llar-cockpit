@@ -1166,6 +1166,19 @@
 
         verSenal ? h(Box, { T }, h(Lbl, { T }, "Señal 50 %"),
           h(Row, { T, k: "Importe" }, h("input", { value: d.senal_importe ?? "", onChange: set("senal_importe"), placeholder: "€", inputMode: "decimal", style: { ...I, width: "120px", padding: "5px 8px", textAlign: "right" } })),
+          (() => { // Lo que falta: total del pedido de servicio (o de la oferta si aún no hay pedido) menos la señal que se está escribiendo
+            const doc = pedido || oferta; const total = doc && doc.importe_iva != null ? Number(doc.importe_iva) : null;
+            const txt = String(d.senal_importe ?? "").trim(); const senal = txt === "" ? null : Number(txt.replace(/\./g, (m, i, t) => (t.includes(",") ? "" : m)).replace(",", "."));
+            if (total == null) return h("div", { "data-senal-resta": "sin", style: { fontSize: "12px", color: T.inkSoft, textAlign: "right", padding: "4px 0" } }, "Vincula el pedido de servicio para ver lo que falta por pagar.");
+            const resta = senal == null || isNaN(senal) ? null : Math.round((total - senal) * 100) / 100;
+            return h(React.Fragment, null,
+              h(Row, { T, k: pedido ? `Total del pedido ${pedido.no}` : `Total de la oferta ${oferta.no}` }, h("b", null, `${eur(total)} IVA incl.`)),
+              resta == null ? null
+                : h("div", { "data-senal-resta": resta > 0 ? "pendiente" : resta < 0 ? "exceso" : "pagado", style: { margin: "6px 0 2px", padding: "9px 12px", borderRadius: "10px", fontWeight: 800, fontSize: "15px", textAlign: "center",
+                    background: resta > 0 ? "#FEF3C7" : resta < 0 ? "#FEE2E2" : "#DCFCE7", color: resta > 0 ? "#92400E" : resta < 0 ? "#B91C1C" : "#166534", border: `1px solid ${resta > 0 ? "#F59E0B" : resta < 0 ? "#F87171" : "#4ADE80"}` } },
+                  resta > 0 ? `RESTA PAGAR ${eur(resta)}` : resta < 0 ? `La señal supera el total en ${eur(-resta)}` : "PAGADO ENTERO",
+                  !pedido && resta > 0 ? h("div", { style: { fontSize: "11.5px", fontWeight: 600, marginTop: "2px" } }, "Según la oferta: cambiará solo cuando pase a pedido") : null));
+          })(),
           h(Row, { T, k: "Comprobante recibido" }, fFechaHora(caso.senal_comprobante_at)),
           h(Row, { T, k: "Aviso a contabilidad" }, caso.senal_aviso_at ? fFechaHora(caso.senal_aviso_at) : h("span", { style: { color: T.warn, fontWeight: 700 } }, "Pendiente")),
           caso.senal_comprobante_at ? h("button", { onClick: avisarAna, disabled: guardando, style: { ...btn(T, "wa"), width: "100%", marginTop: "8px" } }, caso.senal_aviso_at ? "💬 Volver a avisar a Ana" : "💬 Avisar a Ana por WhatsApp") : null) : null,
