@@ -297,6 +297,32 @@
   const abrirExpediente = (id) => irA("garantias", { acllar_garantia_abrir: id });
   // Dar o ver la cita en TALLER → Calendario (o: { caso_id } o { garantia_id }; fecha: día a mostrar)
   const darCitaCal = (o, fecha) => irA("calendario", { acllar_cal_colocar: JSON.stringify(o), ...(fecha ? { acllar_cal_ir: fecha } : {}) });
+  // Mecánicos del taller y su color en el calendario
+  const MECANICOS_CAL = [["Ali", "#2563EB"], ["Carlos", "#16A34A"], ["Hugo", "#EA580C"], ["Sebastián", "#9333EA"], ["Agente externo", "#0E7490"]];
+  const colorMec = (m) => (MECANICOS_CAL.find((x) => x[0] === m) || [null, "#64748B"])[1];
+  // Botones para elegir mecánico (uno de color por mecánico)
+  const ElegirMecanico = ({ T, value, onChange, disabled, compacto }) => h("div", { "data-mec-elegir": "1", style: { display: "flex", gap: "5px", flexWrap: "wrap" } },
+    [["", "Sin asignar", "#64748B"], ...MECANICOS_CAL.map((m) => [m[0], m[0], m[1]])].map(([k, l, c]) => { const on = (value || "") === k;
+      return h("button", { key: l, type: "button", disabled, "data-mec": l, onClick: () => onChange(k || null), style: { display: "inline-flex", alignItems: "center", gap: "5px", padding: compacto ? "3px 9px" : "5px 11px", borderRadius: "999px", cursor: disabled ? "default" : "pointer", fontSize: compacto ? "12px" : "13px", fontWeight: 700, border: `2px solid ${c}`, background: on ? c : "#fff", color: on ? "#fff" : "#0F1B2E" } },
+        h("span", { style: { width: "8px", height: "8px", borderRadius: "50%", background: on ? "#fff" : c } }), l); }));
+  // Pone el mecánico en la cita (la última programada) del caso o de la garantía
+  const ponerMecanico = async (filtro, mec) => {
+    let q = sb().from("citas").select("id,inicio").eq("estado", "programada"); Object.keys(filtro).forEach((k) => { q = q.eq(k, filtro[k]); });
+    const r = await q.order("inicio", { ascending: false }).limit(1); const c = (r.data || [])[0]; if (!c) return false;
+    const u = await sb().from("citas").update({ mecanico: mec || null }).eq("id", c.id); return !u.error;
+  };
+  // Mecánico de la cita del caso o de la garantía, con botones para cambiarlo
+  function MecanicoCita({ T, filtro, citaAt }) {
+    const [mec, setMec] = useState(undefined); const [msg, setMsg] = useState(""); const [trab, setTrab] = useState(false);
+    const clave = JSON.stringify(filtro);
+    useEffect(() => { let vivo = true; if (!citaAt) { setMec(undefined); return; } let q = sb().from("citas").select("id,mecanico,inicio").eq("estado", "programada"); Object.keys(filtro).forEach((k) => { q = q.eq(k, filtro[k]); });
+      q.order("inicio", { ascending: false }).limit(1).then(({ data }) => { if (vivo) setMec(((data || [])[0] || { mecanico: null }).mecanico || null); }); return () => { vivo = false; }; }, [clave, citaAt]);
+    if (!citaAt || mec === undefined) return null;
+    return h("div", { "data-mec-cita": "1", style: { display: "flex", flexDirection: "column", gap: "5px" } },
+      h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft } }, "Mecánico de la cita"),
+      h(ElegirMecanico, { T, value: mec, disabled: trab, compacto: true, onChange: async (m) => { setTrab(true); setMsg(""); const ok = await ponerMecanico(filtro, m); setTrab(false); if (ok) { setMec(m); setMsg(m ? `Asignada a ${m}.` : "Sin mecánico."); } else setMsg("No se pudo cambiar (¿la cita está en el calendario?)."); } }),
+      msg ? h("div", { style: { fontSize: "12px", color: /No se pudo/.test(msg) ? T.danger : T.inkSoft } }, msg) : null);
+  }
   const verCal = (fecha) => irA("calendario", { acllar_cal_ir: fecha || new Date().toISOString() });
   // Fabricante probable a partir del modelo (se puede cambiar en el expediente)
   const fabDeModelo = (m) => { const x = String(m || "").toLowerCase(); if (/benimar|tessoro|mileo|amphitryon|benivan|sport \d/.test(x)) return "Benimar"; if (/roller|kronos|zefiro|pegaso|livingstone|granduca/.test(x)) return "Roller Team"; return null; };
@@ -1006,7 +1032,7 @@
     const [guardando, setGuardando] = useState(false);
     const [msg, setMsg] = useState("");
     const [pend, setPend] = useState(null); // paso que necesita un dato (cita)
-    const [citaTmp, setCitaTmp] = useState("");
+    const [citaTmp, setCitaTmp] = useState(""); const [mecTmp, setMecTmp] = useState(null);
     const [pasando, setPasando] = useState(false);
     const [cerrando, setCerrando] = useState(false); const [cambiando, setCambiando] = useState(false); const [standbyAbierto, setStandbyAbierto] = useState(false); const [envioPend, setEnvioPend] = useState(null);
     const [d, setD] = useState({});
@@ -1037,7 +1063,7 @@
       const patch = { estado: s.to, recordar_at: null, ...(s.set || {}) };
       if (est(s.to).fin) patch.cerrado_at = NOW;
       if (s.to === "cita_asignada") patch.cita_at = fromLocalInput(citaTmp);
-      if (await guardar(patch)) setPend(null);
+      if (await guardar(patch)) { if (s.to === "cita_asignada" && mecTmp) { await ponerMecanico({ caso_id: caso.id }, mecTmp); onRefresh && onRefresh(); } setPend(null); setMecTmp(null); }
     };
     const guardarDatos = () => {
       const p = {};
@@ -1120,8 +1146,9 @@
               h("div", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700 } }, "Siguiente paso"),
               caso.estado === "comprobante_recibido" ? h("button", { onClick: avisarAna, disabled: guardando, style: btn(T, "wa") }, "💬 Avisar a Ana por WhatsApp") : null,
               s.sig.map((x, i) => h("button", { key: i, "data-crm-paso": x.to, disabled: guardando, onClick: () => paso(x), style: { ...btn(T, i === 0 && caso.estado !== "comprobante_recibido" ? "p" : undefined), textAlign: "left" } }, "→ " + x.l)),
-              pend ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px" } },
+              pend ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px", flexWrap: "wrap" } },
                 h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })),
+                h("div", { style: { flexBasis: "100%", order: -1 } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Mecánico"), h(ElegirMecanico, { T, value: mecTmp, onChange: setMecTmp, compacto: true })),
                 h("button", { disabled: !citaTmp || guardando, onClick: () => paso(pend), style: btn(T, "p") }, "Confirmar cita"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar"),
                 h("button", { "data-crm-cal": "1", onClick: () => { setPend(null); darCitaCal({ caso_id: caso.id }); }, style: btn(T, "s") }, "📅 Elegir hueco en el calendario")) : null,
               envioPend ? h(EnvioBox, { T, cliente: caso.cliente, inicial: envioPend.editar ? caso : null, cobro: !envioPend.editar, guardando, onCancel: () => setEnvioPend(null),
@@ -1209,6 +1236,7 @@
             h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
               h(Field, { T, label: "Llegada prevista de piezas" }, h("input", { type: "date", value: d.piezas_previstas || "", onChange: set("piezas_previstas"), style: I })),
               h(Field, { T, label: "Cita" }, h("input", { type: "datetime-local", value: d.cita_at || "", onChange: set("cita_at"), style: I }))),
+            h(MecanicoCita, { T, filtro: { caso_id: caso.id }, citaAt: caso.cita_at }),
             h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
               caso.cita_at ? h("button", { "data-crm-vercal": "1", onClick: () => verCal(caso.cita_at), style: { ...btn(T, "s"), fontSize: "12.5px" } }, "📅 Ver la cita en el calendario") : null,
               h("button", { "data-crm-darcal": "1", onClick: () => darCitaCal({ caso_id: caso.id }, caso.cita_at), style: { ...btn(T, "s"), fontSize: "12.5px" } }, caso.cita_at ? "📅 Otra cita en el calendario" : "📅 Dar cita en el calendario")))),
@@ -1539,5 +1567,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { E, est, lblTipos, darCitaCal, verCal, numsGestion, EnvioBox, EnvioInfo, VisorFotos, NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { MECANICOS_CAL, colorMec, ElegirMecanico, ponerMecanico, MecanicoCita, E, est, lblTipos, darCitaCal, verCal, numsGestion, EnvioBox, EnvioInfo, VisorFotos, NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();

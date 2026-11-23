@@ -11,7 +11,7 @@
   const { useState, useEffect, useRef, useMemo } = React;
 
   // ---------- configuración ----------
-  const MECANICOS = [["Ali", "#2563EB"], ["Carlos", "#16A34A"], ["Hugo", "#EA580C"], ["Sebastián", "#9333EA"], ["Agente externo", "#0E7490"]];
+  const MECANICOS = U.MECANICOS_CAL || [["Ali", "#2563EB"], ["Carlos", "#16A34A"], ["Hugo", "#EA580C"], ["Sebastián", "#9333EA"], ["Agente externo", "#0E7490"]];
   const SIN_MEC = "#64748B";
   const colorMec = (m) => (MECANICOS.find((x) => x[0] === m) || [null, SIN_MEC])[1];
   const TIPOS = [["taller", "Cita de taller", "🔧"], ["garantia", "Garantía", "🛡"], ["recogida", "Recogida / entrega", "🚐"], ["entrega_vn", "Entrega vehículo nuevo", "🔑"], ["llamada", "Llamada", "📞"], ["bloqueo", "Bloqueo / cerrado", "⛔"], ["otro", "Otro", "•"]];
@@ -376,7 +376,9 @@
         h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } }, h(Chip, { c: e[1] }, e[0]), c.aviso_cliente_at ? h(Chip, { c: "verde" }, "Cliente avisado " + fFechaHora(c.aviso_cliente_at)) : null)),
       h("div", { style: { padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px" } },
         h(Box, { T },
-          linea("Mecánico", h("span", { style: { display: "inline-flex", gap: "6px", alignItems: "center", fontWeight: 700 } }, h("span", { style: { width: "10px", height: "10px", borderRadius: "50%", background: colorMec(c.mecanico) } }), c.mecanico || "Sin asignar")),
+          h("div", { "data-cal-det-mec": "1", style: { padding: "4px 0 8px" } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "6px" } }, "Mecánico (pulsa para asignar)"),
+            U.ElegirMecanico ? h(U.ElegirMecanico, { T, value: c.mecanico, disabled: trab, compacto: true, onChange: (m) => { if ((m || null) !== (c.mecanico || null)) upd({ mecanico: m }, m ? `Asignada a ${m}.` : "Sin mecánico."); } })
+              : h("span", { style: { fontWeight: 700 } }, c.mecanico || "Sin asignar")),
           c.cliente ? linea("Cliente", h("span", null, link(nombreCli(c.cliente), () => onCliente(c.cliente.id), "cliente"), c.cliente.telefono ? h("span", { style: { color: T.inkSoft } }, " · " + c.cliente.telefono) : null)) : null,
           linea("Vehículo", vehCita(c) + (c.vehiculo && asVeh(c.vehiculo).bastidor ? " · bastidor " + asVeh(c.vehiculo).bastidor : "")),
           c.caso ? linea("Caso", link(`${lblTipos(c.caso.tipo)} · ${U.est ? U.est(c.caso.estado).l : c.caso.estado} →`, () => irA("clientes", { acllar_crm_abrir_caso: c.caso.id }), "caso")) : null,

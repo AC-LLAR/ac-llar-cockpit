@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, VisorFotos, EnvioBox, EnvioInfo, numsGestion, darCitaCal, verCal, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, VisorFotos, EnvioBox, EnvioInfo, numsGestion, darCitaCal, verCal, ElegirMecanico, ponerMecanico, MecanicoCita, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -297,7 +297,7 @@
     const [g, setG] = useState(null); const [ls, setLs] = useState([]); const [fotos, setFotos] = useState([]); const [urls, setUrls] = useState({}); const [ev, setEv] = useState([]);
     const [d, setD] = useState({}); const [msg, setMsg] = useState(""); const [trab, setTrab] = useState(false);
     const [nuevoProb, setNuevoProb] = useState(""); const [nuevoH, setNuevoH] = useState(""); const [verFoto, setVerFoto] = useState(null); const [etG, setEtG] = useState("");
-    const [pend, setPend] = useState(null); const [citaTmp, setCitaTmp] = useState(""); const [codTmp, setCodTmp] = useState(""); const [envioPend, setEnvioPend] = useState(null);
+    const [pend, setPend] = useState(null); const [citaTmp, setCitaTmp] = useState(""); const [mecTmp, setMecTmp] = useState(null); const [codTmp, setCodTmp] = useState(""); const [envioPend, setEnvioPend] = useState(null);
     const [cerrando, setCerrando] = useState(false);
     const [devolviendo, setDevolviendo] = useState(false); const [devMot, setDevMot] = useState(""); const [devTipo, setDevTipo] = useState(""); const [devuelta, setDevuelta] = useState(null);
     const [verFicha, setVerFicha] = useState(false); const [bitKey, setBitKey] = useState(0); const [alta, setAlta] = useState("");
@@ -335,7 +335,7 @@
       const patch = { estado: x.to, ...(x.set || {}) };
       if (x.cita) { if (!citaTmp) { setMsg("Pon la fecha y hora de la cita."); return; } patch.cita_at = fromLocalInput(citaTmp); }
       if (x.codigo && codTmp.trim()) { const nl = [...new Set([...numsGestion(g), codTmp.trim()])]; patch.reclamaciones = nl; patch.reclamacion_no = nl[0]; }
-      if (await upd(patch)) { if (x.propia) await anotar("nota", "Garantía cubierta por AC·LLAR: no se tramita con el fabricante."); setPend(null); }
+      if (await upd(patch)) { if (x.propia) await anotar("nota", "Garantía cubierta por AC·LLAR: no se tramita con el fabricante."); if (x.cita && mecTmp && ponerMecanico) { await ponerMecanico({ garantia_id: g.id }, mecTmp); await cargar(); } setPend(null); setMecTmp(null); }
     };
     // Abre WhatsApp o el correo con el mensaje, lo anota en la bitácora y avanza el estado
     const enviar = async (canal, texto, asunto, clase, resumen, patch) => {
@@ -438,6 +438,7 @@
           numsGestion(g).length ? h(NumsGestion, { T, g, upd, trab, chasis }) : g.resultado === "propia" ? h(Chip, { c: "verde" }, "Garantía de AC·LLAR · sin fabricante") : !chasis && s.f >= 2 && !s.fin ? h(Chip, { c: "rojo" }, "Falta el nº de gestión del fabricante") : null,
           g.vehiculo && g.vehiculo.bastidor ? h("span", null, "Bastidor ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, g.vehiculo.bastidor)) : null,
           h("span", null, `Entrada ${fFecha(g.fecha_entrada || g.created_at)}`), g.cita_at ? h("span", null, `· Cita ${fLarga(g.cita_at)}`) : null),
+        g.cita_at && MecanicoCita ? h(MecanicoCita, { T, filtro: { garantia_id: g.id }, citaAt: g.cita_at }) : null,
         g.caso_id ? h("button", { onClick: () => irA("clientes", { acllar_crm_abrir_caso: g.caso_id }), style: { ...btn(T, "s"), alignSelf: "flex-start" } }, "Ver el caso de entrada en Casos →") : null),
       h("div", { style: { padding: "16px 22px 40px", display: "flex", flexDirection: "column", gap: "14px" } },
         // ---- estado y siguiente paso
@@ -457,6 +458,7 @@
             sig.map((x, i) => h("button", { key: i, "data-g-paso": x.to, disabled: trab, onClick: () => paso(x), style: { ...btn(T, i === 0 && !(esCli(g) && ["consulta", "esperando_info"].includes(g.estado)) ? "p" : undefined), textAlign: "left" } }, "→ " + x.l)),
             pend ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px", flexWrap: "wrap" } },
               pend.codigo ? h(Field, { T, label: "Nº de gestión que da el fabricante", style: { flex: 1 } }, h("input", { "data-g-codigo": "1", value: codTmp, onChange: (e) => setCodTmp(e.target.value), placeholder: "p. ej. RT-2026-0554", style: { ...I, fontFamily: "'JetBrains Mono', monospace" } })) : null,
+              pend.cita && ElegirMecanico ? h("div", { style: { flexBasis: "100%" } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, "Mecánico"), h(ElegirMecanico, { T, value: mecTmp, onChange: setMecTmp, compacto: true })) : null,
               pend.cita ? h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", "data-g-cita": "1", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })) : null,
               pend.cita && darCitaCal ? h("button", { "data-g-cal": "1", onClick: () => { setPend(null); darCitaCal({ garantia_id: g.id }, g.cita_at); }, style: btn(T, "s") }, "📅 Elegir hueco en el calendario") : null,
               h("button", { "data-g-confirmar": "1", disabled: trab || (pend.cita && !citaTmp), onClick: () => paso(pend), style: btn(T, "p") }, pend.codigo && !codTmp.trim() ? "Confirmar sin nº (lo pongo luego)" : "Confirmar"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
