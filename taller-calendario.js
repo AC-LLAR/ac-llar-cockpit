@@ -48,6 +48,28 @@
   const msgRecordatorio = (c) => { const d = new Date(c.inicio); const v = c.vehiculo ? asVeh(c.vehiculo) : null;
     return `Hola ${nomPila(c.cliente)}, te recordamos tu cita en el taller de AC·LLAR${v && v.modelo ? " para tu " + [v.modelo, v.matricula ? normMat(v.matricula) : null].filter(Boolean).join(" · ") : ""}: ${DIAS[d.getDay()]} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}${c.todo_dia ? "" : " a las " + hm(d)}. Si no puedes venir, avísanos por aquí. ¡Gracias!`; };
 
+  // ---------- «Trabajo a realizar»: el texto de la consulta en puntos, sin perder nada ----------
+  // Quita solo el ruido (saludos, despedidas, cabeceras de email, «Enviado desde mi…»), separa por líneas y viñetas
+  // y parte los párrafos largos en frases. No resume ni reescribe: cada dato del texto original queda en algún punto.
+  const RUIDO = [/^(de|from|enviado|sent|para|to|asunto|subject|cc|fecha|date)\s*:/i, /^enviado desde mi/i, /^sent from my/i, /^-{2,}\s*(mensaje|original|forwarded)/i,
+    /^(hola|buen(os|as)? (d[ií]as|tardes|noches)|buenas|saludos|un saludo|un cordial saludo|saludos cordiales|gracias|muchas gracias|mil gracias|atentamente|un abrazo|quedo a la espera\.?|quedo atent[oa]\.?)[\s,.!¡]*$/i];
+  const VINETA = /^\s*(?:[•·▪◦●○\-–—*]|o(?=\s)|\d{1,2}[.)]|[a-z][.)])\s*/i;
+  function aItems(texto) {
+    const out = []; if (!texto) return out;
+    const lineas = String(texto).replace(/\r/g, "").replace(/\u00a0/g, " ").split("\n");
+    lineas.forEach((l0) => {
+      const crudo = l0.replace(/\t/g, " "); let l = crudo.trim(); if (!l) return;
+      if (RUIDO.some((re) => re.test(l))) return;
+      l = l.replace(/^(?:(?:hola\b|buen(?:os|as)? (?:d[ií]as|tardes|noches)\b|buenas(?=\s*[,.!])|qu[eé] tal(?=\s*[,.!?]))[\s,.!?¡]*)+/i, "").trim(); if (!l) return;
+      const sub = /^\s*o\s/.test(crudo) || /^\s{2,}[•·▪◦●○\-–—*]/.test(crudo) || /^\s*[◦○]/.test(crudo);
+      const vin = VINETA.test(l); if (vin) l = l.replace(VINETA, "").trim(); if (!l) return;
+      if (!vin && l.length <= 60 && /:$/.test(l)) { out.push({ t: l.replace(/:$/, ""), cab: true }); return; }
+      const frases = !vin && l.length > 160 ? l.split(/(?<=[.!?])\s+(?=[¿¡A-ZÁÉÍÓÚÑ0-9])/) : [l];
+      frases.forEach((f) => { f = f.trim(); if (f) out.push({ t: f, sub: sub && out.length > 0 }); });
+    });
+    return out;
+  }
+
   // Reparto en carriles de las citas que se solapan dentro de una columna
   function carriles(lista) {
     const xs = lista.slice().sort((a, b) => a._s - b._s || b._e - a._e);
@@ -347,12 +369,43 @@
           h("button", { "data-cal-guardar": "1", onClick: guardar, disabled: guardando, style: btn(T, "p") }, guardando ? "Guardando…" : inicial.id ? "Guardar cambios" : "Crear cita"))));
   }
 
+  // Resumen del trabajo a realizar en la cita
+  const COB = { cubre: ["Cubre", "verde"], no_cubre: ["No cubre (se cobra)", "rojo"], a_valorar: ["A valorar", "ambar"] };
+  function ListaItems({ T, items }) {
+    return h("ul", { style: { margin: 0, paddingLeft: "18px", display: "flex", flexDirection: "column", gap: "4px", fontSize: "13.5px", lineHeight: 1.4 } },
+      items.map((x, i) => x.cab ? h("li", { key: i, style: { listStyle: "none", marginLeft: "-18px", marginTop: i ? "6px" : 0, fontWeight: 800, fontSize: "12px", color: T.inkSoft, textTransform: "uppercase", letterSpacing: ".04em" } }, x.t)
+        : h("li", { key: i, style: { marginLeft: x.sub ? "18px" : 0, listStyle: x.sub ? "circle" : "disc", color: x.sub ? T.inkSoft : T.ink } }, x.t)));
+  }
+  function Trabajo({ T, c, lineas }) {
+    const items = c.garantia ? aItems(c.garantia.descripcion) : c.caso ? aItems(c.caso.consulta) : [];
+    const problemas = (lineas || []).filter((l) => l.tipo === "problema");
+    const piezasDe = (p) => (lineas || []).filter((l) => l.tipo === "pieza" && l.problema_id === p.id);
+    const notas = aItems(c.notas);
+    const [verTexto, setVerTexto] = useState(false);
+    if (!items.length && !problemas.length && !notas.length && !c.titulo) return null;
+    return h(Box, { T }, h("div", { "data-cal-trabajo": "1" }, h(Lbl, { T }, "Trabajo a realizar"),
+      c.caso && !c.garantia ? h("div", { style: { fontSize: "12.5px", color: T.inkSoft, marginBottom: "6px" } }, lblTipos(c.caso.tipo), c.caso.piezas_previstas ? ` · piezas previstas para el ${U.fFecha ? U.fFecha(c.caso.piezas_previstas) : c.caso.piezas_previstas}` : "") : null,
+      c.titulo && !items.some((x) => x.t === c.titulo) ? h("div", { style: { fontWeight: 700, fontSize: "13.5px", marginBottom: "6px" } }, c.titulo) : null,
+      problemas.length ? h("ol", { "data-cal-problemas": "1", style: { margin: "0 0 4px", paddingLeft: "20px", display: "flex", flexDirection: "column", gap: "6px", fontSize: "13.5px", lineHeight: 1.4 } },
+        problemas.map((p) => { const cob = COB[p.cobertura]; const pz = [...(p.referencia || p.cantidad ? [p] : []), ...piezasDe(p)];
+          return h("li", { key: p.id }, h("span", { style: { fontWeight: 700 } }, p.descripcion), " ",
+            cob ? h(Chip, { c: cob[1] }, cob[0]) : null, p.horas ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, ` · ${String(p.horas).replace(".", ",")} h`) : null,
+            pz.map((x) => h("div", { key: x.id, style: { fontSize: "12.5px", color: T.inkSoft } }, "Pieza: ", [x.cantidad ? x.cantidad + " ×" : "", x.tipo === "pieza" ? x.descripcion : "", x.referencia ? "ref. " + x.referencia : ""].filter(Boolean).join(" "), x.repuesto_recibido_at ? " · ✓ recibida" : " · pendiente de recibir"))); })) : null,
+      items.length ? (problemas.length
+        ? h("div", { style: { marginTop: "6px" } }, h("button", { "data-cal-ver-texto": "1", onClick: () => setVerTexto((v) => !v), style: { border: "none", background: "transparent", color: T.rust, fontWeight: 800, cursor: "pointer", padding: 0, fontSize: "12.5px" } }, verTexto ? "▾ Lo que contó el cliente" : "▸ Ver lo que contó el cliente (punto por punto)"),
+            verTexto ? h("div", { style: { marginTop: "6px" } }, h(ListaItems, { T, items })) : null)
+        : h(ListaItems, { T, items })) : null,
+      notas.length ? h("div", { style: { marginTop: "8px" } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "4px" } }, "Notas de la cita"), h(ListaItems, { T, items: notas })) : null));
+  }
+
   // =====================================================================
   //  Ficha de una cita
   // =====================================================================
   function Detalle({ T, F, cita, onClose, onEditar, onDuplicar, onCambiado, onCliente }) {
-    const [msg, setMsg] = useState(""); const [trab, setTrab] = useState(false); const [hist, setHist] = useState([]);
+    const [msg, setMsg] = useState(""); const [trab, setTrab] = useState(false); const [hist, setHist] = useState([]); const [lineas, setLineas] = useState([]);
     const c = cita;
+    useEffect(() => { let vivo = true; if (!c.garantia_id) { setLineas([]); return; }
+      sb().from("garantia_lineas").select("*").eq("garantia_id", c.garantia_id).eq("anulada", false).order("orden").then(({ data }) => { if (vivo) setLineas(data || []); }); return () => { vivo = false; }; }, [c.garantia_id]);
     useEffect(() => { let vivo = true; sb().from("crm_eventos").select("*").eq("detalle->>cita_id", c.id).order("at", { ascending: false }).limit(30).then(({ data }) => { if (vivo) setHist(data || []); }); return () => { vivo = false; }; }, [c.id, c.updated_at]);
     const upd = async (p, txt) => { setTrab(true); setMsg(""); const r = await sb().from("citas").update(p).eq("id", c.id); setTrab(false); if (r.error) { setMsg("No se pudo guardar: " + r.error.message); return false; } setMsg(txt || "Guardado."); onCambiado(); return true; };
     const avisar = async (canal) => {
@@ -375,6 +428,7 @@
         h("div", { style: { fontSize: "14px" } }, `${DIAS[ini.getDay()]} ${ini.getDate()} de ${MESES[ini.getMonth()]} · ${horaCita(c)}`),
         h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } }, h(Chip, { c: e[1] }, e[0]), c.aviso_cliente_at ? h(Chip, { c: "verde" }, "Cliente avisado " + fFechaHora(c.aviso_cliente_at)) : null)),
       h("div", { style: { padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px" } },
+        h(Trabajo, { T, c, lineas }),
         h(Box, { T },
           h("div", { "data-cal-det-mec": "1", style: { padding: "4px 0 8px" } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "6px" } }, "Mecánico (pulsa para asignar)"),
             U.ElegirMecanico ? h(U.ElegirMecanico, { T, value: c.mecanico, disabled: trab, compacto: true, onChange: (m) => { if ((m || null) !== (c.mecanico || null)) upd({ mecanico: m }, m ? `Asignada a ${m}.` : "Sin mecánico."); } })
@@ -384,7 +438,7 @@
           c.caso ? linea("Caso", link(`${lblTipos(c.caso.tipo)} · ${U.est ? U.est(c.caso.estado).l : c.caso.estado} →`, () => irA("clientes", { acllar_crm_abrir_caso: c.caso.id }), "caso")) : null,
           c.garantia ? linea("Garantía", link(`${c.garantia.numero} →`, () => irA("garantias", { acllar_garantia_abrir: c.garantia.id }), "garantia")) : null,
           c.montaje_id ? linea("Vehículo nuevo", link("Abrir expediente →", () => irA("montajes", { acllar_montaje_abrir: c.montaje_id }), "montaje")) : null,
-          linea("Título", c.titulo), linea("Notas", c.notas ? h("span", { style: { whiteSpace: "pre-wrap" } }, c.notas) : null)),
+          null),
         c.cliente && c.estado === "programada" ? h(Box, { T }, h(Lbl, { T }, "Recordar la cita al cliente"),
           h("div", { style: { display: "flex", gap: "8px" } }, h("button", { "data-cal-wa": "1", disabled: trab, onClick: () => avisar("wa"), style: { ...btn(T, "wa"), flex: 1 } }, "💬 WhatsApp"), h("button", { "data-cal-mail": "1", disabled: trab, onClick: () => avisar("mail"), style: { ...btn(T, "s"), flex: 1 } }, "✉ Email"))) : null,
         h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
@@ -438,8 +492,8 @@
       const ids = (k) => [...new Set(xs.map((x) => x[k]).filter(Boolean))];
       const [cl, ca, ga] = await Promise.all([
         ids("cliente_id").length ? sb().from("crm_clientes").select("id,nombre,apellidos,telefono,email,ciudad,vehiculos,bc_no").in("id", ids("cliente_id")) : { data: [] },
-        ids("caso_id").length ? sb().from("crm_casos").select("id,estado,tipo,consulta,vehiculo").in("id", ids("caso_id")) : { data: [] },
-        ids("garantia_id").length ? sb().from("garantias").select("id,numero,estado,vehiculo").in("id", ids("garantia_id")) : { data: [] }]);
+        ids("caso_id").length ? sb().from("crm_casos").select("id,estado,tipo,consulta,vehiculo,piezas_previstas").in("id", ids("caso_id")) : { data: [] },
+        ids("garantia_id").length ? sb().from("garantias").select("id,numero,estado,vehiculo,descripcion,tipo,fabricante").in("id", ids("garantia_id")) : { data: [] }]);
       const m = (r) => Object.fromEntries((r.data || []).map((x) => [x.id, x]));
       const C = m(cl), K = m(ca), G = m(ga);
       return xs.map((x) => ({ ...x, estado: x.estado || "programada", cliente: C[x.cliente_id] || null, caso: K[x.caso_id] || null, garantia: G[x.garantia_id] || null }));
@@ -561,5 +615,5 @@
   }
 
   window.AcllarCalendario = Calendario;
-  window.AcllarCalendario._test = { carriles, enHorario, msgRecordatorio, MECANICOS, colorMec };
+  window.AcllarCalendario._test = { aItems, carriles, enHorario, msgRecordatorio, MECANICOS, colorMec };
 })();
