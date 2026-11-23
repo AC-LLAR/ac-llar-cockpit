@@ -10,7 +10,7 @@
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
   const U = window.AcllarCRM._ui;
   const { CeldaClave, ZonaFotos, h, CH, Chip, btn, inp, Lbl, Box, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, nombreCli, normMat, vehTxt,
-    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, VisorFotos, EnvioBox, EnvioInfo, numsGestion, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
+    horas, pad, mismoDia, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, NombreLink, VisorFotos, EnvioBox, EnvioInfo, numsGestion, darCitaCal, verCal, esNueva, SegMulti, tiposDe, TIPOS, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, BITACORA, telWa, irA, yo, fLarga, enviarABC } = U;
   const { useState, useEffect, useRef } = React;
 
   const POSVENTA = "post-venta@ac-llar.com";
@@ -458,6 +458,7 @@
             pend ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px", flexWrap: "wrap" } },
               pend.codigo ? h(Field, { T, label: "Nº de gestión que da el fabricante", style: { flex: 1 } }, h("input", { "data-g-codigo": "1", value: codTmp, onChange: (e) => setCodTmp(e.target.value), placeholder: "p. ej. RT-2026-0554", style: { ...I, fontFamily: "'JetBrains Mono', monospace" } })) : null,
               pend.cita ? h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", "data-g-cita": "1", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })) : null,
+              pend.cita && darCitaCal ? h("button", { "data-g-cal": "1", onClick: () => { setPend(null); darCitaCal({ garantia_id: g.id }, g.cita_at); }, style: btn(T, "s") }, "📅 Elegir hueco en el calendario") : null,
               h("button", { "data-g-confirmar": "1", disabled: trab || (pend.cita && !citaTmp), onClick: () => paso(pend), style: btn(T, "p") }, pend.codigo && !codTmp.trim() ? "Confirmar sin nº (lo pongo luego)" : "Confirmar"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
             envioPend ? h(EnvioBox, { T, cliente: cli, inicial: envioPend.editar ? g : null, guardando: trab, onCancel: () => setEnvioPend(null),
               onConfirm: async (datos) => { const p = envioPend.editar ? { ...datos, enviado_at: g.enviado_at || datos.enviado_at } : { estado: envioPend.to, ...(envioPend.set || {}), ...datos };
@@ -529,7 +530,8 @@
             h(Field, { T, label: "Fabricante" }, h("select", { value: d.fabricante, onChange: (e) => setD((x) => ({ ...x, fabricante: e.target.value })), style: I }, h("option", { value: "" }, "—"), (d.tipo === "chasis" ? FAB_CHASIS : FAB_GARANTIA).map(([k, l]) => h("option", { key: k, value: k }, l)))),
             h("div", { style: { gridColumn: "1 / -1" } }, h("div", { style: { fontSize: "12px", fontWeight: 800, color: T.inkSoft, marginBottom: "5px" } }, chasis ? "Nºs de expediente / referencia" : "Nºs de gestión del fabricante (puede haber varios)"), h(NumsGestion, { T, g, upd, trab, chasis, siempre: true })),
             chasis ? h(Field, { T, label: "Concesionario / taller oficial" }, h("input", { value: d.concesionario, onChange: (e) => setD((x) => ({ ...x, concesionario: e.target.value })), style: I })) : null,
-            h(Field, { T, label: "Cita" }, h("input", { type: "datetime-local", value: d.cita_at || "", onChange: (e) => setD((x) => ({ ...x, cita_at: e.target.value })), style: I })),
+            h(Field, { T, label: "Cita" }, h("input", { type: "datetime-local", value: d.cita_at || "", onChange: (e) => setD((x) => ({ ...x, cita_at: e.target.value })), style: I }),
+              verCal && g.cita_at ? h("button", { type: "button", "data-g-vercal": "1", onClick: () => verCal(g.cita_at), style: { ...btn(T, "s"), fontSize: "12px", padding: "3px 9px", marginTop: "5px" } }, "📅 Ver en el calendario") : null),
             h(Field, { T, label: "Modelo" }, h("input", { value: d.modelo, onChange: (e) => setD((x) => ({ ...x, modelo: e.target.value })), style: I })),
             h(Field, { T, label: "Matrícula" }, h("input", { value: d.matricula, onChange: (e) => setD((x) => ({ ...x, matricula: e.target.value })), style: I })),
             h(Field, { T, label: "Bastidor", style: { gridColumn: "1 / -1" } }, h("input", { value: d.bastidor, onChange: (e) => setD((x) => ({ ...x, bastidor: e.target.value })), style: { ...I, fontFamily: "'JetBrains Mono', monospace" } })),

@@ -295,6 +295,9 @@
   // Saltar entre pestañas de TALLER
   const irA = (tab, claves) => { try { Object.keys(claves || {}).forEach((k) => localStorage.setItem(k, claves[k])); } catch (e) {} window.dispatchEvent(new CustomEvent("acllar-taller-tab", { detail: tab })); };
   const abrirExpediente = (id) => irA("garantias", { acllar_garantia_abrir: id });
+  // Dar o ver la cita en TALLER → Calendario (o: { caso_id } o { garantia_id }; fecha: día a mostrar)
+  const darCitaCal = (o, fecha) => irA("calendario", { acllar_cal_colocar: JSON.stringify(o), ...(fecha ? { acllar_cal_ir: fecha } : {}) });
+  const verCal = (fecha) => irA("calendario", { acllar_cal_ir: fecha || new Date().toISOString() });
   // Fabricante probable a partir del modelo (se puede cambiar en el expediente)
   const fabDeModelo = (m) => { const x = String(m || "").toLowerCase(); if (/benimar|tessoro|mileo|amphitryon|benivan|sport \d/.test(x)) return "Benimar"; if (/roller|kronos|zefiro|pegaso|livingstone|granduca/.test(x)) return "Roller Team"; return null; };
   // Un caso de garantía pasa a la pestaña Garantías: se crea su expediente y el caso queda "En Garantías".
@@ -1119,7 +1122,8 @@
               s.sig.map((x, i) => h("button", { key: i, "data-crm-paso": x.to, disabled: guardando, onClick: () => paso(x), style: { ...btn(T, i === 0 && caso.estado !== "comprobante_recibido" ? "p" : undefined), textAlign: "left" } }, "→ " + x.l)),
               pend ? h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", background: T.bg, borderRadius: "10px", padding: "10px" } },
                 h(Field, { T, label: "Fecha y hora de la cita", style: { flex: 1 } }, h("input", { type: "datetime-local", value: citaTmp, onChange: (e) => setCitaTmp(e.target.value), style: I })),
-                h("button", { disabled: !citaTmp || guardando, onClick: () => paso(pend), style: btn(T, "p") }, "Confirmar cita"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar")) : null,
+                h("button", { disabled: !citaTmp || guardando, onClick: () => paso(pend), style: btn(T, "p") }, "Confirmar cita"), h("button", { onClick: () => setPend(null), style: btn(T) }, "Cancelar"),
+                h("button", { "data-crm-cal": "1", onClick: () => { setPend(null); darCitaCal({ caso_id: caso.id }); }, style: btn(T, "s") }, "📅 Elegir hueco en el calendario")) : null,
               envioPend ? h(EnvioBox, { T, cliente: caso.cliente, inicial: envioPend.editar ? caso : null, cobro: !envioPend.editar, guardando, onCancel: () => setEnvioPend(null),
                 onConfirm: async (datos) => { const p = envioPend.editar ? { ...datos, enviado_at: caso.enviado_at || datos.enviado_at } : { estado: envioPend.to, recordar_at: null, ...(envioPend.set || {}), ...datos };
                   if (await guardar(p, envioPend.editar ? "Datos del envío corregidos." : "Marcada como enviada. Avisa al cliente con los botones de abajo.")) setEnvioPend(null); } }) : null,
@@ -1204,7 +1208,10 @@
           h("div", { style: { display: "grid", gridTemplateColumns: "1fr", gap: "8px" } },
             h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
               h(Field, { T, label: "Llegada prevista de piezas" }, h("input", { type: "date", value: d.piezas_previstas || "", onChange: set("piezas_previstas"), style: I })),
-              h(Field, { T, label: "Cita" }, h("input", { type: "datetime-local", value: d.cita_at || "", onChange: set("cita_at"), style: I }))))),
+              h(Field, { T, label: "Cita" }, h("input", { type: "datetime-local", value: d.cita_at || "", onChange: set("cita_at"), style: I }))),
+            h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
+              caso.cita_at ? h("button", { "data-crm-vercal": "1", onClick: () => verCal(caso.cita_at), style: { ...btn(T, "s"), fontSize: "12.5px" } }, "📅 Ver la cita en el calendario") : null,
+              h("button", { "data-crm-darcal": "1", onClick: () => darCitaCal({ caso_id: caso.id }, caso.cita_at), style: { ...btn(T, "s"), fontSize: "12.5px" } }, caso.cita_at ? "📅 Otra cita en el calendario" : "📅 Dar cita en el calendario")))),
 
         h("div", { style: { display: "flex", gap: "8px", alignItems: "center", position: "sticky", bottom: 0, background: T.bg, padding: "8px 0" } },
           h("button", { "data-crm-guardar": "1", onClick: guardarDatos, disabled: guardando, style: btn(T, "p") }, guardando ? "Guardando…" : "Guardar cambios"),
@@ -1532,5 +1539,5 @@
   window.AcllarCRM = CRMView;
   window.AcllarCRM._test = { E, PL, plazo, chipPlazo, textoEvento };
   // Piezas compartidas con taller-garantias.js
-  window.AcllarCRM._ui = { numsGestion, EnvioBox, EnvioInfo, VisorFotos, NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
+  window.AcllarCRM._ui = { E, est, lblTipos, darCitaCal, verCal, numsGestion, EnvioBox, EnvioInfo, VisorFotos, NombreLink, CitasHoy, cmpTxt, ordenar, useOrden, ThOrd, AvisoOrden, ChipNueva, esNueva, SegMulti, tiposDe, difVeh, bastidorDeAlias, CeldaClave, ZonaFotos, CierreBox, NuevaConsulta, Bitacora, ClientePanel, ChipCli, TIPOS_CLI, BITACORA, CLASES, telWa, irA, yo, fLarga, enviarABC, h, CH, Chip, btn, inp, Lbl, Box, Row, Field, Seg, Drawer, sb, quien, fFecha, fFechaHora, toLocalInput, fromLocalInput, eur, nombreCli, normMat, asVeh, vehTxt, vehDeBC, mismoVeh, buscarClientes, ResultadoCliente, qSafe, horas, mismoDia, pad, TIPOS, lbl };
 })();
