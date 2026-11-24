@@ -1121,7 +1121,8 @@
       doc ? h(React.Fragment, null,
         doc.cliente_no && (!caso.cliente || doc.cliente_no !== caso.cliente.bc_no) ? h(Row, { T, k: "A nombre de (en BC)" }, h(Chip, { c: "ambar" }, doc.cliente_nombre || doc.cliente_no)) : null,
         h(Row, { T, k: "Estado en BC" }, doc.activo ? (doc.estado_lanzamiento && doc.tipo === "pedido" ? `${doc.estado || "—"} · ${doc.estado_lanzamiento}` : doc.estado || "—") : (doc.tipo === "oferta" && caso.pedido_bc ? h(Chip, { c: "verde" }, `Convertida en el pedido ${caso.pedido_bc}`) : h(Chip, null, "Ya no está en BC (convertido o registrado)"))),
-        h(Row, { T, k: "Importe" }, `${eur(doc.importe)} · `, h("b", null, `${eur(doc.importe_iva)} IVA incl.`)))
+        h(Row, { T, k: "Importe" }, `${eur(doc.importe)} · `, h("b", null, `${eur(doc.importe_iva)} IVA incl.`)),
+        doc.visto_at ? h("div", { "data-crm-bc-hora": "1", style: { fontSize: "11.5px", color: T.inkSoft, textAlign: "right" } }, `Dato de BC de las ${new Date(doc.visto_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}${(Date.now() - new Date(doc.visto_at)) > 864e5 ? " del " + new Date(doc.visto_at).toLocaleDateString("es-ES") : ""}. Si la acabas de cambiar en BC, pulsa «↻ Actualizar desde BC».`) : null)
         : caso[campo] ? h("div", { style: { fontSize: "12px", color: T.warn, textAlign: "right" } }, "No encontrado en BC (se sincroniza cada 10 min)") : null);
 
     return h(Drawer, { T, onClose, label: "Ficha del caso" },
@@ -1174,7 +1175,7 @@
         s.gar || s.fin || enStandby(caso) ? null : h(PlazoBox, { T, caso, guardar, guardando }),
 
         h(Box, { T }, h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h(Lbl, { T }, "Business Central"),
-            enBC ? h("button", { onClick: syncAhora, disabled: sincronizando, style: { ...btn(T, "s"), marginBottom: "8px" } }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC") : null),
+            h("button", { "data-crm-sync-caso": "1", onClick: syncAhora, disabled: sincronizando, title: "Traer ya de BC el importe y el estado de la oferta o el pedido, sin esperar a los 10 minutos", style: { ...btn(T, "s"), marginBottom: "8px" } }, sincronizando ? "Actualizando…" : "↻ Actualizar desde BC")),
           !enBC ? h("div", { "data-crm-sin-bc": "1", style: { background: CH.ambar.bg, border: `1px solid ${CH.ambar.bd}`, borderRadius: "10px", padding: "10px 12px", fontSize: "13px" } },
               h("div", { style: { marginBottom: "8px" } }, "Este cliente aún no está en BC. Dalo de alta para poder hacerle la oferta o el pedido de servicio (se crean también sus vehículos)."),
               altaMsg === "trabajando" ? h("span", { style: { color: T.inkSoft } }, "Creando en BC…")
