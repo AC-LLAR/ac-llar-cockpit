@@ -828,9 +828,18 @@
       h("div", { style: { color: "#fff", fontSize: "13px", textAlign: "center" } }, n > 1 ? h("b", { "data-visor-cuenta": "1", style: { marginRight: "8px" } }, `${i + 1} / ${n}`) : null, pie ? pie(f) : ""),
       acciones ? h("div", { onClick: (e) => e.stopPropagation(), style: { display: "flex", gap: "8px" } }, acciones(f)) : null);
   }
+  // Fotos pegadas (Ctrl+V): del portapapeles salen como archivos de imagen
+  const fotosPegadas = (e) => Array.from((e.clipboardData && e.clipboardData.items) || []).filter((i) => i.kind === "file" && /^image\//.test(i.type)).map((i) => i.getAsFile()).filter(Boolean)
+    .map((f, i) => new File([f], `pegada-${Date.now()}-${i}.${(f.type.split("/")[1] || "png").replace("jpeg", "jpg")}`, { type: f.type }));
+  const editable = (el) => el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
   function ZonaFotos({ T, onFiles, disabled, onAviso, children }) {
-    const [sobre, setSobre] = useState(false); const n = useRef(0);
+    const [sobre, setSobre] = useState(false); const n = useRef(0); const [foco, setFoco] = useState(false);
     const conArchivos = (e) => Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes("Files");
+    const cb = useRef({}); cb.current = { onFiles, disabled, onAviso };
+    // Ctrl+V con la ficha abierta (sin estar escribiendo en un campo) también sube la foto
+    useEffect(() => { const f = (e) => { if (editable(e.target) || editable(document.activeElement)) return; const fs = fotosPegadas(e); if (!fs.length) return; e.preventDefault(); if (cb.current.disabled) return; cb.current.onFiles(fs); };
+      document.addEventListener("paste", f); return () => document.removeEventListener("paste", f); }, []);
+    const pegarAqui = (e) => { e.preventDefault(); const fs = fotosPegadas(e); if (!fs.length) { onAviso && onAviso("Lo que has copiado no es una imagen. Copia la foto (clic derecho → «Copiar imagen») y vuelve a pegar."); return; } if (!disabled) onFiles(fs); };
     return h("div", { "data-zona-fotos": "1", style: { position: "relative", borderRadius: "12px", outline: sobre ? `2px dashed ${T.rust}` : "none", outlineOffset: "2px" },
       onDragEnter: (e) => { if (!conArchivos(e) || disabled) return; e.preventDefault(); n.current++; setSobre(true); },
       onDragOver: (e) => { if (!conArchivos(e) || disabled) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; },
@@ -840,6 +849,9 @@
         if (fuera && onAviso) onAviso(`${fuera} archivo${fuera > 1 ? "s" : ""} no ${fuera > 1 ? "son imágenes" : "es una imagen"}: no se ${fuera > 1 ? "han subido" : "ha subido"}.`);
         if (imgs.length) onFiles(imgs); } },
       children,
+      h("textarea", { "data-pegar-fotos": "1", "aria-label": "Pegar fotos", rows: 1, value: "", onChange: () => {}, onPaste: pegarAqui, onFocus: () => setFoco(true), onBlur: () => setFoco(false),
+        placeholder: foco ? "Ahora pulsa Ctrl+V (o clic derecho → Pegar)" : "📋 Pega aquí fotos copiadas: haz clic y pulsa Ctrl+V (también vale Ctrl+V con la ficha abierta)",
+        style: { display: "block", width: "100%", boxSizing: "border-box", marginTop: "6px", border: `1.5px dashed ${foco ? T.rust : T.border}`, borderRadius: "10px", padding: "9px 12px", fontSize: "12.5px", fontFamily: "inherit", textAlign: "center", cursor: "text", outline: "none", resize: "none", background: foco ? "#EEF2FF" : "transparent", caretColor: "transparent", color: T.inkSoft } }),
       sobre ? h("div", { style: { position: "absolute", inset: 0, borderRadius: "12px", background: "rgba(255,255,255,.85)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "15px", color: T.rust, pointerEvents: "none" } }, "Suelta aquí las fotos") : null);
   }
   function CasoFotos({ T, caso }) {
@@ -873,7 +885,7 @@
     const quitar = async (f) => { await sb().from("crm_caso_fotos").update({ anulada: true }).eq("id", f.id); await nota("Foto retirada del caso"); setVer(null); cargar(); };
     return h(ZonaFotos, { T, onFiles: subir, disabled: trab, onAviso: (t) => { aviso.current = t; setMsg(t); } }, h(Box, { T },
       h(Lbl, { T }, `Fotos${fotos.length ? " · " + fotos.length : ""}`),
-      h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-4px", marginBottom: "6px" } }, "Pulsa “Añadir fotos” o arrastra aquí fotos desde el ordenador."),
+      h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "-4px", marginBottom: "6px" } }, "Pulsa “Añadir fotos”, arrastra aquí fotos desde el ordenador o pégalas con Ctrl+V."),
       fotos.length ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", margin: "6px 0" } }, fotos.map((f) => h("button", { key: f.id, "data-caso-foto": f.id, onClick: () => setVer(f), title: lbl(ETQ_FOTO, f.etiqueta), style: { border: `1px solid ${T.border}`, borderRadius: "8px", padding: 0, background: T.bg, cursor: "pointer", position: "relative", width: "92px", height: "92px", overflow: "hidden" } },
         urls[f.path] ? h("img", { src: urls[f.path], alt: lbl(ETQ_FOTO, f.etiqueta), style: { width: "100%", height: "100%", objectFit: "cover", display: "block" } }) : null,
         h("span", { style: { position: "absolute", left: 3, bottom: 3, fontSize: "10px", fontWeight: 700, background: "rgba(15,27,46,.75)", color: "#fff", borderRadius: "5px", padding: "1px 5px" } }, lbl(ETQ_FOTO, f.etiqueta))))) : h("div", { style: { fontSize: "13px", color: T.inkSoft, margin: "4px 0" } }, "Sin fotos todavía."),
@@ -1028,6 +1040,7 @@
   }
   function CasoPanel({ T, F, caso, bcServ, vinculados, sugerencia, syncAhora, sincronizando, onRefresh, onClose, onSaved, onCliente }) {
     const [altaMsg, setAltaMsg] = useState(null); // null | "trabajando" | { txt, dup }
+    const [ofertaBC, setOfertaBC] = useState(false);
     const [ev, setEv] = useState([]);
     const [guardando, setGuardando] = useState(false);
     const [msg, setMsg] = useState("");
@@ -1126,6 +1139,7 @@
         : caso[campo] ? h("div", { style: { fontSize: "12px", color: T.warn, textAlign: "right" } }, "No encontrado en BC (se sincroniza cada 10 min)") : null);
 
     return h(Drawer, { T, onClose, label: "Ficha del caso" },
+      ofertaBC && window.AcllarOfertaBC ? ReactDOM.createPortal(h(window.AcllarOfertaBC, { T, F, caso, onClose: () => setOfertaBC(false), onHecho: async () => { if (syncAhora) await syncAhora(); onRefresh && onRefresh(); } }), document.body) : null,
       h("div", { style: { background: T.surface, padding: "18px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: "6px" } },
         h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
           h("span", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" } }, `Caso · ${lblTipos(caso.tipo)}${caso.rama && caso.rama !== "garantia" ? " · rama " + caso.rama : ""}`),
@@ -1193,6 +1207,8 @@
               docsOtros.length ? h("div", { style: { marginTop: "8px" } }, h("div", { style: { fontSize: "12px", color: T.inkSoft, marginBottom: "4px" } }, "Otros documentos abiertos de este cliente en BC · clic para vincular"),
                 h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, docsOtros.map((x) => h("button", { key: x.tipo + x.no, "data-crm-vincular": x.no, disabled: guardando, onClick: () => vincular(x), style: btn(T, "s") }, `${x.tipo === "oferta" ? "Oferta" : "Pedido"} ${x.no} · ${eur(x.importe_iva)}`))))
                 : !caso.oferta_bc && !caso.pedido_bc && !sugerencia ? h("div", { style: { fontSize: "12.5px", color: T.inkFaint, marginTop: "6px" } }, "Aún no hay ofertas ni pedidos abiertos de este cliente en BC. Cuando la crees en BC aparecerá aquí (o pulsa “Actualizar desde BC”).") : null,
+              window.AcllarOfertaBC && !caso.pedido_bc && (!oferta || oferta.activo !== false) ? h("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" } },
+                h("button", { "data-crm-oferta-bc": caso.oferta_bc ? "editar" : "crear", onClick: () => setOfertaBC(true), style: btn(T, caso.oferta_bc ? "s" : "p") }, caso.oferta_bc ? "✎ Ver y editar las líneas de la oferta en BC" : "📄 Crear la oferta en BC pegando la lista de piezas")) : null,
               h(VincularDocBC, { T, caso, guardar, guardando, onCaso: (id) => abrirAbierto({ kind: "caso", id }) })),
           verGar ? h("label", { style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "13px", marginTop: "6px" } }, h("input", { type: "checkbox", checked: !!caso.garantia_100, onChange: (e) => guardar({ garantia_100: e.target.checked }) }), "100 % garantía (sin pedido de servicio)") : null),
 
