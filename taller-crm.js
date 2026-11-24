@@ -1498,6 +1498,20 @@
     const vehExistentes = (() => { const own = sel && sel.tipo === "crm" ? (sel.c.vehiculos || []).map(asVeh) : []; const extra = vehBC.filter((p) => !own.some((v) => v.bc_ps === p.no)).map(vehDeBC); return [...own, ...extra]; })();
     const setC = (f) => (e) => setCli((x) => ({ ...x, [f]: e.target.value }));
     const setKk = (f) => (e) => setK((x) => ({ ...x, [f]: e.target.value }));
+    // Datos leídos de la foto del permiso o de la ficha técnica
+    const fotoDoc = useRef(null); const [docLeido, setDocLeido] = useState("");
+    const usarDoc = (d) => {
+      fotoDoc.current = d.file || null;
+      if (d.modelo || d.matricula || d.bastidor) { setVehSel(null); setVeh({ modelo: d.modelo || "", matricula: d.matricula || "", bastidor: d.bastidor || "" }); }
+      if (!sel) { setCli((x) => ({ ...x, nombre: d.nombre || x.nombre, apellidos: d.apellidos || x.apellidos })); setQ(d.matricula || d.bastidor || [d.nombre, d.apellidos].filter(Boolean).join(" ")); }
+      setDocLeido(sel ? "Vehículo rellenado con lo leído (el cliente ya estaba elegido)." : "Rellenado con lo leído. Si ya es cliente, aparece arriba al buscar por la matrícula: elígelo. Si no, completa teléfono o email.");
+    };
+    // La foto del documento se guarda en el caso (o en la garantía) al crearlo
+    const guardarFotoDoc = async (caso, gid) => { const f = fotoDoc.current; if (!f) return; try {
+      const blob = await comprimirFoto(f); const path = `${gid || caso.id}/${Date.now()}-doc.jpg`;
+      const up = await sb().storage.from(gid ? "garantias" : "casos").upload(path, blob, { contentType: "image/jpeg", upsert: false }); if (up.error) return;
+      if (gid) await sb().from("garantia_fotos").insert({ garantia_id: gid, path, etiqueta: "cliente", nombre: "Permiso / ficha técnica" });
+      else await sb().from("crm_caso_fotos").insert({ caso_id: caso.id, path, etiqueta: "cliente", nombre: "Permiso / ficha técnica" }); } catch (e) {} };
     const I = inp(T);
     const guardar = async () => {
       setErr("");
@@ -1529,7 +1543,8 @@
         const ins = await sb().from("crm_casos").insert({ cliente_id: cliente.id, vehiculo: elegido ? vehTxt(elegido) : null, canal: k.canal, tipo: k.tipo || "otro", consulta: k.consulta.trim(), estado: "pendiente_respuesta", rama: tieneGar(k.tipo) ? "garantia" : null,
           proxima_accion: null, responsable: k.responsable || null, fecha_limite: null }).select("*, cliente:crm_clientes(*)").single();
         if (ins.error) throw ins.error;
-        if (tieneGar(k.tipo)) { const r = await pasarAGarantias(ins.data); onCreated(r.caso, r.gid); return; }
+        if (tieneGar(k.tipo)) { const r = await pasarAGarantias(ins.data); await guardarFotoDoc(ins.data, r.gid); onCreated(r.caso, r.gid); return; }
+        await guardarFotoDoc(ins.data, null);
         onCreated(ins.data);
       } catch (e) { setErr("No se pudo guardar: " + (e.message || e)); setGuardando(false); }
     };
@@ -1537,6 +1552,8 @@
       h("div", { onClick: onClose, style: { position: "fixed", inset: 0, background: "rgba(15,27,46,.35)" } }),
       h("div", { style: { position: "relative", width: "min(680px, 100%)", background: T.surface, borderRadius: "16px", border: `1px solid ${T.border}`, boxShadow: "0 20px 50px rgba(15,27,46,.2)", padding: "22px", display: "flex", flexDirection: "column", gap: "14px", fontFamily: F.body, color: T.ink } },
         h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, h("div", { style: { fontFamily: F.display, fontSize: "22px", fontWeight: 800 } }, tieneGar(k.tipo) ? "Nueva garantía" : "Nueva consulta"), h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×")),
+        window.AcllarLeerDoc ? h(window.AcllarLeerDoc.LeerDocumento, { T, onUsar: usarDoc }) : null,
+        docLeido ? h("div", { "data-crm-doc-leido": "1", style: { fontSize: "12.5px", color: "#15803D", marginTop: "-6px" } }, "✓ " + docLeido) : null,
         sel ? h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", background: T.bg, borderRadius: "10px", padding: "10px 12px" } },
           h("span", null, h("span", { style: { fontSize: "12px", color: T.inkSoft } }, "Cliente: "), h("b", null, sel.tipo === "crm" ? nombreCli(sel.c) : sel.bc.nombre), " ", (sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) ? h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: T.inkSoft } }, sel.tipo === "crm" ? sel.c.bc_no : sel.bc.no) : h(Chip, { c: "ambar" }, "sin alta en BC")),
           h("button", { onClick: () => setSel(null), style: btn(T, "s") }, "Cambiar"))
