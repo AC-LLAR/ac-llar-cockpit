@@ -82,7 +82,7 @@
   const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["retirar", "Para retirar o enviado"]];
   const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "retirar"];
   const CAMPOS = { envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviado", standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
-    garantia_100: "100 % garantía", senal_importe: "Importe señal", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
+    garantia_100: "100 % garantía", senal_importe: "Señal / pagado a cuenta", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
     piezas_previstas: "Llegada de piezas", cita_at: "Cita", cerrado_at: "Cerrado", motivo_cierre: "Motivo de cierre", archivado: "Archivado", rama: "Rama", vehiculo: "Vehículo",
     consulta: "Consulta", tipo: "Tipo", canal: "Canal", nombre: "Nombre", apellidos: "Apellidos", telefono: "Teléfono", email: "Email", nif: "NIF", direccion: "Dirección", cp: "CP",
@@ -1130,7 +1130,7 @@
       if (res.ok) { setAltaMsg({ txt: `Dado de alta en BC como ${res.bc_no}.` + (res.vehiculos && res.vehiculos.length ? " " + res.vehiculos.join(" · ") : "") }); onRefresh && onRefresh(); return; }
       setAltaMsg({ txt: "No se pudo: " + (res.error || "error"), err: true });
     };
-    const verSenal = caso.rama === "A" || /senal|comprobante|contabilidad/.test(caso.estado) || caso.senal_importe != null || caso.senal_comprobante_at;
+    const verSenal = caso.rama === "A" || /senal|comprobante|contabilidad/.test(caso.estado) || caso.senal_comprobante_at || (caso.senal_importe != null && !caso.oferta_bc && !caso.pedido_bc);
     const verGar = /^garantia_|cobertura/.test(caso.estado) || !!caso.garantia_resultado; // casos antiguos con el flujo de garantía dentro de Casos
     const set = (k) => (e) => setD((x) => ({ ...x, [k]: e.target.value }));
     const I = inp(T);
@@ -1217,8 +1217,9 @@
               h(VincularDocBC, { T, caso, guardar, guardando, onCaso: (id) => abrirAbierto({ kind: "caso", id }) })),
           verGar ? h("label", { style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "13px", marginTop: "6px" } }, h("input", { type: "checkbox", checked: !!caso.garantia_100, onChange: (e) => guardar({ garantia_100: e.target.checked }) }), "100 % garantía (sin pedido de servicio)") : null),
 
-        verSenal ? h(Box, { T }, h(Lbl, { T }, "Señal 50 %"),
-          h(Row, { T, k: "Importe" }, h("input", { value: d.senal_importe ?? "", onChange: set("senal_importe"), placeholder: "€", inputMode: "decimal", style: { ...I, width: "120px", padding: "5px 8px", textAlign: "right" } })),
+        // Señal 50 % (rama A) o, en cualquier caso con oferta o pedido de BC, «Pagos»: lo pagado a cuenta y lo que resta
+        verSenal || pedido || oferta ? h(Box, { T }, h(Lbl, { T }, verSenal ? "Señal 50 %" : "Pagos"),
+          h(Row, { T, k: verSenal ? "Importe" : "Pagado a cuenta" }, h("input", { "data-crm-pagado": "1", value: d.senal_importe ?? "", onChange: set("senal_importe"), placeholder: "€", inputMode: "decimal", style: { ...I, width: "120px", padding: "5px 8px", textAlign: "right" } })),
           (() => { // Lo que falta: total del pedido de servicio (o de la oferta si aún no hay pedido) menos la señal que se está escribiendo
             const doc = pedido || oferta; const total = doc && doc.importe_iva != null ? Number(doc.importe_iva) : null;
             const txt = String(d.senal_importe ?? "").trim(); const senal = txt === "" ? null : Number(txt.replace(/\./g, (m, i, t) => (t.includes(",") ? "" : m)).replace(",", "."));
@@ -1229,12 +1230,12 @@
               resta == null ? null
                 : h("div", { "data-senal-resta": resta > 0 ? "pendiente" : resta < 0 ? "exceso" : "pagado", style: { margin: "6px 0 2px", padding: "9px 12px", borderRadius: "10px", fontWeight: 800, fontSize: "15px", textAlign: "center",
                     background: resta > 0 ? "#FEF3C7" : resta < 0 ? "#FEE2E2" : "#DCFCE7", color: resta > 0 ? "#92400E" : resta < 0 ? "#B91C1C" : "#166534", border: `1px solid ${resta > 0 ? "#F59E0B" : resta < 0 ? "#F87171" : "#4ADE80"}` } },
-                  resta > 0 ? `RESTA PAGAR ${eur(resta)}` : resta < 0 ? `La señal supera el total en ${eur(-resta)}` : "PAGADO ENTERO",
+                  resta > 0 ? `RESTA PAGAR ${eur(resta)}` : resta < 0 ? `${verSenal ? "La señal" : "Lo pagado"} supera el total en ${eur(-resta)}` : "PAGADO ENTERO",
                   !pedido && resta > 0 ? h("div", { style: { fontSize: "11.5px", fontWeight: 600, marginTop: "2px" } }, "Según la oferta: cambiará solo cuando pase a pedido") : null));
           })(),
-          h(Row, { T, k: "Comprobante recibido" }, fFechaHora(caso.senal_comprobante_at)),
-          h(Row, { T, k: "Aviso a contabilidad" }, caso.senal_aviso_at ? fFechaHora(caso.senal_aviso_at) : h("span", { style: { color: T.warn, fontWeight: 700 } }, "Pendiente")),
-          caso.senal_comprobante_at ? h("button", { onClick: avisarAna, disabled: guardando, style: { ...btn(T, "wa"), width: "100%", marginTop: "8px" } }, caso.senal_aviso_at ? "💬 Volver a avisar a Ana" : "💬 Avisar a Ana por WhatsApp") : null) : null,
+          verSenal ? h(Row, { T, k: "Comprobante recibido" }, fFechaHora(caso.senal_comprobante_at)) : null,
+          !verSenal ? null : h(Row, { T, k: "Aviso a contabilidad" }, caso.senal_aviso_at ? fFechaHora(caso.senal_aviso_at) : h("span", { style: { color: T.warn, fontWeight: 700 } }, "Pendiente")),
+          verSenal && caso.senal_comprobante_at ? h("button", { onClick: avisarAna, disabled: guardando, style: { ...btn(T, "wa"), width: "100%", marginTop: "8px" } }, caso.senal_aviso_at ? "💬 Volver a avisar a Ana" : "💬 Avisar a Ana por WhatsApp") : null) : null,
 
         verGar ? h(Box, { T }, h(Lbl, { T }, "Garantía"),
           h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
