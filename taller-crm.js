@@ -644,14 +644,18 @@
     const cargar = async () => {
       const ini = new Date(); ini.setHours(0, 0, 0, 0); const fin = new Date(ini.getTime() + 2 * 864e5);
       try {
-        const [a, b] = await Promise.all([
-          sb().from("crm_casos").select("id,estado,cita_at,vehiculo,tipo,cliente:crm_clientes(id,nombre,apellidos)").eq("archivado", false).gte("cita_at", ini.toISOString()).lt("cita_at", fin.toISOString()).limit(100),
-          sb().from("garantias").select("id,numero,estado,cita_at,vehiculo,cliente:crm_clientes(id,nombre,apellidos)").eq("archivado", false).gte("cita_at", ini.toISOString()).lt("cita_at", fin.toISOString()).limit(100)]);
-        const casos = (a.data || []).filter((c) => !est(c.estado).fin && ["cita_asignada", "piezas_recibidas"].includes(c.estado))
-          .map((c) => ({ kind: "caso", id: c.id, at: c.cita_at, quien: nombreCli(c.cliente), veh: c.vehiculo, que: lblTipos(c.tipo) }));
-        const gars = (b.data || []).filter((g) => ["cita_asignada", "cita_pedida"].includes(g.estado))
-          .map((g) => ({ kind: "garantia", id: g.id, at: g.cita_at, quien: g.cliente ? nombreCli(g.cliente) : "Flota", veh: [g.vehiculo && g.vehiculo.ac, g.vehiculo && g.vehiculo.modelo].filter(Boolean).join(" "), que: `Garantía ${g.numero}` }));
-        setXs([...casos, ...gars].sort((p, q) => String(p.at).localeCompare(String(q.at))));
+        // Las citas salen del calendario (todas las programadas de hoy y mañana, tengan o no caso)
+        const r = await sb().from("citas").select("id,inicio,todo_dia,tipo,titulo,mecanico,vehiculo,cliente_id,caso_id,garantia_id,estado").eq("estado", "programada").gte("inicio", ini.toISOString()).lt("inicio", fin.toISOString()).order("inicio").limit(100);
+        const cs = (r.data || []).filter((c) => c.tipo !== "bloqueo");
+        const ids = (k) => [...new Set(cs.map((c) => c[k]).filter(Boolean))];
+        const [cl, ga, ca] = await Promise.all([
+          ids("cliente_id").length ? sb().from("crm_clientes").select("id,nombre,apellidos").in("id", ids("cliente_id")) : { data: [] },
+          ids("garantia_id").length ? sb().from("garantias").select("id,numero").in("id", ids("garantia_id")) : { data: [] },
+          ids("caso_id").length ? sb().from("crm_casos").select("id,tipo").in("id", ids("caso_id")) : { data: [] }]);
+        const M = (q) => Object.fromEntries((q.data || []).map((x) => [x.id, x])); const C = M(cl), G = M(ga), K = M(ca);
+        setXs(cs.map((c) => ({ kind: c.garantia_id ? "garantia" : c.caso_id ? "caso" : "cita", id: c.garantia_id || c.caso_id || c.id, cita: c, at: c.inicio, mec: c.mecanico,
+          quien: C[c.cliente_id] ? nombreCli(C[c.cliente_id]) : c.titulo || "Cita", veh: c.vehiculo ? vehTxt(c.vehiculo) : "",
+          que: G[c.garantia_id] ? `Garantía ${G[c.garantia_id].numero}` : K[c.caso_id] ? lblTipos(K[c.caso_id].tipo) : "Cita" })));
       } catch (e) {}
     };
     useEffect(() => { cargar(); }, [recargar]); // se recarga a la vez que la lista (cada minuto y al cambiar algo)
@@ -660,9 +664,10 @@
     if (!deHoy.length && !deMan.length) return null;
     const hora = (x) => { const d = new Date(x.at); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
     const item = (x, grande) => { const pasada = new Date(x.at) < new Date(Date.now() - 3600e3);
-      return h("button", { key: x.kind + x.id, "data-cita": x.id, onClick: () => abrirAbierto(x), title: "Abrir",
+      return h("button", { key: "c" + x.cita.id, "data-cita": x.id, onClick: () => (x.kind === "cita" ? verCal(x.at) : abrirAbierto(x)), title: x.mec ? `Abrir · ${x.mec}` : "Abrir · sin mecánico",
         style: { ...btn(T, "s"), background: T.surface, fontSize: grande ? "13px" : "12px", opacity: pasada ? 0.6 : 1, display: "inline-flex", gap: "6px", alignItems: "center" } },
-        h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, hora(x)), `${x.quien}${x.veh ? " · " + x.veh : ""} · ${x.que}`); };
+        h("span", { style: { width: "9px", height: "9px", borderRadius: "50%", background: colorMec(x.mec), flex: "0 0 auto" } }),
+        h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, x.cita.todo_dia ? "día" : hora(x)), `${x.quien}${x.veh ? " · " + x.veh : ""} · ${x.que}${x.mec ? " · " + x.mec : ""}`); };
     return h("div", { "data-citas-hoy": "1", style: { background: deHoy.length ? CH.verde.bg : T.bg, border: `1px solid ${deHoy.length ? CH.verde.bd : T.border}`, borderRadius: "12px", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", fontSize: "13.5px" } },
         h("b", { style: { color: deHoy.length ? CH.verde.fg : T.inkSoft } }, deHoy.length ? `📅 Hoy, ${DIAS[hoy.getDay()]} ${pad(hoy.getDate())}/${pad(hoy.getMonth() + 1)}: ${deHoy.length} cita${deHoy.length > 1 ? "s" : ""}` : "📅 Hoy no hay citas"),
