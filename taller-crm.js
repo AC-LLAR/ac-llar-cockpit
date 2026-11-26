@@ -81,7 +81,7 @@
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
   const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["retirar", "Para retirar o enviado"]];
   const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "retirar"];
-  const CAMPOS = { pagado_at: "Pago completado", saldo_pagado: "Saldo pagado", envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviado", standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
+  const CAMPOS = { factura_bc: "Factura de servicio", importe_pactado: "Pactado antes de la visita", vendido_items: "Vendido en la visita", pactado_at: "Foto de lo pactado", pactado_origen: "Origen de lo pactado", pagado_at: "Pago completado", saldo_pagado: "Saldo pagado", envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviado", standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
     garantia_100: "100 % garantía", senal_importe: "Señal / pagado a cuenta", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
     piezas_previstas: "Llegada de piezas", cita_at: "Cita", cerrado_at: "Cerrado", motivo_cierre: "Motivo de cierre", archivado: "Archivado", rama: "Rama", vehiculo: "Vehículo",
@@ -778,7 +778,7 @@
             h("td", { style: td }, h(NombreLink, { c: c.cliente, onCliente }), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: { ...td, maxWidth: "200px" } }, h(CeldaClave, { T, valor: c.clave, tabla: "crm_casos", id: c.id })),
             h("td", { style: td }, lblTipos(c.tipo)),
-            h("td", { style: td }, h(Chip, { c: s.c }, s.l), c.pagado_at ? h("span", { style: { marginLeft: "4px" } }, h(Chip, { c: "verde" }, "💶 Pagado")) : null, s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
+            h("td", { style: td }, h(Chip, { c: s.c }, s.l), c.pagado_at ? h("span", { style: { marginLeft: "4px" } }, h(Chip, { c: "verde" }, "💶 Pagado")) : null, c.factura_bc ? h("span", { style: { marginLeft: "4px" } }, h(Chip, { c: "azul", title: `Factura de servicio ${c.factura_bc}` }, "🧾 Facturado")) : null, s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
             h("td", { style: td }, pz ? pz.accion : h("span", { style: { color: T.inkFaint } }, "—"), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, pz ? `${PELOTA[pz.pel]}${c.responsable && pz.pel === "nos" ? " · " + c.responsable : ""}` : "")),
             h("td", { style: td }, doc ? h(React.Fragment, null, h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" } }, doc.no), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, `${doc.tipo === "oferta" ? "Oferta" : "Pedido"} · ${eur(doc.importe_iva)}`))
               : c.garantia_100 ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, "100 % garantía") : h("span", { style: { color: T.inkFaint } }, "—"),
@@ -800,7 +800,7 @@
           h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft, padding: "4px 2px" } }, h("span", null, nombre), h(Chip, null, xs.length)),
           xs.map((c) => { const v = chipPlazo(plazo(c)), s = est(c.estado); return h("div", { key: c.id, "data-crm-card": c.id, role: "button", tabIndex: 0, className: "acl-tarjeta" + (esNueva(c) ? " acl-es-nueva" : ""), onClick: () => onOpen(c.id), onKeyDown: (e) => { if (e.key === "Enter") onOpen(c.id); }, draggable: true, title: "Clic para abrir · arrastra a una pestaña para moverlo", onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
             esNueva(c) ? h("div", null, h(ChipNueva, { x: c, borde: 11 })) : null, h("span", null, h(NombreLink, { c: c.cliente, onCliente })), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lblTipos(c.tipo)].filter(Boolean).join(" · ")),
-            h("span", null, h(Chip, { c: s.c }, s.l)), c.pagado_at ? h("span", null, h(Chip, { c: "verde" }, "💶 Pagado")) : null, v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
+            h("span", null, h(Chip, { c: s.c }, s.l)), c.pagado_at ? h("span", null, h(Chip, { c: "verde" }, "💶 Pagado")) : null, c.factura_bc ? h("span", null, h(Chip, { c: "azul" }, "🧾 Facturado")) : null, v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
       })));
   }
 
@@ -1054,7 +1054,7 @@
     const [pasando, setPasando] = useState(false);
     const [cerrando, setCerrando] = useState(false); const [cambiando, setCambiando] = useState(false); const [standbyAbierto, setStandbyAbierto] = useState(false); const [envioPend, setEnvioPend] = useState(null);
     const [d, setD] = useState({});
-    useEffect(() => { setD({ proxima_accion: caso.proxima_accion || "", responsable: caso.responsable || "", fecha_limite: toLocalInput(caso.fecha_limite), oferta_bc: caso.oferta_bc || "", pedido_bc: caso.pedido_bc || "", senal_importe: caso.senal_importe ?? "",
+    useEffect(() => { setD({ proxima_accion: caso.proxima_accion || "", responsable: caso.responsable || "", fecha_limite: toLocalInput(caso.fecha_limite), oferta_bc: caso.oferta_bc || "", pedido_bc: caso.pedido_bc || "", factura_bc: caso.factura_bc || "", senal_importe: caso.senal_importe ?? "",
       garantia_fabricante: caso.garantia_fabricante || "", garantia_reclamacion: caso.garantia_reclamacion || "", garantia_cubre: caso.garantia_cubre || "", garantia_no_cubre: caso.garantia_no_cubre || "", piezas_previstas: caso.piezas_previstas || "", cita_at: toLocalInput(caso.cita_at), vehiculo: caso.vehiculo || "", tipo: caso.tipo || "", canal: caso.canal || "", consulta: caso.consulta || "" }); }, [caso.id, caso.updated_at]);
     const cargarEv = async () => { const { data } = await sb().from("crm_eventos").select("*").eq("caso_id", caso.id).order("at", { ascending: false }).limit(300); setEv((data || []).filter((e) => !BITACORA.includes(e.tipo))); };
     useEffect(() => { cargarEv(); }, [caso.id, caso.updated_at]);
@@ -1085,7 +1085,7 @@
     };
     const guardarDatos = () => {
       const p = {};
-      const map = { proxima_accion: (v) => v || null, responsable: (v) => v || null, fecha_limite: fromLocalInput, oferta_bc: (v) => norm(v) || null, pedido_bc: (v) => norm(v) || null, senal_importe: (v) => (v === "" ? null : Number(String(v).replace(",", "."))),
+      const map = { proxima_accion: (v) => v || null, responsable: (v) => v || null, fecha_limite: fromLocalInput, oferta_bc: (v) => norm(v) || null, pedido_bc: (v) => norm(v) || null, factura_bc: (v) => norm(v) || null, senal_importe: (v) => (v === "" ? null : Number(String(v).replace(",", "."))),
         garantia_fabricante: (v) => v || null, garantia_reclamacion: (v) => v || null, garantia_cubre: (v) => v || null, garantia_no_cubre: (v) => v || null, piezas_previstas: (v) => v || null, cita_at: fromLocalInput, vehiculo: (v) => v || null, tipo: (v) => v || null, canal: (v) => v || null, consulta: (v) => (String(v || "").trim() || null) };
       Object.keys(map).forEach((k) => { const v = map[k](d[k]); const old = caso[k] == null ? null : caso[k]; const same = /_at$|fecha_limite/.test(k) ? (v ? Math.floor(new Date(v).getTime() / 6e4) : null) === (old ? Math.floor(new Date(old).getTime() / 6e4) : null) : String(v ?? "") === String(old ?? ""); if (!same) p[k] = v; });
       if (!Object.keys(p).length) { setMsg("No hay cambios."); return; }
@@ -1138,11 +1138,56 @@
       h(Row, { T, k: titulo }, h("input", { value: d[campo] || "", onChange: set(campo), placeholder: "nº en BC", style: { ...I, width: "150px", padding: "5px 8px", fontFamily: "'JetBrains Mono', monospace", fontSize: "13px", textAlign: "right" } })),
       doc ? h(React.Fragment, null,
         doc.cliente_no && (!caso.cliente || doc.cliente_no !== caso.cliente.bc_no) ? h(Row, { T, k: "A nombre de (en BC)" }, h(Chip, { c: "ambar" }, doc.cliente_nombre || doc.cliente_no)) : null,
-        h(Row, { T, k: "Estado en BC" }, doc.activo ? (doc.estado_lanzamiento && doc.tipo === "pedido" ? `${doc.estado || "—"} · ${doc.estado_lanzamiento}` : doc.estado || "—") : (doc.tipo === "oferta" && caso.pedido_bc ? h(Chip, { c: "verde" }, `Convertida en el pedido ${caso.pedido_bc}`) : h(Chip, null, "Ya no está en BC (convertido o registrado)"))),
+        h(Row, { T, k: "Estado en BC" }, doc.activo ? (doc.estado_lanzamiento && doc.tipo === "pedido" ? `${doc.estado || "—"} · ${doc.estado_lanzamiento}` : doc.estado || "—") : (doc.tipo === "oferta" && caso.pedido_bc ? h(Chip, { c: "verde" }, `Convertida en el pedido ${caso.pedido_bc}`) : doc.tipo === "pedido" && caso.factura_bc ? h(Chip, { c: "verde" }, `Facturado: ${caso.factura_bc}`) : h(Chip, null, "Ya no está en BC (convertido o registrado)"))),
         h(Row, { T, k: "Importe" }, `${eur(doc.importe)} · `, h("b", null, `${eur(doc.importe_iva)} IVA incl.`)),
         doc.visto_at ? h("div", { "data-crm-bc-hora": "1", style: { fontSize: "11.5px", color: T.inkSoft, textAlign: "right" } }, `Dato de BC de las ${new Date(doc.visto_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}${(Date.now() - new Date(doc.visto_at)) > 864e5 ? " del " + new Date(doc.visto_at).toLocaleDateString("es-ES") : ""}. Si la acabas de cambiar en BC, pulsa «↻ Actualizar desde BC».`) : null)
         : caso[campo] ? h("div", { style: { fontSize: "12px", color: T.warn, textAlign: "right" } }, "No encontrado en BC (se sincroniza cada 10 min)") : null);
 
+    // Factura de servicio de BC (se vincula sola cuando el pedido se registra; también a mano)
+    const [fac, setFac] = useState(null);
+    useEffect(() => { let vivo = true; if (!caso.factura_bc) { setFac(null); return; }
+      sb().from("bc_facturas_servicio").select("*").eq("no", norm(caso.factura_bc)).maybeSingle().then(({ data }) => { if (vivo) setFac(data || false); }); return () => { vivo = false; }; }, [caso.factura_bc, caso.updated_at]);
+    const facturaBox = () => (caso.pedido_bc || caso.factura_bc) ? h("div", { "data-crm-factura": "1", style: { padding: "6px 0", borderTop: `1px solid ${T.border}` } },
+      h(Row, { T, k: "Factura de servicio" }, h("input", { "data-crm-factura-no": "1", value: d.factura_bc || "", onChange: set("factura_bc"), placeholder: "se vincula sola", style: { ...I, width: "150px", padding: "5px 8px", fontFamily: "'JetBrains Mono', monospace", fontSize: "13px", textAlign: "right" } })),
+      fac ? h(React.Fragment, null,
+          h(Row, { T, k: "Fecha" }, fFecha(fac.fecha)),
+          h(Row, { T, k: "Importe" }, h("b", null, `${eur(fac.importe_iva)} IVA incl.`)),
+          h(Row, { T, k: "Cobro en BC" }, fac.cobrada ? h(Chip, { c: "verde" }, "✓ Cobrada") : h(Chip, { c: "ambar" }, `Pendiente de cobro ${eur(fac.pendiente)}`)))
+        : caso.factura_bc ? h("div", { style: { fontSize: "12px", color: T.warn, textAlign: "right" } }, fac === false ? "No encontrada en BC (se sincroniza cada 10 min)" : "Buscando…")
+        : pedido && pedido.activo === false ? h("div", { style: { fontSize: "12px", color: T.inkSoft, textAlign: "right" } }, "El pedido ya no está abierto en BC: la factura se vinculará sola en cuanto aparezca.")
+        : h("div", { style: { fontSize: "12px", color: T.inkSoft, textAlign: "right" } }, "Se vinculará sola cuando el pedido se registre en BC.")) : null;
+    // Vendido en la visita: lo pactado antes de la visita frente a lo facturado al final
+    const [pactTxt, setPactTxt] = useState(""); const [nuevoItem, setNuevoItem] = useState({ descripcion: "", importe: "" });
+    useEffect(() => { setPactTxt(caso.importe_pactado != null ? String(caso.importe_pactado).replace(".", ",") : ""); }, [caso.id, caso.importe_pactado]);
+    const numEu = (t) => { const x = String(t ?? "").trim(); if (!x) return null; const n = Number(x.replace(/\./g, (m, i, s2) => (s2.includes(",") ? "" : m)).replace(",", ".")); return isNaN(n) ? null : Math.round(n * 100) / 100; };
+    const vendidoBox = () => {
+      const docFinal = fac || pedido || oferta; if (!docFinal && caso.importe_pactado == null) return null;
+      const final = fac ? Number(fac.importe_iva) : docFinal && docFinal.importe_iva != null ? Number(docFinal.importe_iva) : null;
+      const pact = caso.importe_pactado != null ? Number(caso.importe_pactado) : null;
+      const dif = final != null && pact != null ? Math.round((final - pact) * 100) / 100 : null;
+      const items = Array.isArray(caso.vendido_items) ? caso.vendido_items : [];
+      const origen = caso.pactado_origen === "manual" ? "puesto a mano" : caso.pactado_origen === "cita" ? "foto automática del día de la cita" : caso.pactado_origen === "estado" ? "foto al dar la cita" : "";
+      const guardarPact = () => { const v = numEu(pactTxt); if (v === (pact ?? null)) return; guardar({ importe_pactado: v, pactado_at: v == null ? null : NOW, pactado_origen: v == null ? null : "manual" }, v == null ? "Pactado quitado." : `Pactado antes de la visita: ${eur(v)}.`); };
+      return h(Box, { T }, h("div", { "data-crm-vendido": "1" }, h(Lbl, { T }, "Vendido en la visita"),
+        h(Row, { T, k: "Pactado antes de la visita" }, h("span", { style: { display: "inline-flex", gap: "6px", alignItems: "center" } },
+          h("input", { "data-crm-pactado": "1", value: pactTxt, onChange: (e) => setPactTxt(e.target.value), onBlur: guardarPact, onKeyDown: (e) => { if (e.key === "Enter") e.currentTarget.blur(); }, placeholder: "€", inputMode: "decimal", style: { ...I, width: "110px", padding: "5px 8px", textAlign: "right" } }), "€")),
+        pact != null ? h("div", { style: { fontSize: "11.5px", color: T.inkSoft, textAlign: "right" } }, [origen, caso.pactado_at ? fFechaHora(caso.pactado_at) : ""].filter(Boolean).join(" · "))
+          : h("div", { style: { fontSize: "11.5px", color: T.inkSoft, textAlign: "right" } }, "Se guardará solo el día de la cita a primera hora (importe del pedido en ese momento). También puedes escribirlo."),
+        final != null ? h(Row, { T, k: fac ? `Facturado (${fac.no})` : `${pedido ? "Pedido " + pedido.no : "Oferta " + (oferta ? oferta.no : "")} · aún sin facturar` }, h("b", null, `${eur(final)} IVA incl.`)) : null,
+        dif != null ? h("div", { "data-crm-vendido-dif": dif > 0 ? "mas" : dif < 0 ? "menos" : "igual", style: { margin: "6px 0 2px", padding: "9px 12px", borderRadius: "10px", fontWeight: 800, fontSize: "15px", textAlign: "center",
+            background: dif > 0 ? "#DCFCE7" : dif < 0 ? "#FEF3C7" : T.bg, color: dif > 0 ? "#166534" : dif < 0 ? "#92400E" : T.inkSoft, border: `1px solid ${dif > 0 ? "#4ADE80" : dif < 0 ? "#F59E0B" : T.border}` } },
+            dif > 0 ? `+${eur(dif)} vendidos en la visita${pact > 0 ? ` (+${Math.round((dif / pact) * 100)} %)` : ""}` : dif < 0 ? `${eur(-dif)} menos de lo pactado` : "Sin ventas añadidas en la visita",
+            !fac && dif !== 0 ? h("div", { style: { fontSize: "11.5px", fontWeight: 600 } }, "Provisional: se confirma con la factura") : null) : null,
+        h("div", { style: { marginTop: "8px", fontSize: "12px", fontWeight: 800, color: T.inkSoft } }, "Qué se añadió (opcional)"),
+        items.map((it, i) => h("div", { key: i, "data-crm-vendido-item": i, style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", fontSize: "13px", padding: "3px 0", borderBottom: `1px solid ${T.border}` } },
+          h("span", null, it.descripcion), h("span", { style: { display: "inline-flex", gap: "8px", alignItems: "center" } }, it.importe != null ? h("b", null, eur(it.importe)) : null,
+            h("button", { title: "Quitar", disabled: guardando, onClick: () => { if (window.confirm(`¿Quitar «${it.descripcion}»? Queda en el historial.`)) guardar({ vendido_items: items.filter((_, j) => j !== i) }, "Quitado de lo vendido en la visita."); }, style: { border: "none", background: "transparent", cursor: "pointer", color: T.danger, fontWeight: 800 } }, "×")))),
+        h("div", { style: { display: "flex", gap: "6px", marginTop: "6px" } },
+          h("input", { "data-crm-vendido-desc": "1", value: nuevoItem.descripcion, onChange: (e) => setNuevoItem((x) => ({ ...x, descripcion: e.target.value })), placeholder: "Ej.: batería de litio 150 Ah", style: { ...I, flex: 1, padding: "5px 8px" } }),
+          h("input", { "data-crm-vendido-imp": "1", value: nuevoItem.importe, onChange: (e) => setNuevoItem((x) => ({ ...x, importe: e.target.value })), placeholder: "€", inputMode: "decimal", style: { ...I, width: "90px", padding: "5px 8px", textAlign: "right" } }),
+          h("button", { "data-crm-vendido-add": "1", disabled: guardando || !nuevoItem.descripcion.trim(), onClick: async () => { const it = { descripcion: nuevoItem.descripcion.trim(), importe: numEu(nuevoItem.importe) };
+              if (await guardar({ vendido_items: [...items, it] }, "Añadido a lo vendido en la visita.")) setNuevoItem({ descripcion: "", importe: "" }); }, style: { ...btn(T, "s"), padding: "5px 10px" } }, "Añadir"))));
+    };
     return h(Drawer, { T, onClose, label: "Ficha del caso" },
       ofertaBC && window.AcllarOfertaBC ? ReactDOM.createPortal(h(window.AcllarOfertaBC, { T, F, caso, onClose: () => setOfertaBC(false), onHecho: async () => { if (syncAhora) await syncAhora(); onRefresh && onRefresh(); } }), document.body) : null,
       h("div", { style: { background: T.surface, padding: "18px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: "6px" } },
@@ -1202,13 +1247,13 @@
                   altaMsg && altaMsg.dup ? h("button", { onClick: () => onCliente(caso.cliente_id), style: btn(T, "p") }, "Revisar en la ficha del cliente") : h("button", { "data-crm-alta-caso": "1", onClick: altaDesdeCaso, style: btn(T, "p") }, "Dar de alta en BC"),
                   h("button", { "data-crm-ya-en-bc": "1", onClick: () => onCliente(caso.cliente_id), style: btn(T) }, "Ya existe en BC: vincular"),
                   altaMsg && altaMsg.txt ? h("span", { style: { fontSize: "12.5px", color: altaMsg.err || altaMsg.dup ? T.danger : T.ok } }, altaMsg.txt) : null,
-                  caso.oferta_bc || caso.pedido_bc ? h("div", { style: { width: "100%" } }, caso.oferta_bc ? docBox("Oferta de servicio", "oferta_bc", oferta) : null, caso.pedido_bc ? docBox("Pedido de servicio", "pedido_bc", pedido) : null) : null,
+                  caso.oferta_bc || caso.pedido_bc ? h("div", { style: { width: "100%" } }, caso.oferta_bc ? docBox("Oferta de servicio", "oferta_bc", oferta) : null, caso.pedido_bc ? docBox("Pedido de servicio", "pedido_bc", pedido) : null, facturaBox()) : null,
                   h("div", { style: { width: "100%" } }, h(VincularDocBC, { T, caso, guardar, guardando, onCaso: (id) => abrirAbierto({ kind: "caso", id }) }))))
             : h(React.Fragment, null,
               sugerencia ? h("div", { "data-crm-sugerencia": "1", style: { background: CH.azul.bg, border: `1px solid ${CH.azul.bd}`, borderRadius: "10px", padding: "10px 12px", fontSize: "13px", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
                 h("span", null, `Hay ${sugerencia.tipo === "oferta" ? "una oferta nueva" : "un pedido nuevo"} en BC de este cliente: `, h("b", { style: { fontFamily: "'JetBrains Mono', monospace" } }, sugerencia.doc.no), ` · ${eur(sugerencia.doc.importe_iva)}. ¿Es de este caso?`),
                 h("button", { onClick: () => vincular(sugerencia.doc), disabled: guardando, style: btn(T, "p") }, "Sí, vincular")) : null,
-              docBox("Oferta de servicio", "oferta_bc", oferta), docBox("Pedido de servicio", "pedido_bc", pedido),
+              docBox("Oferta de servicio", "oferta_bc", oferta), docBox("Pedido de servicio", "pedido_bc", pedido), facturaBox(),
               docsOtros.length ? h("div", { style: { marginTop: "8px" } }, h("div", { style: { fontSize: "12px", color: T.inkSoft, marginBottom: "4px" } }, "Otros documentos abiertos de este cliente en BC · clic para vincular"),
                 h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, docsOtros.map((x) => h("button", { key: x.tipo + x.no, "data-crm-vincular": x.no, disabled: guardando, onClick: () => vincular(x), style: btn(T, "s") }, `${x.tipo === "oferta" ? "Oferta" : "Pedido"} ${x.no} · ${eur(x.importe_iva)}`))))
                 : !caso.oferta_bc && !caso.pedido_bc && !sugerencia ? h("div", { style: { fontSize: "12.5px", color: T.inkFaint, marginTop: "6px" } }, "Aún no hay ofertas ni pedidos abiertos de este cliente en BC. Cuando la crees en BC aparecerá aquí (o pulsa “Actualizar desde BC”).") : null,
@@ -1217,16 +1262,17 @@
               h(VincularDocBC, { T, caso, guardar, guardando, onCaso: (id) => abrirAbierto({ kind: "caso", id }) })),
           verGar ? h("label", { style: { display: "flex", gap: "8px", alignItems: "center", fontSize: "13px", marginTop: "6px" } }, h("input", { type: "checkbox", checked: !!caso.garantia_100, onChange: (e) => guardar({ garantia_100: e.target.checked }) }), "100 % garantía (sin pedido de servicio)") : null),
 
+        s.gar ? null : vendidoBox(),
         // Señal 50 % (rama A) o, en cualquier caso con oferta o pedido de BC, «Pagos»: lo pagado a cuenta y lo que resta
         verSenal || pedido || oferta ? h(Box, { T }, h(Lbl, { T }, verSenal ? "Señal 50 %" : "Pagos"),
           h(Row, { T, k: verSenal ? "Importe" : "Pagado a cuenta" }, h("input", { "data-crm-pagado": "1", value: d.senal_importe ?? "", onChange: set("senal_importe"), placeholder: "€", inputMode: "decimal", style: { ...I, width: "120px", padding: "5px 8px", textAlign: "right" } })),
           (() => { // Lo que falta: total del pedido de servicio (o de la oferta si aún no hay pedido) menos la señal que se está escribiendo
-            const doc = pedido || oferta; const total = doc && doc.importe_iva != null ? Number(doc.importe_iva) : null;
+            const doc = pedido || oferta; const total = fac && fac.importe_iva != null ? Number(fac.importe_iva) : doc && doc.importe_iva != null ? Number(doc.importe_iva) : null;
             const txt = String(d.senal_importe ?? "").trim(); const senal = txt === "" ? null : Number(txt.replace(/\./g, (m, i, t) => (t.includes(",") ? "" : m)).replace(",", "."));
             if (total == null) return h("div", { "data-senal-resta": "sin", style: { fontSize: "12px", color: T.inkSoft, textAlign: "right", padding: "4px 0" } }, "Vincula el pedido de servicio para ver lo que falta por pagar.");
             const resta = senal == null || isNaN(senal) ? null : Math.round((total - senal) * 100) / 100;
             return h(React.Fragment, null,
-              h(Row, { T, k: pedido ? `Total del pedido ${pedido.no}` : `Total de la oferta ${oferta.no}` }, h("b", null, `${eur(total)} IVA incl.`)),
+              h(Row, { T, k: fac ? `Total de la factura ${fac.no}` : pedido ? `Total del pedido ${pedido.no}` : `Total de la oferta ${oferta.no}` }, h("b", null, `${eur(total)} IVA incl.`)),
               resta == null || caso.pagado_at ? null
                 : h("div", { "data-senal-resta": resta > 0 ? "pendiente" : resta < 0 ? "exceso" : "pagado", style: { margin: "6px 0 2px", padding: "9px 12px", borderRadius: "10px", fontWeight: 800, fontSize: "15px", textAlign: "center",
                     background: resta > 0 ? "#FEF3C7" : resta < 0 ? "#FEE2E2" : "#DCFCE7", color: resta > 0 ? "#92400E" : resta < 0 ? "#B91C1C" : "#166534", border: `1px solid ${resta > 0 ? "#F59E0B" : resta < 0 ? "#F87171" : "#4ADE80"}` } },
@@ -1235,7 +1281,7 @@
           })(),
           // Pago completado: al pulsarlo se entiende que el cliente ha pagado el saldo restante (total − señal / pagado a cuenta)
           (() => {
-            const doc = pedido || oferta; const total = doc && doc.importe_iva != null ? Number(doc.importe_iva) : null;
+            const doc = pedido || oferta; const total = fac && fac.importe_iva != null ? Number(fac.importe_iva) : doc && doc.importe_iva != null ? Number(doc.importe_iva) : null;
             const txt = String(d.senal_importe ?? "").trim(); const senalNum = txt === "" ? null : Number(txt.replace(/\./g, (m, i, t) => (t.includes(",") ? "" : m)).replace(",", "."));
             const senal = senalNum != null && !isNaN(senalNum) ? senalNum : null;
             if (caso.pagado_at) return h(React.Fragment, null,

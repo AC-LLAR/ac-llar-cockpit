@@ -2739,12 +2739,12 @@ const inicioOT =
         style: { cursor: "pointer", padding: "8px 18px", borderRadius: "10px", border: `1px solid ${on ? T.ink : T.border}`, background: on ? T.ink : T.surface, color: on ? T.bg : T.inkSoft, fontFamily: F.body, fontSize: "12.5px", fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", transition: "all 120ms" } }, g.label); })));
   // Pestañas del grupo TALLER. "Casos" (id clientes) = CRM de taller (taller-crm.js → window.AcllarCRM);
   // "Garantías" = expedientes de garantía/chasis (taller-garantias.js → window.AcllarGarantias).
-  const TALLER_TABS = [{ id: "clientes", label: "Casos" }, { id: "calendario", label: "Calendario" }, { id: "garantias", label: "Garant\xEDas" }, { id: "montajes", label: "Expedientes veh\xEDculos nuevos" }];
+  const TALLER_TABS = [{ id: "clientes", label: "Casos" }, { id: "calendario", label: "Calendario" }, { id: "garantias", label: "Garant\xEDas" }, { id: "ventas", label: "Ventas en la visita" }, { id: "montajes", label: "Expedientes veh\xEDculos nuevos" }];
   const TallerView = ({ flota }) => {
     const [tab, setTab] = useState(() => { try { const x = localStorage.getItem("acllar_taller_tab"); return TALLER_TABS.some((t) => t.id === x) ? x : "clientes"; } catch (e) { return "clientes"; } });
     const ir = (id) => { setTab(id); try { localStorage.setItem("acllar_taller_tab", id); } catch (e) {} };
     useEffect(() => { const f = (e) => { if (e && e.detail) ir(e.detail); }; window.addEventListener("acllar-taller-tab", f); return () => window.removeEventListener("acllar-taller-tab", f); }, []);
-    const Comp = tab === "garantias" ? window.AcllarGarantias : tab === "montajes" ? window.AcllarMontajes : tab === "calendario" ? window.AcllarCalendario : window.AcllarCRM;
+    const Comp = tab === "garantias" ? window.AcllarGarantias : tab === "montajes" ? window.AcllarMontajes : tab === "calendario" ? window.AcllarCalendario : tab === "ventas" ? window.AcllarVentas : window.AcllarCRM;
     return React.createElement(React.Fragment, null,
       React.createElement("nav", { style: { background: T.surface, borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, padding: "0 28px", position: "sticky", top: 0, zIndex: 40 } },
         React.createElement("div", { role: "tablist", style: { maxWidth: "1280px", margin: "0 auto", display: "flex", gap: "2px", minHeight: "44px", alignItems: "center" } },
