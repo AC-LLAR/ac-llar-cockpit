@@ -81,7 +81,7 @@
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
   const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["retirar", "Para retirar o enviado"]];
   const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "retirar"];
-  const CAMPOS = { envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviado", standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
+  const CAMPOS = { pagado_at: "Pago completado", envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviado", standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
     garantia_100: "100 % garantía", senal_importe: "Señal / pagado a cuenta", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
     piezas_previstas: "Llegada de piezas", cita_at: "Cita", cerrado_at: "Cerrado", motivo_cierre: "Motivo de cierre", archivado: "Archivado", rama: "Rama", vehiculo: "Vehículo",
@@ -778,7 +778,7 @@
             h("td", { style: td }, h(NombreLink, { c: c.cliente, onCliente }), h(ChipCli, { c: c.cliente }), h("div", { style: { color: T.inkSoft, fontSize: "12.5px" } }, c.vehiculo || "—")),
             h("td", { style: { ...td, maxWidth: "200px" } }, h(CeldaClave, { T, valor: c.clave, tabla: "crm_casos", id: c.id })),
             h("td", { style: td }, lblTipos(c.tipo)),
-            h("td", { style: td }, h(Chip, { c: s.c }, s.l), s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
+            h("td", { style: td }, h(Chip, { c: s.c }, s.l), c.pagado_at ? h("span", { style: { marginLeft: "4px" } }, h(Chip, { c: "verde" }, "💶 Pagado")) : null, s.fin && c.motivo_cierre ? h("div", { style: { fontSize: "12px", color: T.inkSoft, marginTop: "4px", maxWidth: "240px" } }, c.motivo_cierre) : null),
             h("td", { style: td }, pz ? pz.accion : h("span", { style: { color: T.inkFaint } }, "—"), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, pz ? `${PELOTA[pz.pel]}${c.responsable && pz.pel === "nos" ? " · " + c.responsable : ""}` : "")),
             h("td", { style: td }, doc ? h(React.Fragment, null, h("span", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" } }, doc.no), h("div", { style: { color: T.inkSoft, fontSize: "12px" } }, `${doc.tipo === "oferta" ? "Oferta" : "Pedido"} · ${eur(doc.importe_iva)}`))
               : c.garantia_100 ? h("span", { style: { color: T.inkSoft, fontSize: "12.5px" } }, "100 % garantía") : h("span", { style: { color: T.inkFaint } }, "—"),
@@ -800,7 +800,7 @@
           h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 800, color: T.inkSoft, padding: "4px 2px" } }, h("span", null, nombre), h(Chip, null, xs.length)),
           xs.map((c) => { const v = chipPlazo(plazo(c)), s = est(c.estado); return h("div", { key: c.id, "data-crm-card": c.id, role: "button", tabIndex: 0, className: "acl-tarjeta" + (esNueva(c) ? " acl-es-nueva" : ""), onClick: () => onOpen(c.id), onKeyDown: (e) => { if (e.key === "Enter") onOpen(c.id); }, draggable: true, title: "Clic para abrir · arrastra a una pestaña para moverlo", onDragStart: (e) => { e.dataTransfer.setData("text/caso", c.id); e.dataTransfer.effectAllowed = "move"; }, style: { textAlign: "left", cursor: "pointer", fontFamily: "inherit", color: T.ink, background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "11px", display: "flex", flexDirection: "column", gap: "6px" } },
             esNueva(c) ? h("div", null, h(ChipNueva, { x: c, borde: 11 })) : null, h("span", null, h(NombreLink, { c: c.cliente, onCliente })), h("span", { style: { fontSize: "12px", color: T.inkSoft } }, [c.vehiculo, lblTipos(c.tipo)].filter(Boolean).join(" · ")),
-            h("span", null, h(Chip, { c: s.c }, s.l)), v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
+            h("span", null, h(Chip, { c: s.c }, s.l)), c.pagado_at ? h("span", null, h(Chip, { c: "verde" }, "💶 Pagado")) : null, v && v.c !== "gris" ? h("span", null, h(Chip, { c: v.c }, v.t)) : null); }));
       })));
   }
 
@@ -1227,12 +1227,21 @@
             const resta = senal == null || isNaN(senal) ? null : Math.round((total - senal) * 100) / 100;
             return h(React.Fragment, null,
               h(Row, { T, k: pedido ? `Total del pedido ${pedido.no}` : `Total de la oferta ${oferta.no}` }, h("b", null, `${eur(total)} IVA incl.`)),
-              resta == null ? null
+              resta == null || caso.pagado_at ? null
                 : h("div", { "data-senal-resta": resta > 0 ? "pendiente" : resta < 0 ? "exceso" : "pagado", style: { margin: "6px 0 2px", padding: "9px 12px", borderRadius: "10px", fontWeight: 800, fontSize: "15px", textAlign: "center",
                     background: resta > 0 ? "#FEF3C7" : resta < 0 ? "#FEE2E2" : "#DCFCE7", color: resta > 0 ? "#92400E" : resta < 0 ? "#B91C1C" : "#166534", border: `1px solid ${resta > 0 ? "#F59E0B" : resta < 0 ? "#F87171" : "#4ADE80"}` } },
                   resta > 0 ? `RESTA PAGAR ${eur(resta)}` : resta < 0 ? `${verSenal ? "La señal" : "Lo pagado"} supera el total en ${eur(-resta)}` : "PAGADO ENTERO",
                   !pedido && resta > 0 ? h("div", { style: { fontSize: "11.5px", fontWeight: 600, marginTop: "2px" } }, "Según la oferta: cambiará solo cuando pase a pedido") : null));
           })(),
+          // Pago completado: confirmación manual de que el cliente ya lo ha pagado todo
+          caso.pagado_at ? h("div", { "data-crm-pagado-ok": "1", style: { margin: "6px 0 2px", padding: "9px 12px", borderRadius: "10px", background: "#DCFCE7", border: "1px solid #4ADE80", color: "#166534", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+              h("span", { style: { fontWeight: 800, fontSize: "15px" } }, "✓ PAGO COMPLETADO", h("span", { style: { fontWeight: 600, fontSize: "12px", marginLeft: "8px" } }, fFechaHora(caso.pagado_at))),
+              h("button", { "data-crm-pagado-deshacer": "1", disabled: guardando, onClick: () => { if (window.confirm("¿Quitar la marca de pago completado? Queda en el historial.")) guardar({ pagado_at: null }, "Se quita la marca de pago completado."); }, style: { ...btn(T, "s"), padding: "3px 10px", fontSize: "12px" } }, "Deshacer"))
+            : h("button", { "data-crm-pago-completado": "1", disabled: guardando, onClick: () => {
+                const doc = pedido || oferta; const total = doc && doc.importe_iva != null ? Number(doc.importe_iva) : null; const pag = caso.senal_importe != null ? Number(caso.senal_importe) : null;
+                const falta = total != null && pag != null ? Math.round((total - pag) * 100) / 100 : null;
+                if (falta != null && falta > 0 && !window.confirm(`Según lo apuntado aún faltan ${eur(falta)}. ¿Marcar igualmente el pago como completado?`)) return;
+                guardar({ pagado_at: NOW }, "Pago completado: el cliente lo ha pagado todo."); }, style: { ...btn(T, "s"), width: "100%", marginTop: "8px", borderColor: "#4ADE80", color: "#166534", fontWeight: 800 } }, "✓ Pago completado"),
           verSenal ? h(Row, { T, k: "Comprobante recibido" }, fFechaHora(caso.senal_comprobante_at)) : null,
           !verSenal ? null : h(Row, { T, k: "Aviso a contabilidad" }, caso.senal_aviso_at ? fFechaHora(caso.senal_aviso_at) : h("span", { style: { color: T.warn, fontWeight: 700 } }, "Pendiente")),
           verSenal && caso.senal_comprobante_at ? h("button", { onClick: avisarAna, disabled: guardando, style: { ...btn(T, "wa"), width: "100%", marginTop: "8px" } }, caso.senal_aviso_at ? "💬 Volver a avisar a Ana" : "💬 Avisar a Ana por WhatsApp") : null) : null,
