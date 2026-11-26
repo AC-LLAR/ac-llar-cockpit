@@ -3,7 +3,7 @@
 // quién monta cada extra (colaboración), comprobaciones (mecánico, jefe de taller, comercial) con fecha y
 // hora del servidor, limpieza y entrega. Todo cambio queda en la bitácora; nada se borra.
 // Tablas: montajes / montaje_extras / montaje_comprobaciones; historial en crm_eventos (montaje_id).
-// Factura de venta de BC: la función bc-sync abre o completa el expediente (por bastidor) y carga como extras lo que se cobra.
+// Factura de venta de BC: la función bc-sync abre o completa el expediente (por bastidor, o matrícula si es de la flota) y carga como extras lo que se cobra.
 // Se carga después de taller-crm.js y usa sus piezas (window.AcllarCRM._ui).
 (function () {
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
@@ -42,7 +42,7 @@
     entregado_at: "Entregado", motivo_cierre: "Motivo", montaje_sin_pagar: "Montaje sin pagar", cliente_id: "Cliente", descripcion: "Descripción", cantidad: "Cantidad", pieza: "Pieza", montado_at: "Montado",
     mecanicos: "Montado por", desmontado_at: "Desmontado", desmontado_por: "Desmontado por",
     factura_bc: "Factura de venta BC", pedido_venta_bc: "Pedido de venta BC", factura_fecha: "Fecha de factura", factura_total: "Total factura", factura_pagada: "Factura pagada",
-    vendedor_bc: "Vendedor BC", de_serie: "De serie", codigo: "Código", bc_linea: "Línea BC" };
+    de_serie: "De serie", codigo: "Código", bc_linea: "Línea BC" };
   const eur = (n) => (n == null || isNaN(n) ? "—" : Number(n).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €");
   const vehTxt = (v) => { const x = v || {}; return [x.modelo, x.bastidor ? "Bastidor " + normMat(x.bastidor) : null, x.matricula ? normMat(x.matricula) : null].filter(Boolean).join(" · ") || "—"; };
   const hoyISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -339,7 +339,7 @@
     return h(Drawer, { T, onClose, width: 900, label: "Expediente vehículo nuevo" },
       h("div", { style: { background: T.surface, padding: "18px 22px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: "6px" } },
         h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" } },
-          h("span", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" } }, `Vehículo nuevo · comercial ${m.comercial || "—"}${m.mecanico ? " · mecánico " + m.mecanico : ""}`),
+          h("span", { style: { fontSize: "12px", color: T.inkSoft, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" } }, `${(m.vehiculo || {}).flota ? "Vehículo de la flota de alquiler (" + m.vehiculo.flota + ")" : "Vehículo nuevo"} · comercial ${m.comercial || "—"}${m.mecanico ? " · mecánico " + m.mecanico : ""}`),
           h("button", { onClick: onClose, "aria-label": "Cerrar", style: { border: "none", background: "transparent", cursor: "pointer", fontSize: "22px", color: T.inkSoft } }, "×")),
         h("div", { style: { fontFamily: F.display, fontSize: "24px", fontWeight: 800 } }, h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, m.numero), " · ", (m.vehiculo || {}).modelo || "—"),
         h("div", { style: { fontSize: "13.5px", color: T.inkSoft, display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" } },
@@ -352,7 +352,7 @@
           m.factura_total != null ? h("span", null, `· ${eur(m.factura_total)} IVA incl.`) : null,
           h(Chip, { c: m.factura_pagada ? "verde" : "ambar" }, m.factura_pagada ? "Pagada en BC" : "Pendiente de pago en BC"),
           m.pedido_venta_bc ? h("span", null, "Pedido ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, m.pedido_venta_bc)) : null)
-          : h("div", { style: { fontSize: "12.5px", color: T.inkFaint } }, "Sin factura de venta de BC todavía: se vinculará sola al registrarse en BC (por el bastidor)."),
+          : h("div", { style: { fontSize: "12.5px", color: T.inkFaint } }, "Sin factura de venta de BC todavía: se vinculará sola al registrarse en BC (por el bastidor o la matrícula)."),
         m.cliente ? h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", fontSize: "13.5px" } }, h("b", null, nombreCli(m.cliente)), h(ChipCli, { c: m.cliente }), m.cliente.telefono ? h("span", { style: { color: T.inkSoft } }, m.cliente.telefono) : null,
           h("button", { onClick: () => irA("clientes", { acllar_crm_abrir_cliente: m.cliente_id }), style: btn(T, "s") }, "Ficha del cliente →")) : null),
       h("div", { style: { padding: "16px 22px 40px", display: "flex", flexDirection: "column", gap: "14px" } },
