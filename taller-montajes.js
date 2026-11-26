@@ -3,6 +3,7 @@
 // quién monta cada extra (colaboración), comprobaciones (mecánico, jefe de taller, comercial) con fecha y
 // hora del servidor, limpieza y entrega. Todo cambio queda en la bitácora; nada se borra.
 // Tablas: montajes / montaje_extras / montaje_comprobaciones; historial en crm_eventos (montaje_id).
+// Factura de venta de BC: la función bc-sync abre o completa el expediente (por bastidor) y carga como extras lo que se cobra.
 // Se carga después de taller-crm.js y usa sus piezas (window.AcllarCRM._ui).
 (function () {
   if (!window.React || !window.AcllarCRM || !window.AcllarCRM._ui) return;
@@ -39,7 +40,10 @@
   const CAMPOS = { estado: "Estado", comercial: "Comercial", mecanico: "Mecánico asignado", fecha_entrega: "Entrega comprometida", fecha_senal: "Señal", pagado_at: "Pagado", vehiculo: "Vehículo",
     notas: "Notas", limpieza_interior_at: "Limpieza interior", limpieza_exterior_at: "Limpieza exterior", limpieza_interior_por: "Limpieza interior por", limpieza_exterior_por: "Limpieza exterior por",
     entregado_at: "Entregado", motivo_cierre: "Motivo", montaje_sin_pagar: "Montaje sin pagar", cliente_id: "Cliente", descripcion: "Descripción", cantidad: "Cantidad", pieza: "Pieza", montado_at: "Montado",
-    mecanicos: "Montado por", desmontado_at: "Desmontado", desmontado_por: "Desmontado por" };
+    mecanicos: "Montado por", desmontado_at: "Desmontado", desmontado_por: "Desmontado por",
+    factura_bc: "Factura de venta BC", pedido_venta_bc: "Pedido de venta BC", factura_fecha: "Fecha de factura", factura_total: "Total factura", factura_pagada: "Factura pagada",
+    vendedor_bc: "Vendedor BC", de_serie: "De serie", codigo: "Código", bc_linea: "Línea BC" };
+  const eur = (n) => (n == null || isNaN(n) ? "—" : Number(n).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €");
   const vehTxt = (v) => { const x = v || {}; return [x.modelo, x.bastidor ? "Bastidor " + normMat(x.bastidor) : null, x.matricula ? normMat(x.matricula) : null].filter(Boolean).join(" · ") || "—"; };
   const hoyISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
   const diasHasta = (f) => { if (!f) return null; const a = new Date(f + "T00:00:00"), b = new Date(hoyISO() + "T00:00:00"); return Math.round((a - b) / 864e5); };
@@ -58,13 +62,18 @@
     if (m.montaje_sin_pagar && !m.pagado_at) out.push({ c: "rojo", t: "Montando sin pagar" });
     if (p.porPedir) out.push({ c: m.estado === "senado" ? "gris" : "ambar", t: `${p.porPedir} pieza${p.porPedir > 1 ? "s" : ""} por pedir` });
     if (p.pedidas && ["pagado", "en_montaje"].includes(m.estado)) out.push({ c: "ambar", t: `${p.pedidas} pieza${p.pedidas > 1 ? "s" : ""} sin llegar` });
-    const nuevos = xs.filter((x) => x.estado === "activo" && !x.montado_at && esNuevo(m, x)).length;
+    const nuevos = xs.filter((x) => x.estado === "activo" && !x.montado_at && esNuevo(m, x, xs)).length;
     if (nuevos && m.estado !== "senado") out.push({ c: "violeta", t: `${nuevos} extra${nuevos > 1 ? "s" : ""} añadido${nuevos > 1 ? "s" : ""} después` });
     if (p.desmontar) out.push({ c: "rojo", t: `${p.desmontar} por desmontar` });
     return out;
   }
-  // Extra añadido después de abrir el expediente (más de 10 min después), para que no se escape
-  const esNuevo = (m, x) => new Date(x.created_at) - new Date(m.created_at) > 6e5;
+  // Extra añadido después de abrir el expediente (más de 10 min después), para que no se escape.
+  // Los que vienen de la factura de BC se comparan con la primera carga de la factura, no con la apertura del expediente.
+  const esNuevo = (m, x, xs) => {
+    const desdeBC = x.bc_linea && xs ? xs.filter((y) => y.bc_linea).map((y) => +new Date(y.created_at)) : [];
+    const ref = desdeBC.length ? Math.min(...desdeBC) : +new Date(m.created_at);
+    return +new Date(x.created_at) - ref > 6e5;
+  };
   function textoEventoM(ev) {
     const d = ev.detalle || {};
     if (ev.tipo === "m_creado") return `Expediente ${d.numero} abierto`;
@@ -106,7 +115,7 @@
       if (!sb() || sinAcceso) { setCargando(false); return; }
       const [a, b] = await Promise.all([
         sb().from("montajes").select("*, cliente:crm_clientes(id,nombre,apellidos,telefono,tipo_cliente,bc_no)").eq("archivado", false).order("created_at", { ascending: false }).limit(2000),
-        sb().from("montaje_extras").select("id,montaje_id,estado,montado_at,pieza,created_at").limit(20000),
+        sb().from("montaje_extras").select("id,montaje_id,estado,montado_at,pieza,created_at,bc_linea").limit(20000),
       ]);
       if (a.error) setError("No se pudieron cargar los expedientes: " + a.error.message); else { setLista(a.data || []); setExtras(b.data || []); setError(""); }
       setCargando(false);
@@ -338,6 +347,12 @@
           (m.vehiculo || {}).matricula ? h("span", null, "Matrícula ", h("b", { style: { color: T.ink } }, m.vehiculo.matricula)) : null,
           h("span", null, `Señal ${fFecha(m.fecha_senal)}`), m.pagado_at ? h("span", null, `· Pagado ${fFecha(m.pagado_at)}`) : null,
           h("span", null, m.fecha_entrega ? `· Entrega comprometida ${fFecha(m.fecha_entrega)}` : "· Sin fecha de entrega")),
+        m.factura_bc ? h("div", { "data-vn-factura": m.factura_bc, style: { fontSize: "13.5px", color: T.inkSoft, display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" } },
+          h("span", null, "Factura ", h("b", { style: { fontFamily: "'JetBrains Mono', monospace", color: T.ink } }, m.factura_bc), m.factura_fecha ? ` · ${fFecha(m.factura_fecha)}` : ""),
+          m.factura_total != null ? h("span", null, `· ${eur(m.factura_total)} IVA incl.`) : null,
+          h(Chip, { c: m.factura_pagada ? "verde" : "ambar" }, m.factura_pagada ? "Pagada en BC" : "Pendiente de pago en BC"),
+          m.pedido_venta_bc ? h("span", null, "Pedido ", h("span", { style: { fontFamily: "'JetBrains Mono', monospace" } }, m.pedido_venta_bc)) : null)
+          : h("div", { style: { fontSize: "12.5px", color: T.inkFaint } }, "Sin factura de venta de BC todavía: se vinculará sola al registrarse en BC (por el bastidor)."),
         m.cliente ? h("div", { style: { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", fontSize: "13.5px" } }, h("b", null, nombreCli(m.cliente)), h(ChipCli, { c: m.cliente }), m.cliente.telefono ? h("span", { style: { color: T.inkSoft } }, m.cliente.telefono) : null,
           h("button", { onClick: () => irA("clientes", { acllar_crm_abrir_cliente: m.cliente_id }), style: btn(T, "s") }, "Ficha del cliente →")) : null),
       h("div", { style: { padding: "16px 22px 40px", display: "flex", flexDirection: "column", gap: "14px" } },
@@ -387,10 +402,11 @@
             h("tr", { "data-vn-extra": x.descripcion },
               h("td", { style: { ...td, width: "34px" } }, x.estado === "desmontar" ? h("span", { title: "Por desmontar" }, "⤺")
                 : h("input", { type: "checkbox", "aria-label": `Montado: ${x.descripcion}`, checked: !!x.montado_at, disabled: s.fin || (!puedeMontar && !x.montado_at), onChange: () => (x.montado_at ? desmarcar(x) : setMontando(x.id)) })),
-              h("td", { style: td }, h("span", { style: { fontWeight: 700, textDecoration: x.estado === "desmontar" ? "line-through" : "none" } }, x.descripcion), Number(x.cantidad) > 1 ? ` × ${Number(x.cantidad)}` : "",
+              h("td", { style: td }, x.codigo ? h("span", { title: "Código de producto en BC", style: { fontFamily: "'JetBrains Mono', monospace", fontSize: "11.5px", color: T.inkSoft, marginRight: "6px" } }, x.codigo) : null,
+                h("span", { style: { fontWeight: 700, textDecoration: x.estado === "desmontar" ? "line-through" : "none" } }, x.descripcion), Number(x.cantidad) > 1 ? ` × ${Number(x.cantidad)}` : "",
                 x.origen === "incidencia" ? h(Chip, { c: "rojo", style: { marginLeft: "6px" } }, "Incidencia") : null,
                 x.estado === "desmontar" ? h(Chip, { c: "rojo", style: { marginLeft: "6px" } }, "Desmontar") : null,
-                esNuevo(m, x) && x.origen !== "incidencia" ? h(Chip, { c: "violeta", style: { marginLeft: "6px" } }, `Añadido ${fFecha(x.created_at)} · ${quien(x.created_by)}`) : null,
+                esNuevo(m, x, xs) && x.origen !== "incidencia" ? h(Chip, { c: "violeta", style: { marginLeft: "6px" } }, `Añadido ${fFecha(x.created_at)} · ${quien(x.created_by)}`) : null,
                 x.montado_at ? h("div", { style: { fontSize: "12px", color: T.inkSoft } }, `Montado por ${(x.mecanicos || []).join(", ") || "—"} · ${fLarga(x.montado_at)}`) : null),
               h("td", { style: { ...td, width: "150px" } }, x.montado_at || x.estado !== "activo" ? (x.pieza !== "no_necesita" ? h("span", { style: { fontSize: "12px", color: T.inkSoft } }, (PIEZA.find((q) => q[0] === x.pieza) || ["", ""])[1]) : null)
                 : h("select", { value: x.pieza, disabled: s.fin, "aria-label": `Pieza: ${x.descripcion}`, onChange: async (e) => { await updX(x.id, { pieza: e.target.value }); cargar(); onChanged && onChanged(); }, style: { ...I, padding: "4px 6px", fontSize: "12.5px", borderColor: x.pieza === "por_pedir" ? CH.ambar.bd : x.pieza === "pedida" ? CH.azul.bd : T.borderHi } }, PIEZA.map(([k, l]) => h("option", { key: k, value: k }, l)))),
@@ -399,6 +415,8 @@
                 : h("button", { "data-vn-quitar": x.descripcion, onClick: () => quitar(x), style: { ...btn(T, "s"), fontSize: "11.5px", color: T.inkSoft } }, "Quitar"))),
             montando === x.id ? h("tr", null, h("td", { colSpan: 4 }, h(ElegirMecanicos, { T, inicial: m.mecanico ? [m.mecanico] : [], onOk: (mecs) => marcarMontado(x, mecs), onCancel: () => setMontando(null) }))) : null,
             desmontando === x.id ? h("tr", null, h("td", { colSpan: 4 }, h(ElegirMecanicos, { T, inicial: m.mecanico ? [m.mecanico] : [], ok: "Marcar desmontado", onOk: (mecs) => marcarDesmontado(x, mecs), onCancel: () => setDesmontando(null) }))) : null)))) : h("div", { style: { fontSize: "13px", color: T.inkFaint } }, "Sin extras."),
+          m.de_serie ? h("div", { "data-vn-serie": "1", style: { marginTop: "10px", fontSize: "12.5px", color: T.inkSoft, background: T.bg, borderRadius: "8px", padding: "8px 10px" } },
+            h("b", null, "De serie (según la factura, no se montan): "), String(m.de_serie).split("\n").map((l) => l.replace(/^SERIE:\s*/i, "").trim()).filter(Boolean).join(" · ")) : null,
           !s.fin ? h("div", { style: { display: "grid", gridTemplateColumns: "1fr 70px 150px auto", gap: "6px", marginTop: "10px" } },
             h("input", { value: nx.descripcion, onChange: (e) => setNx((o) => ({ ...o, descripcion: e.target.value })), onKeyDown: (e) => { if (e.key === "Enter") addExtra(); }, placeholder: "Nuevo extra (p. ej. Portabicis Thule)", "aria-label": "Nuevo extra", style: I }),
             h("input", { value: nx.cantidad, onChange: (e) => setNx((o) => ({ ...o, cantidad: e.target.value })), inputMode: "decimal", "aria-label": "Cantidad del extra", style: I }),
