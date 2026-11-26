@@ -81,7 +81,7 @@
   const est = (k) => E[k] || { l: k || "—", f: "consulta", c: "gris", sig: [] };
   const FASES = [["consulta", "Consulta"], ["presupuesto", "Presupuesto"], ["piezas", "Piezas"], ["cita", "Cita"], ["retirar", "Para retirar o enviado"]];
   const RECORRIDO = ["consulta", "presupuesto", "piezas", "cita", "retirar"];
-  const CAMPOS = { pagado_at: "Pago completado", envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviado", standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
+  const CAMPOS = { pagado_at: "Pago completado", saldo_pagado: "Saldo pagado", envio_agencia: "Agencia del envío", envio_seguimiento: "Nº de seguimiento", envio_direccion: "Dirección de envío", enviado_at: "Enviado", standby_at: "Standby desde", standby_motivo: "Motivo del standby", plazo_desde: "Plazo reiniciado", clave: "Clave", estado: "Estado", proxima_accion: "Próxima acción", responsable: "Responsable", fecha_limite: "Fecha límite", recordar_at: "Recordar el", oferta_bc: "Oferta BC", pedido_bc: "Pedido BC",
     garantia_100: "100 % garantía", senal_importe: "Señal / pagado a cuenta", senal_comprobante_at: "Comprobante", senal_aviso_at: "Aviso a contabilidad", garantia_fabricante: "Fabricante",
     garantia_reclamacion: "Nº reclamación", garantia_ultimo_contacto: "Último contacto fabricante", garantia_resultado: "Resultado garantía", garantia_cubre: "Cubre", garantia_no_cubre: "No cubre",
     piezas_previstas: "Llegada de piezas", cita_at: "Cita", cerrado_at: "Cerrado", motivo_cierre: "Motivo de cierre", archivado: "Archivado", rama: "Rama", vehiculo: "Vehículo",
@@ -1233,15 +1233,28 @@
                   resta > 0 ? `RESTA PAGAR ${eur(resta)}` : resta < 0 ? `${verSenal ? "La señal" : "Lo pagado"} supera el total en ${eur(-resta)}` : "PAGADO ENTERO",
                   !pedido && resta > 0 ? h("div", { style: { fontSize: "11.5px", fontWeight: 600, marginTop: "2px" } }, "Según la oferta: cambiará solo cuando pase a pedido") : null));
           })(),
-          // Pago completado: confirmación manual de que el cliente ya lo ha pagado todo
-          caso.pagado_at ? h("div", { "data-crm-pagado-ok": "1", style: { margin: "6px 0 2px", padding: "9px 12px", borderRadius: "10px", background: "#DCFCE7", border: "1px solid #4ADE80", color: "#166534", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
-              h("span", { style: { fontWeight: 800, fontSize: "15px" } }, "✓ PAGO COMPLETADO", h("span", { style: { fontWeight: 600, fontSize: "12px", marginLeft: "8px" } }, fFechaHora(caso.pagado_at))),
-              h("button", { "data-crm-pagado-deshacer": "1", disabled: guardando, onClick: () => { if (window.confirm("¿Quitar la marca de pago completado? Queda en el historial.")) guardar({ pagado_at: null }, "Se quita la marca de pago completado."); }, style: { ...btn(T, "s"), padding: "3px 10px", fontSize: "12px" } }, "Deshacer"))
-            : h("button", { "data-crm-pago-completado": "1", disabled: guardando, onClick: () => {
-                const doc = pedido || oferta; const total = doc && doc.importe_iva != null ? Number(doc.importe_iva) : null; const pag = caso.senal_importe != null ? Number(caso.senal_importe) : null;
-                const falta = total != null && pag != null ? Math.round((total - pag) * 100) / 100 : null;
-                if (falta != null && falta > 0 && !window.confirm(`Según lo apuntado aún faltan ${eur(falta)}. ¿Marcar igualmente el pago como completado?`)) return;
-                guardar({ pagado_at: NOW }, "Pago completado: el cliente lo ha pagado todo."); }, style: { ...btn(T, "s"), width: "100%", marginTop: "8px", borderColor: "#4ADE80", color: "#166534", fontWeight: 800 } }, "✓ Pago completado"),
+          // Pago completado: al pulsarlo se entiende que el cliente ha pagado el saldo restante (total − señal / pagado a cuenta)
+          (() => {
+            const doc = pedido || oferta; const total = doc && doc.importe_iva != null ? Number(doc.importe_iva) : null;
+            const txt = String(d.senal_importe ?? "").trim(); const senalNum = txt === "" ? null : Number(txt.replace(/\./g, (m, i, t) => (t.includes(",") ? "" : m)).replace(",", "."));
+            const senal = senalNum != null && !isNaN(senalNum) ? senalNum : null;
+            if (caso.pagado_at) return h(React.Fragment, null,
+              caso.saldo_pagado != null ? h(Row, { T, k: "Saldo pagado" }, h("b", null, eur(caso.saldo_pagado)), h("span", { style: { color: T.inkSoft, fontSize: "12px", marginLeft: "6px" } }, fFechaHora(caso.pagado_at))) : null,
+              h("div", { "data-crm-pagado-ok": "1", style: { margin: "6px 0 2px", padding: "9px 12px", borderRadius: "10px", background: "#DCFCE7", border: "1px solid #4ADE80", color: "#166534", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+                h("span", { style: { fontWeight: 800, fontSize: "15px" } }, "✓ PAGO COMPLETADO", total != null ? h("span", { style: { fontWeight: 600, fontSize: "12px", marginLeft: "8px" } }, `total ${eur(total)}`) : null),
+                h("button", { "data-crm-pagado-deshacer": "1", disabled: guardando, onClick: () => { if (window.confirm("¿Quitar la marca de pago completado? Queda en el historial.")) guardar({ pagado_at: null, saldo_pagado: null }, "Se quita la marca de pago completado."); }, style: { ...btn(T, "s"), padding: "3px 10px", fontSize: "12px" } }, "Deshacer")));
+            const saldo = total != null ? Math.max(0, Math.round((total - (senal || 0)) * 100) / 100) : null;
+            return h("button", { "data-crm-pago-completado": "1", disabled: guardando, onClick: () => {
+                const q = total == null ? "¿Confirmas que el cliente ha pagado todo?"
+                  : senal ? `¿Confirmas que el cliente ha pagado el saldo restante de ${eur(saldo)}?\n\nTotal ${eur(total)} − ${verSenal ? "señal" : "pagado a cuenta"} ${eur(senal)} = ${eur(saldo)}`
+                  : `¿Confirmas que el cliente ha pagado el total de ${eur(total)}?`;
+                if (!window.confirm(q)) return;
+                const patch = { pagado_at: NOW, saldo_pagado: saldo };
+                if (senal !== (caso.senal_importe != null ? Number(caso.senal_importe) : null)) patch.senal_importe = senal; // la señal escrita y aún sin guardar, también
+                guardar(patch, saldo != null ? `Pago completado: saldo restante de ${eur(saldo)} pagado.` : "Pago completado."); },
+              style: { ...btn(T, "s"), width: "100%", marginTop: "8px", borderColor: "#4ADE80", color: "#166534", fontWeight: 800 } },
+              saldo != null && senal ? `✓ Pago completado (saldo restante ${eur(saldo)})` : "✓ Pago completado");
+          })(),
           verSenal ? h(Row, { T, k: "Comprobante recibido" }, fFechaHora(caso.senal_comprobante_at)) : null,
           !verSenal ? null : h(Row, { T, k: "Aviso a contabilidad" }, caso.senal_aviso_at ? fFechaHora(caso.senal_aviso_at) : h("span", { style: { color: T.warn, fontWeight: 700 } }, "Pendiente")),
           verSenal && caso.senal_comprobante_at ? h("button", { onClick: avisarAna, disabled: guardando, style: { ...btn(T, "wa"), width: "100%", marginTop: "8px" } }, caso.senal_aviso_at ? "💬 Volver a avisar a Ana" : "💬 Avisar a Ana por WhatsApp") : null) : null,
